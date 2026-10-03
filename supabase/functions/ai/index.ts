@@ -42,23 +42,35 @@ async function complete(model: string, messages: unknown[]): Promise<Completion>
   return { text: reply, input: safeNumber(data.usage?.prompt_tokens, 10_000_000), output: safeNumber(data.usage?.completion_tokens, 10_000_000) };
 }
 
+class NvidiaStatusError extends Error {
+  constructor(message: string, readonly status: number) { super(message); }
+}
+
+const FOOD_INSTRUCTIONS = `You estimate food and portion sizes for a calorie-tracking app, from a meal photo and/or a short user hint.
+Use the hint and the photo together. For each food give a realistic portion in grams and your nutrition estimate for that portion.
+Be honest about uncertainty: photos cannot show hidden oil, sauces or portion depth. Use "low" confidence when unsure.
+If one key detail is missing (size, sauce, brand), ask ONE short follow_up_question, otherwise null.
+Reply with ONLY a JSON object, no other text, in exactly this shape:
+{"items":[{"name":"Grilled chicken breast","portion":"1 palm-size piece","grams":120,"calories":198,"protein_g":37,"carbs_g":0,"fat_g":4.3,"confidence":"medium","portion_assumption":"About the size of a palm, 2 cm thick","usda_search_query":"chicken breast roasted"}],"overall_confidence":"medium","follow_up_question":null,"notes":["Short note about assumptions"]}
+Up to 8 items. "usda_search_query" is a short generic USDA food search term. "notes" has at most 3 short sentences.`;
+
 async function nvidiaComplete(model: string, messages: unknown[]): Promise<Completion> {
   const key = Deno.env.get('NVIDIA_API_KEY');
   if (!key) throw new Error('NVIDIA meal-photo AI is not configured on the server.');
   const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
     headers: { Authorization: `Bearer ${key.trim()}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 2500, stream: false }),
+    body: JSON.stringify({ model, messages, temperature: 0.1, max_tokens: 1500, stream: false }),
     signal: AbortSignal.timeout(150_000),
   });
-  if (response.status === 202) throw new Error(`NVIDIA model "${model}" is warming up. Try again in a minute.`);
+  if (response.status === 202) throw new NvidiaStatusError(`NVIDIA model "${model}" is warming up. Try again in a minute.`, 202);
   if (!response.ok) {
     const detail = (await response.text().catch(() => '')).slice(0, 200);
     console.error(`NVIDIA ${response.status} for ${model}: ${detail}`);
-    if (response.status === 429) throw new Error('NVIDIA image-model limit reached. Try again later.');
-    if (response.status === 401 || response.status === 403) throw new Error('The server NVIDIA key was rejected. Check NVIDIA_API_KEY in Supabase.');
-    if (response.status === 404) throw new Error(`NVIDIA doesn't offer "${model}" to this key.`);
-    throw new Error(`NVIDIA image request failed (${response.status}).`);
+    if (response.status === 429) throw new NvidiaStatusError('NVIDIA image-model limit reached. Try again later.', 429);
+    if (response.status === 401 || response.status === 403) throw new NvidiaStatusError('The server NVIDIA key was rejected. Check NVIDIA_API_KEY in Supabase.', response.status);
+    if (response.status === 404) throw new NvidiaStatusError(`NVIDIA doesn't offer "${model}" to this key.`, 404);
+    throw new NvidiaStatusError(`NVIDIA image request failed (${response.status}).`, response.status);
   }
   const data = await response.json();
   const reply = data.choices?.[0]?.message?.content;
@@ -148,13 +160,28 @@ async function estimateFood(body: Record<string, unknown>) {
   const mime = text(image?.mediaType, 30);
   if (!hint && !data) throw new Error('Send a photo or a hint.');
   if (image && (!['image/jpeg', 'image/png', 'image/webp'].includes(mime) || !/^[A-Za-z0-9+/=]+$/.test(data) || data.length > 7_000_000)) throw new Error('Use a smaller JPEG, PNG, or WebP photo.');
-  const content: unknown[] = [{ type: 'text', text: `Food hint: ${hint || '(none)'}. Identify foods, portions and estimate nutrition. Reply ONLY with JSON: {"items":[{"name":string,"portion":string,"grams":number,"calories":number,"protein_g":number,"carbs_g":number,"fat_g":number,"confidence":"high"|"medium"|"low","portion_assumption":string,"usda_search_query":string}],"overall_confidence":"high"|"medium"|"low","follow_up_question":string|null,"notes":string[]}. Up to 8 items. Be honest about visual uncertainty.` }];
-  if (data) content.push({ type: 'image_url', image_url: { url: `data:${mime};base64,${data}` } });
-  const response = await nvidiaComplete(model, [
-    { role: 'system', content: 'You estimate meals from images and hints. A photo cannot reveal exact ingredients or calories. Never invent an official nutrition source.' },
-    { role: 'user', content },
-  ]);
-  const value = parseObject(response.text);
+  const prompt = `${FOOD_INSTRUCTIONS}\n\nUser hint: ${hint || '(none)'}${data ? '' : '\nThere is no photo; estimate from the hint only.'}`;
+  const dataUrl = data ? `data:${mime};base64,${data}` : '';
+  // Llama 3.2 Vision doesn't accept a system prompt alongside an image, so everything goes in the user turn.
+  const ask = (content: unknown) => nvidiaComplete(model, [{ role: 'user', content }]);
+  let response: Completion;
+  if (!dataUrl) response = await ask(prompt);
+  else {
+    try {
+      response = await ask([{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: dataUrl } }]);
+    } catch (error) {
+      // Some NVIDIA-hosted vision models only accept the older inline <img> form.
+      if (!(error instanceof NvidiaStatusError) || (error.status !== 400 && error.status !== 422)) throw error;
+      response = await ask(`${prompt}\n<img src="${dataUrl}" />`);
+    }
+  }
+  let value: Record<string, unknown>;
+  try {
+    value = parseObject(response.text.replace(/```(?:json)?/gi, ''));
+  } catch (error) {
+    console.error(`Unusable ${model} reply: ${response.text.slice(0, 500)}`);
+    throw error;
+  }
   if (!Array.isArray(value.items)) throw new Error('The model returned an invalid meal estimate.');
   const items = await Promise.all(value.items.slice(0, 8).map(async (raw: Record<string, unknown>) => {
     const item: VisionItem = {
