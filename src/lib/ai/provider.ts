@@ -13,10 +13,20 @@ import { GEMINI_DEFAULT_MODEL } from './gemini';
 import { prepareImageForAI } from './image';
 import { selectedChatModel } from './openrouterModels';
 
-/** Signed-in accounts use the owner's separate server-side NVIDIA and OpenRouter keys.
+/** Signed-in accounts use the owner's server-side NVIDIA key (and OpenRouter for chat when set).
  * Without Supabase, the app offers built-in answers. AI only proposes changes. */
 
 export class AIUnavailableError extends Error {}
+
+/** supabase-js reports any non-2xx as a generic message; the gateway's own reason is in the body. */
+async function functionErrorMessage(error: unknown, fallback: string): Promise<string> {
+  const context = (error as { context?: unknown } | null)?.context;
+  if (context instanceof Response) {
+    const body = await context.clone().json().catch(() => null) as { error?: unknown } | null;
+    if (typeof body?.error === 'string' && body.error) return body.error;
+  }
+  return error instanceof Error ? error.message : fallback;
+}
 
 export type AIEngine = 'nvidia' | 'gemini' | 'server' | 'simulated';
 
@@ -57,7 +67,7 @@ export async function estimateFood(state: AppState, input: FoodInput): Promise<F
     if (error) throw error;
     return toEstimate(data, input);
   } catch (error) {
-    return { ...simulateFoodEstimate(input), aiNotice: error instanceof Error ? error.message : 'The image service is unavailable.' };
+    return { ...simulateFoodEstimate(input), aiNotice: await functionErrorMessage(error, 'The image service is unavailable.') };
   }
 }
 
@@ -165,7 +175,7 @@ export async function coachReply(state: AppState, message: string, today: ISODat
     if (!d || typeof d.reply !== 'string') throw new Error('The coach returned an invalid reply.');
     return { text: d.reply, safety: d.safety, proposals: proposalsForIntents(state, d.intents ?? [], today), simulated: false };
   } catch (error) {
-    return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice: error instanceof Error ? error.message : 'The chat service is unavailable.' };
+    return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice: await functionErrorMessage(error, 'The chat service is unavailable.') };
   }
 }
 

@@ -59,6 +59,15 @@ describe('shared OpenRouter gateway', () => {
     expect(result.aiNotice).toContain('provider unavailable');
   });
 
+  it('shows the gateway reason instead of the generic non-2xx message', async () => {
+    const error = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+      context: new Response(JSON.stringify({ error: 'NVIDIA is not configured on the server.' }), { status: 503 }),
+    });
+    mockInvoke.mockResolvedValue({ data: null, error });
+    const result = await coachReply(sample(), 'Can I shorten my workout?', TODAY);
+    expect(result.aiNotice).toBe('NVIDIA is not configured on the server.');
+  });
+
   it('keeps a failed OpenRouter coach reply clearly simulated', async () => {
     mockInvoke.mockResolvedValue({ data: null, error: new Error('provider unavailable') });
     const result = await coachReply(sample(), 'Can I shorten my workout?', TODAY);

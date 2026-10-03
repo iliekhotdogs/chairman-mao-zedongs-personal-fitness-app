@@ -47,13 +47,17 @@ async function nvidiaComplete(model: string, messages: unknown[]): Promise<Compl
   if (!key) throw new Error('NVIDIA meal-photo AI is not configured on the server.');
   const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 2500 }),
+    headers: { Authorization: `Bearer ${key.trim()}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 2500, stream: false }),
     signal: AbortSignal.timeout(150_000),
   });
+  if (response.status === 202) throw new Error(`NVIDIA model "${model}" is warming up. Try again in a minute.`);
   if (!response.ok) {
+    const detail = (await response.text().catch(() => '')).slice(0, 200);
+    console.error(`NVIDIA ${response.status} for ${model}: ${detail}`);
     if (response.status === 429) throw new Error('NVIDIA image-model limit reached. Try again later.');
-    if (response.status === 401 || response.status === 403) throw new Error('The server NVIDIA key was rejected.');
+    if (response.status === 401 || response.status === 403) throw new Error('The server NVIDIA key was rejected. Check NVIDIA_API_KEY in Supabase.');
+    if (response.status === 404) throw new Error(`NVIDIA doesn't offer "${model}" to this key.`);
     throw new Error(`NVIDIA image request failed (${response.status}).`);
   }
   const data = await response.json();
