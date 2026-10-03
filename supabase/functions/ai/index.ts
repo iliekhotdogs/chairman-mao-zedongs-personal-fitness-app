@@ -204,6 +204,12 @@ Deno.serve(async (request) => {
     } catch (error) { return json({ error: error instanceof Error ? error.message : 'USDA search failed.' }, 502); }
   }
   if (body.action !== 'coach' && body.action !== 'estimate_food') return json({ error: 'Unknown action.' }, 400);
+  if (body.action === 'coach' && !Deno.env.get('OPENROUTER_API_KEY')) {
+    return json({ error: 'OpenRouter is not configured on the server.' }, 503);
+  }
+  if (body.action === 'estimate_food' && !Deno.env.get('NVIDIA_API_KEY')) {
+    return json({ error: 'NVIDIA meal-photo AI is not configured on the server.' }, 503);
+  }
   const day = new Date().toISOString().slice(0, 10);
   const { data: claim, error: claimError } = await admin.rpc('claim_ai_request', {
     p_user: auth.user.id, p_day: day,

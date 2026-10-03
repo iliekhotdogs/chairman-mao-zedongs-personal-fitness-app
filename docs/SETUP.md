@@ -1,6 +1,6 @@
 # FitCoach account setup (fitdih)
 
-This repository is configured locally for the `fitdih` Supabase project. As of 3 October 2026, `ADMIN_USER_ID` is saved in fitdih for the existing Wesley account; the migration and functions are not deployed, and `OPENROUTER_API_KEY` is intentionally blank at the owner’s request. The saved NVIDIA key must be entered as a secret by the owner because browser storage could not be read safely. Every person creates an email/password account; Supabase Auth assigns a unique user ID. The app stores each account's browser/device cache under that ID and synchronizes only rows owned by that ID. RLS in `0001_init.sql` enforces the boundary in Postgres.
+This repository is configured locally for the `fitdih` Supabase project. As of 3 October 2026, `ADMIN_USER_ID` is saved in fitdih for the existing Wesley account; the migration and both `ai` and `admin-stats` functions are deployed with JWT verification; the owner admin screen has been verified. `OPENROUTER_API_KEY` is intentionally blank at the owner’s request, and `NVIDIA_API_KEY` is still missing. The saved NVIDIA key must be entered as a secret by the owner because browser storage could not be read through the permitted tool. Every person creates an email/password account; Supabase Auth assigns a unique user ID. The app stores each account's browser/device cache under that ID and synchronizes only rows owned by that ID. RLS in `0001_init.sql` enforces the boundary in Postgres.
 
 ## 1. Database
 
@@ -9,7 +9,7 @@ In the **fitdih** Supabase dashboard, open **SQL Editor** and run these files in
 1. `supabase/migrations/0001_init.sql` (the project's existing `init` migration already contains this schema).
 2. `supabase/migrations/20261003000000_shared_accounts_ai.sql`.
 
-The second script grants the signed-in role access to the existing RLS-protected tables, adds shared AI metering, and tightens the food-photo update policy. Review the SQL and back up important data before applying it. Do not run the first script again if it is already applied.
+The second script (already applied to fitdih) grants the signed-in role access to the existing RLS-protected tables, adds shared AI metering, and tightens the food-photo update policy. Review the SQL and back up important data before applying it. Do not run the first script again if it is already applied.
 
 ## 2. Authentication
 
@@ -30,7 +30,7 @@ In **Edge Functions → Secrets**, set:
 
 Supabase provides `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` to Edge Functions. Never add any of these secret keys to `.env.local`, Expo public variables, Git, or app settings.
 
-Deploy `supabase/functions/ai/index.ts` as function **ai** and `supabase/functions/admin-stats/index.ts` as function **admin-stats**, with JWT verification enabled on both. The deploy can be done in the Supabase dashboard's Edge Function editor or with the Supabase CLI after linking project `nmovowhobqeaokzdspfp`:
+The `ai` and `admin-stats` functions are already deployed to fitdih with JWT verification enabled. If you change their source later, redeploy them from `supabase/functions/ai/index.ts` and `supabase/functions/admin-stats/index.ts`. The deploy can be done in the Supabase dashboard's Edge Function editor or with the Supabase CLI after linking project `nmovowhobqeaokzdspfp`:
 
 ```sh
 supabase functions deploy ai --project-ref nmovowhobqeaokzdspfp
