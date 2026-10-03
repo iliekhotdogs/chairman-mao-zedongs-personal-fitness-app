@@ -12,27 +12,28 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
  */
 
 const STORE_KEY = 'fitapp.nvidia-api-key';
+const GEMINI_STORE_KEY = 'fitapp.gemini-api-key';
 
 let current: string | null = null;
 let loaded = false;
 const listeners = new Set<() => void>();
 const emit = () => listeners.forEach((l) => l());
 
-async function read(): Promise<string | null> {
-  if (Platform.OS === 'web') return AsyncStorage.getItem(STORE_KEY);
+async function read(storeKey = STORE_KEY): Promise<string | null> {
+  if (Platform.OS === 'web') return AsyncStorage.getItem(storeKey);
   const SecureStore = await import('expo-secure-store');
-  return SecureStore.getItemAsync(STORE_KEY);
+  return SecureStore.getItemAsync(storeKey);
 }
 
-async function write(value: string | null): Promise<void> {
+async function write(value: string | null, storeKey = STORE_KEY): Promise<void> {
   if (Platform.OS === 'web') {
-    if (value) await AsyncStorage.setItem(STORE_KEY, value);
-    else await AsyncStorage.removeItem(STORE_KEY);
+    if (value) await AsyncStorage.setItem(storeKey, value);
+    else await AsyncStorage.removeItem(storeKey);
     return;
   }
   const SecureStore = await import('expo-secure-store');
-  if (value) await SecureStore.setItemAsync(STORE_KEY, value);
-  else await SecureStore.deleteItemAsync(STORE_KEY);
+  if (value) await SecureStore.setItemAsync(storeKey, value);
+  else await SecureStore.deleteItemAsync(storeKey);
 }
 
 /** Loads the saved key once at startup. Safe to call repeatedly. */
@@ -94,4 +95,55 @@ export function __setApiKeyForTests(key: string | null) {
   current = key;
   loaded = true;
   emit();
+}
+
+// The coach's Gemini key is independent of the NVIDIA photo key. Neither key enters
+// AppState, cloud sync, or data exports.
+let geminiKey: string | null = null;
+let geminiLoaded = false;
+const geminiListeners = new Set<() => void>();
+const emitGemini = () => geminiListeners.forEach((listener) => listener());
+
+export async function loadGeminiKey(): Promise<string | null> {
+  if (geminiLoaded) return geminiKey;
+  try { geminiKey = (await read(GEMINI_STORE_KEY)) || null; }
+  catch { geminiKey = null; }
+  geminiLoaded = true;
+  emitGemini();
+  return geminiKey;
+}
+
+export function getGeminiKey(): string | null { return geminiKey; }
+
+export async function saveGeminiKey(key: string): Promise<void> {
+  const trimmed = key.trim();
+  if (!trimmed) throw new Error('Enter a Gemini API key.');
+  await write(trimmed, GEMINI_STORE_KEY);
+  geminiKey = trimmed;
+  geminiLoaded = true;
+  emitGemini();
+}
+
+export async function removeGeminiKey(): Promise<void> {
+  await write(null, GEMINI_STORE_KEY);
+  geminiKey = null;
+  geminiLoaded = true;
+  emitGemini();
+}
+
+function subscribeGemini(listener: () => void) {
+  geminiListeners.add(listener);
+  return () => geminiListeners.delete(listener);
+}
+
+export function useGeminiKey(): { key: string | null; loaded: boolean } {
+  const key = useSyncExternalStore(subscribeGemini, () => geminiKey, () => null);
+  const isLoaded = useSyncExternalStore(subscribeGemini, () => geminiLoaded, () => false);
+  return { key, loaded: isLoaded };
+}
+
+export function __setGeminiKeyForTests(key: string | null) {
+  geminiKey = key;
+  geminiLoaded = true;
+  emitGemini();
 }

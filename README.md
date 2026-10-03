@@ -2,7 +2,7 @@
 
 A fitness app for **Android and desktop browsers** that cuts down food-logging effort, tracks gym progress, and gives personalised coaching. Built with Expo, React Native and TypeScript, so one codebase serves both.
 
-> **Status: working prototype.** Everything runs locally today. Health syncing and push delivery are **simulated** (and labelled as such in the app) until the backend accounts are connected. AI uses built-in answers until you paste an NVIDIA API key in **Settings** → **AI** (see [docs/SETUP.md](docs/SETUP.md) §5). See [docs/TESTING.md](docs/TESTING.md) for exactly what is real, simulated, or unverified.
+> **Status: working prototype.** Accounts and per-user sync use Supabase. Coach chat uses the owner’s OpenRouter key; meal photos keep the owner’s NVIDIA key and original vision model. Both keys belong in Supabase Edge Function secrets. Database migration and functions must be deployed before these features work end to end. See [setup](docs/SETUP.md) and [verification](docs/TESTING.md).
 
 ## What's in it
 

@@ -7,9 +7,9 @@ import { itemFromFdc, searchFdc } from '../nutrition/lookup';
  * NVIDIA API (build.nvidia.com), used when the user saves their own NVIDIA key in Settings.
  * The API is OpenAI-compatible: POST /v1/chat/completions.
  *
- * Two models, chosen separately in Settings:
- *  - vision model: reads meal photos and estimates foods + portions
- *  - chat model:   the coach conversation
+ * The user-selected vision model reads meal photos and estimates foods + portions.
+ * The coach uses a separate Gemini key; older NVIDIA chat helpers remain for
+ * compatibility with existing tests/settings but are not selected by the app.
  *
  * Open models don't support guaranteed JSON output here, so replies are asked for as JSON,
  * parsed defensively, and validated field by field. Anything invalid is dropped, and the

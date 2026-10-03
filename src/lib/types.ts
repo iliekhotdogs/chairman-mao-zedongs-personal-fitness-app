@@ -305,7 +305,9 @@ export interface Settings {
   coachTone: CoachTone;
   notifications: NotificationPrefs;
   aiMode: 'simulated' | 'server';
-  /** NVIDIA model ids used when an NVIDIA API key is saved on this device. Missing = defaults. */
+  /** The vision id is used for NVIDIA photos; chat is retained for old saved settings. */
   aiModels?: { vision: string; chat: string };
+  geminiModel?: string;
+  openRouterChatModel?: string;
   updatedAt: ISODateTime;
 }

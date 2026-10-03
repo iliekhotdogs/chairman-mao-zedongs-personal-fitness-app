@@ -1,10 +1,11 @@
 import { useStore } from '@/store/AppStore';
-import { useApiKey } from '@/lib/ai/apiKey';
-import { aiEngine, type AIEngine } from '@/lib/ai/provider';
+import { useApiKey, useGeminiKey } from '@/lib/ai/apiKey';
+import { aiEngine, chatEngine, type AIEngine } from '@/lib/ai/provider';
 
-/** Which AI the app is using right now: 'nvidia' (your key), 'server', or 'simulated' (built-in answers). */
-export function useAiEngine(): AIEngine {
+/** The current provider for meal photos or coach chat. */
+export function useAiEngine(feature: 'food' | 'chat'): AIEngine {
   const { state } = useStore();
-  const { key } = useApiKey();
-  return aiEngine(state.settings, key);
+  const { key: nvidiaKey } = useApiKey();
+  const { key: geminiKey } = useGeminiKey();
+  return feature === 'food' ? aiEngine(state.settings, nvidiaKey) : chatEngine(state.settings, geminiKey);
 }

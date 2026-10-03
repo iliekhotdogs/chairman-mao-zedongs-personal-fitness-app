@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
 import { Badge, Button, Card, Field, Muted, Row, Text } from './ui';
@@ -8,24 +9,37 @@ import { supabase } from '@/lib/sync/supabase';
 
 /** Sign in / create account / sync status. Used in Settings and on the welcome screen. */
 export function AccountCard({ intro }: { intro?: string }) {
-  const { sync } = useStore();
+  const { state, sync } = useStore();
   const toast = useToast();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
+  const [adminUserId, setAdminUserId] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    if (sync.session) {
+      supabase()?.functions.invoke('admin-stats', { body: { action: 'check' } })
+        .then(({ data, error }) => { if (active && !error && data?.admin === true) setAdminUserId(sync.session!.user.id); })
+        .catch(() => {});
+    }
+    return () => { active = false; };
+  }, [sync.session]);
 
   const auth = async (mode: 'in' | 'up') => {
     const sb = supabase();
     if (!sb) return;
     setBusy(true);
     setErr(undefined);
-    const { error } = mode === 'in' ? await sb.auth.signInWithPassword({ email, password }) : await sb.auth.signUp({ email, password });
+    const { data, error } = mode === 'in'
+      ? await sb.auth.signInWithPassword({ email: email.trim(), password })
+      : await sb.auth.signUp({ email: email.trim(), password });
     setBusy(false);
     if (error) setErr(error.message);
     else {
       setPassword('');
-      toast(mode === 'in' ? 'Signed in' : 'Account created. Check your email if confirmation is required.');
+      toast(mode === 'in' ? 'Signed in' : data.session ? 'Account created and signed in.' : 'Check your email to confirm your account, then sign in.');
     }
   };
 
@@ -45,8 +59,14 @@ export function AccountCard({ intro }: { intro?: string }) {
           </Row>
           {sync.error ? <Text variant="small" color={C.danger}>{sync.error}</Text> : null}
           {sync.lastSyncAt ? <Muted variant="small">Last sync {new Date(sync.lastSyncAt).toLocaleTimeString()}</Muted> : null}
+          {sync.legacyAvailable && !state.profile ? (
+            <Button title="Import earlier data from this device" kind="secondary" size="sm" onPress={() => {
+              void sync.importLocalData().then(() => toast('Earlier device data imported into this account.')).catch((error) => setErr(error instanceof Error ? error.message : 'Import failed.'));
+            }} />
+          ) : null}
           <Row gap={Space.sm}>
             <Button title="Sync now" kind="secondary" size="sm" icon="refresh" onPress={() => sync.syncNow()} />
+            {adminUserId === sync.session.user.id ? <Button title="Admin stats" kind="secondary" size="sm" onPress={() => router.push('/admin')} /> : null}
             <Button title="Sign out" kind="ghost" size="sm" onPress={() => supabase()?.auth.signOut()} />
           </Row>
         </>

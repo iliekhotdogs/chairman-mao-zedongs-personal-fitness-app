@@ -140,9 +140,27 @@ export interface FdcResult {
  * production this call should go through the server so the key and rate limit are shared.
  */
 export async function searchFdc(query: string, apiKey: string, signal?: AbortSignal): Promise<FdcResult[]> {
-  const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(apiKey)}&query=${encodeURIComponent(query)}&pageSize=8&dataType=Foundation,SR%20Legacy,Survey%20(FNDDS),Branded`;
-  const res = await fetch(url, { signal });
-  if (!res.ok) throw new Error(res.status === 429 ? 'USDA rate limit reached — try again later.' : `USDA lookup failed (${res.status})`);
+  const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(apiKey.trim())}`;
+  // USDA documents dataType as a JSON array. A comma-separated GET parameter can be
+  // rejected with HTTP 400 even though DEMO_KEY happens to accept it.
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify({ query, pageSize: 8, dataType: ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'] }),
+    signal,
+  });
+  if (!res.ok) {
+    let code: string | undefined;
+    try {
+      const body = await res.json() as { error?: { code?: string } };
+      code = body.error?.code;
+    } catch { /* Some USDA errors are HTML. */ }
+    if (code === 'API_KEY_UNVERIFIED') throw new Error('USDA key is not verified yet. Open the verification link in the email from api.data.gov, then retry.');
+    if (code === 'API_KEY_INVALID' || code === 'API_KEY_MISSING') throw new Error('USDA rejected this key. Paste only the 40-character API key from the email, then retry.');
+    if (code === 'API_KEY_DISABLED' || code === 'API_KEY_UNAUTHORIZED') throw new Error(`USDA says this key is ${code === 'API_KEY_DISABLED' ? 'disabled' : 'not authorized'}. Contact USDA or request a new key.`);
+    if (res.status === 429) throw new Error('USDA rate limit reached — try again later.');
+    throw new Error(`USDA lookup failed (${res.status}${code ? `, ${code}` : ''}).`);
+  }
   const json = (await res.json()) as { foods?: { fdcId: number; description: string; brandOwner?: string; dataType: string; foodNutrients: { nutrientNumber?: string; nutrientName?: string; value?: number; unitName?: string }[] }[] };
   return (json.foods ?? []).map((f) => {
     const get = (nums: string[]) => f.foodNutrients.find((n) => n.nutrientNumber && nums.includes(n.nutrientNumber))?.value ?? 0;
@@ -154,6 +172,21 @@ export async function searchFdc(query: string, apiKey: string, signal?: AbortSig
       per100g: { kcal: get(['208', '957', '958']), p: get(['203']), c: get(['205']), f: get(['204']) },
     };
   });
+}
+
+/** Signed-in accounts share the server's USDA key; local prototype uses its own key. */
+export async function searchFdcForAccount(query: string): Promise<FdcResult[]> {
+  const { isSupabaseConfigured, supabase } = await import('../sync/supabase');
+  if (!isSupabaseConfigured()) {
+    const { getUsdaKey } = await import('../integrations/config');
+    return searchFdc(query, getUsdaKey());
+  }
+  const sb = supabase();
+  if (!sb) throw new Error('Sign in to search USDA foods.');
+  const { data, error } = await sb.functions.invoke('ai', { body: { action: 'search_food', query } });
+  if (error) throw new Error('USDA search is unavailable. Check the server connection.');
+  if (data?.error) throw new Error(String(data.error));
+  return (data?.foods ?? []) as FdcResult[];
 }
 
 export function itemFromFdc(r: FdcResult, grams: number, portionLabel: string): FoodItem {

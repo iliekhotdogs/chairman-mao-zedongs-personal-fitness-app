@@ -1,279 +1,222 @@
-// Supabase Edge Function: AI features for FitCoach.
-//   POST { action: 'estimate_food', hint, image?: { data, mediaType }, units }
-//   POST { action: 'coach', message, history, context }
-//
-// Secrets (set with `supabase secrets set ...`, never in the app):
-//   ANTHROPIC_API_KEY   — Claude API key (billed per use by Anthropic)
-//   FDC_API_KEY         — free USDA FoodData Central key (optional; DEMO_KEY otherwise)
-//   AI_DAILY_LIMIT      — max AI requests per user per day (default 60)
-//
-// The AI only proposes. The app shows every estimate/suggestion for review, and the
-// app's own code applies changes only after the user accepts them.
+// Shared AI gateway. Deploy with JWT verification enabled.
+// Secrets: OPENROUTER_API_KEY, NVIDIA_API_KEY, optional FDC_API_KEY, AI_DAILY_LIMIT,
+// AI_GLOBAL_DAILY_LIMIT. Never place the OpenRouter key in Expo env vars.
+import { createClient } from 'npm:@supabase/supabase-js@2';
 
-import Anthropic from 'npm:@anthropic-ai/sdk';
-import { createClient } from 'npm:@supabase/supabase-js@^2';
-
-const MODEL = 'claude-opus-5-5';
-const anthropic = new Anthropic({ apiKey: Deno.env.get('ANTHROPIC_API_KEY') });
-const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-const DAILY_LIMIT = Number(Deno.env.get('AI_DAILY_LIMIT') ?? 60);
-
+const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+const CHAT_MODELS = [
+  'qwen/qwen3.8-27b:free',
+  'google/gemma-4-26b-a4b-it:free',
+  'google/gemma-4-31b-it:free',
+  'nvidia/nemotron-3.5-lightning:free',
+];
+const VISION_MODELS = ['meta/llama-3.2-90b-vision-instruct', 'meta/llama-3.2-11b-vision-instruct'];
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
+const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
+const safeNumber = (value: unknown, max: number) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max ? value : 0;
+const text = (value: unknown, max: number) => typeof value === 'string' ? value.slice(0, max) : '';
 
-const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
-
-Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
-  if (req.method !== 'POST') return json({ error: 'POST only' }, 405);
-
-  // 1. Authenticate the caller (only signed-in users can spend AI credits)
-  const token = req.headers.get('Authorization')?.replace('Bearer ', '');
-  if (!token) return json({ error: 'Not signed in' }, 401);
-  const { data: auth, error: authError } = await supabaseAdmin.auth.getUser(token);
-  if (authError || !auth.user) return json({ error: 'Not signed in' }, 401);
-  const userId = auth.user.id;
-
-  // 2. Per-user daily limit (cost control)
-  const today = new Date().toISOString().slice(0, 10);
-  const { data: usage } = await supabaseAdmin.from('ai_usage').select('requests,input_tokens,output_tokens').eq('user_id', userId).eq('day', today).maybeSingle();
-  if ((usage?.requests ?? 0) >= DAILY_LIMIT) return json({ error: 'Daily AI limit reached. Try again tomorrow.' }, 429);
-
-  let body: Record<string, unknown>;
-  try {
-    body = await req.json();
-  } catch {
-    return json({ error: 'Invalid JSON' }, 400);
+type Completion = { text: string; input: number; output: number };
+async function complete(model: string, messages: unknown[]): Promise<Completion> {
+  const key = Deno.env.get('OPENROUTER_API_KEY');
+  if (!key) throw new Error('OpenRouter is not configured on the server.');
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'FitCoach' },
+    body: JSON.stringify({ model, messages, temperature: 0.3, max_tokens: 4096 }),
+    signal: AbortSignal.timeout(90_000),
+  });
+  if (!response.ok) {
+    if (response.status === 429) throw new Error('OpenRouter free-model limit reached. Try again later.');
+    if (response.status === 401 || response.status === 403) throw new Error('The server OpenRouter key was rejected.');
+    throw new Error(`OpenRouter request failed (${response.status}).`);
   }
-
-  try {
-    let result: unknown;
-    let tokens = { input: 0, output: 0 };
-    if (body.action === 'estimate_food') ({ result, tokens } = await estimateFood(body));
-    else if (body.action === 'coach') ({ result, tokens } = await coach(body));
-    else return json({ error: 'Unknown action' }, 400);
-
-    await supabaseAdmin.from('ai_usage').upsert(
-      { user_id: userId, day: today, requests: (usage?.requests ?? 0) + 1, input_tokens: (usage?.input_tokens ?? 0) + tokens.input, output_tokens: (usage?.output_tokens ?? 0) + tokens.output },
-      { onConflict: 'user_id,day' },
-    );
-    return json(result);
-  } catch (e) {
-    if (e instanceof Anthropic.RateLimitError) return json({ error: 'AI is busy, please retry shortly.' }, 503);
-    if (e instanceof Anthropic.AuthenticationError) return json({ error: 'Server AI key is not configured.' }, 500);
-    if (e instanceof Anthropic.APIError) return json({ error: `AI error (${e.status})` }, 502);
-    return json({ error: e instanceof Error ? e.message : 'Unexpected error' }, 500);
-  }
-});
-
-// ---------------------------------------------------------------------------
-// Shared: one structured-output request with refusal fallbacks enabled
-// ---------------------------------------------------------------------------
-
-async function structured<T>(args: { system: string; content: Anthropic.Beta.BetaContentBlockParam[] | string; schema: Record<string, unknown>; effort: 'low' | 'medium' | 'high'; history?: Anthropic.Beta.BetaMessageParam[] }) {
-  const params = {
-    model: MODEL,
-    max_tokens: 16000,
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    system: args.system,
-    output_config: { effort: args.effort, format: { type: 'json_schema', schema: args.schema } },
-    messages: [...(args.history ?? []), { role: 'user', content: args.content }],
-  };
-  // deno-lint-ignore no-explicit-any
-  const res = await anthropic.beta.messages.create(params as any);
-  if (res.stop_reason === 'refusal') throw new Error('The AI declined this request.');
-  if (res.stop_reason === 'max_tokens') throw new Error('The AI response was cut off.');
-  const text = res.content.find((b) => b.type === 'text');
-  if (!text || text.type !== 'text') throw new Error('Empty AI response');
-  return { value: JSON.parse(text.text) as T, tokens: { input: res.usage.input_tokens, output: res.usage.output_tokens } };
+  const data = await response.json();
+  const content = data.choices?.[0]?.message?.content;
+  const reply = typeof content === 'string' ? content : Array.isArray(content) ? content.map((part: { text?: string }) => part.text ?? '').join('') : '';
+  if (!reply.trim()) throw new Error('The selected model returned an empty reply. Try another model.');
+  return { text: reply, input: safeNumber(data.usage?.prompt_tokens, 10_000_000), output: safeNumber(data.usage?.completion_tokens, 10_000_000) };
 }
 
-// ---------------------------------------------------------------------------
-// Food photo estimate
-// ---------------------------------------------------------------------------
+async function nvidiaComplete(model: string, messages: unknown[]): Promise<Completion> {
+  const key = Deno.env.get('NVIDIA_API_KEY');
+  if (!key) throw new Error('NVIDIA meal-photo AI is not configured on the server.');
+  const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: 2500 }),
+    signal: AbortSignal.timeout(150_000),
+  });
+  if (!response.ok) {
+    if (response.status === 429) throw new Error('NVIDIA image-model limit reached. Try again later.');
+    if (response.status === 401 || response.status === 403) throw new Error('The server NVIDIA key was rejected.');
+    throw new Error(`NVIDIA image request failed (${response.status}).`);
+  }
+  const data = await response.json();
+  const reply = data.choices?.[0]?.message?.content;
+  if (typeof reply !== 'string' || !reply.trim()) throw new Error('The NVIDIA model returned an empty reply.');
+  return { text: reply, input: safeNumber(data.usage?.prompt_tokens, 10_000_000), output: safeNumber(data.usage?.completion_tokens, 10_000_000) };
+}
 
-const FOOD_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['items', 'overall_confidence', 'follow_up_question', 'notes'],
-  properties: {
-    items: {
-      type: 'array',
-      items: {
-        type: 'object',
-        additionalProperties: false,
-        required: ['name', 'restaurant', 'portion', 'grams', 'calories', 'protein_g', 'carbs_g', 'fat_g', 'confidence', 'portion_assumption', 'usda_search_query'],
-        properties: {
-          name: { type: 'string' },
-          restaurant: { type: ['string', 'null'], description: 'Restaurant chain if identifiable, else null' },
-          portion: { type: 'string' },
-          grams: { type: 'number' },
-          calories: { type: 'number' },
-          protein_g: { type: 'number' },
-          carbs_g: { type: 'number' },
-          fat_g: { type: 'number' },
-          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-          portion_assumption: { type: 'string' },
-          usda_search_query: { type: 'string', description: 'Short generic USDA search term, e.g. "chicken breast roasted"' },
-        },
-      },
-    },
-    overall_confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
-    follow_up_question: { type: ['string', 'null'] },
-    notes: { type: 'array', items: { type: 'string' } },
-  },
-};
+function parseObject(reply: string): Record<string, unknown> {
+  const start = reply.indexOf('{');
+  const end = reply.lastIndexOf('}');
+  if (start < 0 || end <= start) throw new Error('The selected model did not return usable JSON. Try another model.');
+  const value = JSON.parse(reply.slice(start, end + 1));
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('The model returned an invalid reply.');
+  return value;
+}
 
-interface VisionItem {
-  name: string; restaurant: string | null; portion: string; grams: number; calories: number; protein_g: number; carbs_g: number; fat_g: number;
-  confidence: 'high' | 'medium' | 'low'; portion_assumption: string; usda_search_query: string;
+function validatedIntents(value: unknown): unknown[] {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 3).filter((intent) => {
+    if (!intent || typeof intent !== 'object') return false;
+    if (intent.type === 'short_on_time') return Number.isInteger(intent.minutes) && intent.minutes >= 10 && intent.minutes <= 120;
+    if (intent.type === 'training_days') return Number.isInteger(intent.days) && intent.days >= 1 && intent.days <= 6;
+    if (intent.type === 'goal_change') return ['fat_loss', 'muscle_gain', 'strength', 'maintenance'].includes(intent.goal);
+    if (intent.type === 'pain') return ['knee', 'lower_back', 'shoulder', 'wrist', 'elbow', 'hip', 'ankle', 'neck'].includes(intent.area) && typeof intent.red_flags === 'boolean';
+    return intent.type === 'low_energy';
+  });
+}
+
+async function coach(body: Record<string, unknown>) {
+  const model = text(body.model, 100);
+  if (!CHAT_MODELS.includes(model)) throw new Error('Choose a supported free chat model.');
+  const message = text(body.message, 2000);
+  if (!message.trim()) throw new Error('Enter a message first.');
+  const context = body.context && typeof body.context === 'object' ? JSON.stringify(body.context).slice(0, 6000) : '{}';
+  const history = Array.isArray(body.history) ? body.history.slice(-12).map((turn) => ({
+    role: turn?.role === 'assistant' ? 'assistant' : 'user', content: text(turn?.content, 2000),
+  })) : [];
+  if (history.at(-1)?.role === 'user') history.pop();
+  while (history.length && history[0].role !== 'user') history.shift();
+  const system = [
+    'You are FitCoach, a concise fitness and nutrition coach. Respond ONLY with a JSON object: {"reply":string,"safety":boolean,"intents":array}. Keep reply under 150 words.',
+    'Never claim to edit a plan or log. Changes require the user to accept a card. Allowed intents: short_on_time {minutes}, pain {area,red_flags}, low_energy, goal_change {goal}, training_days {days}. Use [] when no change is needed.',
+    'Do not diagnose injuries, recommend extreme diets, or tell users to train through pain. For chest pain, fainting or trouble breathing, urge emergency medical help and return no intents.',
+    `User context: ${context}`,
+  ].join('\n');
+  const response = await complete(model, [{ role: 'system', content: system }, ...history, { role: 'user', content: message }]);
+  const value = parseObject(response.text);
+  const reply = text(value.reply, 2000).trim();
+  if (!reply) throw new Error('The selected model returned no coach reply.');
+  return { result: { reply, safety: value.safety === true, intents: validatedIntents(value.intents) }, tokens: response };
+}
+
+type VisionItem = { name: string; portion: string; grams: number; calories: number; protein_g: number; carbs_g: number; fat_g: number; confidence: string; portion_assumption: string; usda_search_query: string };
+async function searchUsda(query: string, pageSize: number) {
+  const key = Deno.env.get('FDC_API_KEY') || 'DEMO_KEY';
+  const response = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(key)}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, pageSize, dataType: ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'] }),
+  });
+  if (!response.ok) throw new Error(`USDA search failed (${response.status}).`);
+  return (await response.json()).foods ?? [];
+}
+
+async function usdaItem(item: VisionItem) {
+  const food = (await searchUsda(item.usda_search_query || item.name, 1))[0];
+  if (!food) return null;
+  const nutrient = (numbers: string[]) => food.foodNutrients?.find((n: { nutrientNumber?: string }) => numbers.includes(n.nutrientNumber ?? ''))?.value ?? 0;
+  const kcal = nutrient(['208', '957', '958']) * item.grams / 100;
+  if (!Number.isFinite(kcal) || kcal <= 0 || (item.calories > 0 && (kcal < item.calories * 0.4 || kcal > item.calories * 2.5))) return null;
+  return {
+    name: item.name, portion: item.portion, grams: item.grams, calories: Math.round(kcal),
+    protein_g: Math.round(nutrient(['203']) * item.grams / 10) / 10,
+    carbs_g: Math.round(nutrient(['205']) * item.grams / 10) / 10,
+    fat_g: Math.round(nutrient(['204']) * item.grams / 10) / 10,
+    confidence: item.confidence, portion_assumption: item.portion_assumption,
+    source_kind: 'database', source_label: `USDA FoodData Central #${food.fdcId}: ${food.description}`,
+    source_url: `https://fdc.nal.usda.gov/food-details/${food.fdcId}/nutrients`,
+  };
 }
 
 async function estimateFood(body: Record<string, unknown>) {
-  const hint = String(body.hint ?? '').slice(0, 300);
-  const image = body.image as { data: string; mediaType: string } | undefined;
-  if (!hint && !image) throw new Error('Send a photo or a hint.');
-  if (image && image.data.length > 7_000_000) throw new Error('Photo is too large.');
+  const model = text(body.model, 100);
+  if (!VISION_MODELS.includes(model)) throw new Error('Choose a supported NVIDIA image model.');
+  const hint = text(body.hint, 300);
+  const image = body.image as { data?: unknown; mediaType?: unknown } | undefined;
+  const data = text(image?.data, 7_000_001);
+  const mime = text(image?.mediaType, 30);
+  if (!hint && !data) throw new Error('Send a photo or a hint.');
+  if (image && (!['image/jpeg', 'image/png', 'image/webp'].includes(mime) || !/^[A-Za-z0-9+/=]+$/.test(data) || data.length > 7_000_000)) throw new Error('Use a smaller JPEG, PNG, or WebP photo.');
+  const content: unknown[] = [{ type: 'text', text: `Food hint: ${hint || '(none)'}. Identify foods, portions and estimate nutrition. Reply ONLY with JSON: {"items":[{"name":string,"portion":string,"grams":number,"calories":number,"protein_g":number,"carbs_g":number,"fat_g":number,"confidence":"high"|"medium"|"low","portion_assumption":string,"usda_search_query":string}],"overall_confidence":"high"|"medium"|"low","follow_up_question":string|null,"notes":string[]}. Up to 8 items. Be honest about visual uncertainty.` }];
+  if (data) content.push({ type: 'image_url', image_url: { url: `data:${mime};base64,${data}` } });
+  const response = await nvidiaComplete(model, [
+    { role: 'system', content: 'You estimate meals from images and hints. A photo cannot reveal exact ingredients or calories. Never invent an official nutrition source.' },
+    { role: 'user', content },
+  ]);
+  const value = parseObject(response.text);
+  if (!Array.isArray(value.items)) throw new Error('The model returned an invalid meal estimate.');
+  const items = await Promise.all(value.items.slice(0, 8).map(async (raw: Record<string, unknown>) => {
+    const item: VisionItem = {
+      name: text(raw.name, 100) || 'Unknown food', portion: text(raw.portion, 80) || 'Estimated serving',
+      grams: safeNumber(raw.grams, 5000), calories: safeNumber(raw.calories, 10000),
+      protein_g: safeNumber(raw.protein_g, 1000), carbs_g: safeNumber(raw.carbs_g, 2000), fat_g: safeNumber(raw.fat_g, 1000),
+      confidence: ['high', 'medium', 'low'].includes(String(raw.confidence)) ? String(raw.confidence) : 'low',
+      portion_assumption: text(raw.portion_assumption, 200), usda_search_query: text(raw.usda_search_query, 100),
+    };
+    const sourced = item.grams ? await usdaItem(item).catch(() => null) : null;
+    return sourced ?? {
+      name: item.name, portion: item.portion, grams: item.grams, calories: item.calories,
+      protein_g: item.protein_g, carbs_g: item.carbs_g, fat_g: item.fat_g,
+      confidence: item.confidence === 'high' ? 'medium' : item.confidence,
+      portion_assumption: item.portion_assumption,
+      source_kind: 'visual_estimate', source_label: 'Visual estimate (no matching USDA value)', source_url: null,
+    };
+  }));
+  return { result: { items, overall_confidence: ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes: Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [], model }, tokens: response };
+}
 
-  const content: Anthropic.Beta.BetaContentBlockParam[] = [];
-  if (image) content.push({ type: 'image', source: { type: 'base64', media_type: image.mediaType as 'image/jpeg', data: image.data } });
-  content.push({ type: 'text', text: `User hint: ${hint || '(none)'}\nIdentify each food and estimate the portion and nutrition.` });
-
-  const system = [
-    'You estimate food and portion sizes from a meal photo and a short user hint, for a calorie-tracking app.',
-    'Use the hint and the photo together. Give a realistic portion in grams for each item and your visual nutrition estimate.',
-    'Be honest about uncertainty: photos cannot reveal exact calories (hidden oil, sauces, portion depth). Use "low" confidence when unsure.',
-    'If the restaurant or a specific menu item is identifiable, set "restaurant". If a key detail is missing (size, sauce, brand), ask ONE short follow_up_question; otherwise null.',
-    'Notes: at most 3 short sentences about assumptions.',
-  ].join('\n');
-
-  const vision = await structured<{ items: VisionItem[]; overall_confidence: string; follow_up_question: string | null; notes: string[] }>({ system, content, schema: FOOD_SCHEMA, effort: 'medium' });
-  let tokens = vision.tokens;
-
-  // Replace visual guesses with sourced values where possible.
-  const items = [];
-  for (const it of vision.value.items.slice(0, 8)) {
-    let sourced: Record<string, unknown> | null = null;
-    if (it.restaurant) {
-      const r = await officialRestaurantNutrition(it).catch(() => null);
-      if (r) {
-        sourced = r.item;
-        tokens = { input: tokens.input + r.tokens.input, output: tokens.output + r.tokens.output };
-      }
-    }
-    if (!sourced) sourced = await usdaNutrition(it).catch(() => null);
-    items.push(
-      sourced ?? {
-        name: it.name, portion: it.portion, grams: it.grams, calories: it.calories, protein_g: it.protein_g, carbs_g: it.carbs_g, fat_g: it.fat_g,
-        confidence: it.confidence === 'high' ? 'medium' : it.confidence, portion_assumption: it.portion_assumption,
-        source_kind: 'visual_estimate', source_label: 'Visual estimate by AI (no nutrition source found)', source_url: null,
-      },
-    );
+Deno.serve(async (request) => {
+  if (request.method === 'OPTIONS') return new Response('ok', { headers: CORS });
+  if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
+  const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '');
+  if (!token) return json({ error: 'Sign in first.' }, 401);
+  const { data: auth, error: authError } = await admin.auth.getUser(token);
+  if (authError || !auth.user || auth.user.is_anonymous) return json({ error: 'Sign in first.' }, 401);
+  const raw = await request.text();
+  if (raw.length > 7_200_000) return json({ error: 'Request too large.' }, 413);
+  let body: Record<string, unknown>;
+  try { body = JSON.parse(raw); } catch { return json({ error: 'Invalid JSON.' }, 400); }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'Invalid request.' }, 400);
+  if (body.action === 'search_food') {
+    const query = text(body.query, 100).trim();
+    if (query.length < 2) return json({ foods: [] });
+    const { data: searchClaim, error: searchClaimError } = await admin.rpc('claim_food_search', {
+      p_user: auth.user.id, p_day: new Date().toISOString().slice(0, 10),
+      p_user_limit: 30, p_global_limit: 500,
+    });
+    if (searchClaimError) return json({ error: 'Food search metering is not ready. Apply the account SQL setup first.' }, 503);
+    if (searchClaim !== 'ok') return json({ error: 'Food search limit reached. Try again tomorrow.' }, 429);
+    try {
+      const foods = await searchUsda(query, 8);
+      const result = foods.map((food: { fdcId: number; description: string; brandOwner?: string; dataType: string; foodNutrients?: { nutrientNumber?: string; value?: number }[] }) => {
+        const nutrient = (numbers: string[]) => food.foodNutrients?.find((n) => numbers.includes(n.nutrientNumber ?? ''))?.value ?? 0;
+        return { fdcId: food.fdcId, description: food.description, brandOwner: food.brandOwner, dataType: food.dataType,
+          per100g: { kcal: nutrient(['208', '957', '958']), p: nutrient(['203']), c: nutrient(['205']), f: nutrient(['204']) } };
+      });
+      return json({ foods: result });
+    } catch (error) { return json({ error: error instanceof Error ? error.message : 'USDA search failed.' }, 502); }
   }
-  return { result: { items, overall_confidence: vision.value.overall_confidence, follow_up_question: vision.value.follow_up_question, notes: vision.value.notes, model: MODEL }, tokens };
-}
-
-/** Official restaurant nutrition via Claude's web search, restricted to an official-source answer. */
-async function officialRestaurantNutrition(it: VisionItem) {
-  const params = {
-    model: MODEL,
-    max_tokens: 4000,
-    betas: ['server-side-fallback-2026-07-01'],
-    fallbacks: 'default',
-    output_config: { effort: 'low' },
-    tools: [{ type: 'web_search_20260209', name: 'web_search', max_uses: 3 }],
-    system: 'Find OFFICIAL nutrition facts published by the restaurant itself (its website or official nutrition PDF). Never use third-party estimates. Reply with ONLY a JSON object: {"found": boolean, "item": string, "serving": string, "calories": number, "protein_g": number, "carbs_g": number, "fat_g": number, "url": string}. If no official source is found, reply {"found": false}.',
-    messages: [{ role: 'user', content: `${it.restaurant}: ${it.name} (${it.portion})` }],
-  };
-  // deno-lint-ignore no-explicit-any
-  const res = await anthropic.beta.messages.create(params as any);
-  if (res.stop_reason === 'refusal') return null;
-  const text = [...res.content].reverse().find((b) => b.type === 'text');
-  if (!text || text.type !== 'text') return null;
-  const m = text.text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  const j = JSON.parse(m[0]);
-  if (!j.found || !j.url || typeof j.calories !== 'number') return null;
-  return {
-    item: {
-      name: `${j.item} (${it.restaurant})`, portion: j.serving, grams: it.grams, calories: j.calories, protein_g: j.protein_g, carbs_g: j.carbs_g, fat_g: j.fat_g,
-      confidence: 'high', portion_assumption: `Assumed one standard serving (${j.serving}) as listed by the restaurant.`,
-      source_kind: 'official_restaurant', source_label: `Official ${it.restaurant} nutrition information`, source_url: j.url,
-    },
-    tokens: { input: res.usage.input_tokens, output: res.usage.output_tokens },
-  };
-}
-
-/** Generic foods: USDA FoodData Central values per 100 g, scaled to the estimated portion. */
-async function usdaNutrition(it: VisionItem) {
-  const key = Deno.env.get('FDC_API_KEY') ?? 'DEMO_KEY';
-  const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${key}&query=${encodeURIComponent(it.usda_search_query)}&pageSize=3&dataType=Foundation,SR%20Legacy,Survey%20(FNDDS)`;
-  const res = await fetch(url);
-  if (!res.ok) return null;
-  const data = await res.json();
-  const f = data.foods?.[0];
-  if (!f) return null;
-  const get = (nums: string[]) => f.foodNutrients.find((n: { nutrientNumber?: string }) => n.nutrientNumber && nums.includes(n.nutrientNumber))?.value ?? 0;
-  const k = it.grams / 100;
-  const kcal = get(['208', '957', '958']);
-  if (!kcal) return null;
-  return {
-    name: it.name, portion: it.portion, grams: it.grams,
-    calories: Math.round(kcal * k), protein_g: Math.round(get(['203']) * k * 10) / 10, carbs_g: Math.round(get(['205']) * k * 10) / 10, fat_g: Math.round(get(['204']) * k * 10) / 10,
-    confidence: it.confidence, portion_assumption: it.portion_assumption,
-    source_kind: 'database', source_label: `USDA FoodData Central #${f.fdcId}: ${f.description} (per-gram values; portion estimated from photo)`,
-    source_url: `https://fdc.nal.usda.gov/food-details/${f.fdcId}/nutrients`,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Coach chat
-// ---------------------------------------------------------------------------
-
-const COACH_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['reply', 'safety', 'intents'],
-  properties: {
-    reply: { type: 'string' },
-    safety: { type: 'boolean', description: 'true when the reply contains injury/pain/medical safety guidance' },
-    intents: {
-      type: 'array',
-      description: 'Structured changes the app may OFFER the user (never applied automatically).',
-      items: {
-        anyOf: [
-          { type: 'object', additionalProperties: false, required: ['type', 'minutes'], properties: { type: { const: 'short_on_time' }, minutes: { type: 'integer' } } },
-          { type: 'object', additionalProperties: false, required: ['type', 'area', 'red_flags'], properties: { type: { const: 'pain' }, area: { type: 'string', enum: ['knee', 'lower_back', 'shoulder', 'wrist', 'elbow', 'hip', 'ankle', 'neck'] }, red_flags: { type: 'boolean' } } },
-          { type: 'object', additionalProperties: false, required: ['type'], properties: { type: { const: 'low_energy' } } },
-          { type: 'object', additionalProperties: false, required: ['type', 'goal'], properties: { type: { const: 'goal_change' }, goal: { type: 'string', enum: ['fat_loss', 'muscle_gain', 'strength', 'maintenance'] } } },
-          { type: 'object', additionalProperties: false, required: ['type', 'days'], properties: { type: { const: 'training_days' }, days: { type: 'integer' } } },
-        ],
-      },
-    },
-  },
-};
-
-async function coach(body: Record<string, unknown>) {
-  const context = body.context as Record<string, unknown>;
-  const tone = context?.tone === 'direct' ? 'a direct, no-nonsense trainer: short sentences, no fluff' : 'a warm, supportive coach who briefly explains why';
-  const system = [
-    `You are FitCoach, ${tone}. You help with nutrition, training and consistency, using the user's data below.`,
-    'Rules:',
-    '- Be concise (under 150 words) and practical. Use the numbers in the context.',
-    '- Never claim a change has been made. If a change would help, describe it and add the matching intent; the app shows an Accept/Decline card.',
-    '- Pain or injury: do not diagnose. Advise stopping movements that hurt, suggest seeing a physiotherapist/doctor for persistent pain or red flags (swelling, numbness, sharp pain, a pop, cannot bear weight). For chest pain, fainting or trouble breathing: tell them to stop and seek urgent medical care, and return no intents.',
-    '- Never recommend extreme diets, under ~1,200 kcal/day, dehydration, or training through sharp pain. If the user mentions disordered eating, respond with care and suggest professional support.',
-    '- Calorie and wearable numbers are estimates; say so when relevant.',
-    `User data (JSON): ${JSON.stringify(context).slice(0, 6000)}`,
-  ].join('\n');
-  const history = ((body.history as { role: 'user' | 'assistant'; content: string }[]) ?? []).slice(-12).map((m) => ({ role: m.role, content: String(m.content).slice(0, 2000) }));
-  // the latest user message is sent separately; drop it from history if the app included it
-  if (history.length && history[history.length - 1].role === 'user') history.pop();
-  while (history.length && history[0].role !== 'user') history.shift();
-  const { value, tokens } = await structured<{ reply: string; safety: boolean; intents: unknown[] }>({ system, content: String(body.message ?? '').slice(0, 2000), schema: COACH_SCHEMA, effort: 'low', history });
-  return { result: value, tokens };
-}
+  if (body.action !== 'coach' && body.action !== 'estimate_food') return json({ error: 'Unknown action.' }, 400);
+  const day = new Date().toISOString().slice(0, 10);
+  const { data: claim, error: claimError } = await admin.rpc('claim_ai_request', {
+    p_user: auth.user.id, p_day: day,
+    p_user_limit: Number(Deno.env.get('AI_DAILY_LIMIT') || 5),
+    p_global_limit: Number(Deno.env.get('AI_GLOBAL_DAILY_LIMIT') || 40),
+  });
+  if (claimError) return json({ error: 'AI metering is not ready. Apply the account SQL setup first.' }, 503);
+  if (claim !== 'ok') return json({ error: claim === 'user_limit' ? 'Your daily AI limit is reached.' : 'The shared free AI allowance is used up today. Try tomorrow.' }, 429);
+  try {
+    const { result, tokens } = body.action === 'coach' ? await coach(body) : await estimateFood(body);
+    await admin.rpc('record_ai_tokens', { p_user: auth.user.id, p_day: day, p_input: tokens.input, p_output: tokens.output });
+    return json(result);
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : 'AI request failed.' }, 502);
+  }
+});

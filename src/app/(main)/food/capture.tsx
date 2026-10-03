@@ -45,7 +45,7 @@ export default function CaptureScreen() {
   const [error, setError] = useState<string>();
   const [addOpen, setAddOpen] = useState(false);
   const [answered, setAnswered] = useState(false);
-  const engine = useAiEngine();
+  const engine = useAiEngine('food');
   const realAI = engine !== 'simulated';
 
   const pick = async (source: 'camera' | 'library') => {
@@ -115,7 +115,7 @@ export default function CaptureScreen() {
 
       {!realAI ? (
         <Banner kind="simulated" title="Built-in estimates">
-          Without an AI key, the estimate comes from your hint matched against built-in reference foods. The photo itself is not analysed. Add an NVIDIA API key in Settings → AI for real photo recognition.
+          Without a Supabase connection, the estimate comes from your hint matched against built-in reference foods. The photo itself is not analysed. Sign in to use shared NVIDIA photo analysis.
         </Banner>
       ) : null}
       {phase === 'review' && estimate?.aiNotice ? (

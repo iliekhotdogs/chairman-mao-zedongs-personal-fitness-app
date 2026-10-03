@@ -2,42 +2,42 @@ import type { AppState } from '../state';
 import type { Confidence, EstimateItem, FoodEstimate, ISODate, Proposal } from '../types';
 import { simulateFoodEstimate } from '../nutrition/estimate';
 import { isUrgentSymptom, simulateCoachReply, type CoachReply } from '../coaching/coachSim';
-import { supabase } from '../sync/supabase';
+import { isSupabaseConfigured, supabase } from '../sync/supabase';
 import { newId } from '../id';
 import { nowISO, addDays } from '../dates';
 import { remainingForDay, workoutForDay, latestWeight, live } from '../selectors';
 import { exerciseName, formatPrescription } from '../workouts/exercises';
-import { getApiKey } from './apiKey';
-import { NVIDIA_DEFAULT_MODELS, nvidiaCoach, nvidiaEstimateFood } from './nvidia';
+import { getApiKey, getGeminiKey } from './apiKey';
+import { NVIDIA_DEFAULT_MODELS } from './nvidia';
+import { GEMINI_DEFAULT_MODEL } from './gemini';
 import { prepareImageForAI } from './image';
+import { selectedChatModel } from './openrouterModels';
 
-/**
- * Three interchangeable AI back-ends, picked by aiEngine():
- *  - 'nvidia':    the user pasted their own NVIDIA API key in Settings (stored only on this
- *                 device). If NVIDIA fails, the app falls back to the built-in answers.
- *  - 'server':    a Supabase Edge Function that calls the Claude API. The API key stays on
- *                 the server; the app only sends the signed-in user's token.
- *  - 'simulated': no key: pre-determined, rule-based answers built on the device. Free.
- *
- * Whatever the back-end, the AI only *proposes*. Changes are built by deterministic code
- * (so plans stay safe and valid) and applied only after the user accepts them.
- */
+/** Signed-in accounts use the owner's separate server-side NVIDIA and OpenRouter keys.
+ * Without Supabase, the app offers built-in answers. AI only proposes changes. */
 
 export class AIUnavailableError extends Error {}
 
-export type AIEngine = 'nvidia' | 'server' | 'simulated';
+export type AIEngine = 'nvidia' | 'gemini' | 'server' | 'simulated';
 
-/** A saved NVIDIA key always wins; otherwise the Settings choice; otherwise built-in answers. */
+/** In the account build, calls go through the authenticated Supabase gateway. */
 export function aiEngine(settings: AppState['settings'], key: string | null = getApiKey()): AIEngine {
-  if (key) return 'nvidia';
-  return settings.aiMode === 'server' ? 'server' : 'simulated';
+  void settings; void key;
+  return isSupabaseConfigured() ? 'server' : 'simulated';
+}
+
+export function chatEngine(settings: AppState['settings'], key: string | null = getGeminiKey()): AIEngine {
+  void settings; void key;
+  return isSupabaseConfigured() ? 'server' : 'simulated';
+}
+
+export function geminiModel(settings: AppState['settings']): string {
+  return settings.geminiModel || GEMINI_DEFAULT_MODEL;
 }
 
 export function aiModels(settings: AppState['settings']) {
   return { vision: settings.aiModels?.vision || NVIDIA_DEFAULT_MODELS.vision, chat: settings.aiModels?.chat || NVIDIA_DEFAULT_MODELS.chat };
 }
-
-const USDA_KEY = process.env.EXPO_PUBLIC_USDA_API_KEY || 'DEMO_KEY';
 
 type FoodInput = { hint?: string; photoUri?: string; photoSize?: { width?: number; height?: number }; followUpAnswered?: boolean };
 
@@ -47,31 +47,18 @@ export async function estimateFood(state: AppState, input: FoodInput): Promise<F
     await delay(700); // let the UI show its loading state realistically
     return simulateFoodEstimate(input);
   }
-  if (engine === 'nvidia') {
-    const model = aiModels(state.settings).vision;
-    try {
-      const image = input.photoUri ? await prepareImageForAI(input.photoUri, input.photoSize) : undefined;
-      const r = await nvidiaEstimateFood({ key: getApiKey()!, model, hint: input.hint, image, usdaKey: USDA_KEY });
-      return { id: newId(), createdAt: nowISO(), hint: input.hint, photoUri: input.photoUri, simulated: false, provider: `NVIDIA (${model})`, ...r };
-    } catch (e) {
-      return fallbackEstimate(input, e);
-    }
-  }
   const sb = supabase();
   if (!sb) throw new AIUnavailableError('Server AI is not configured. Switch to simulated mode in Settings.');
-  const image = input.photoUri ? await prepareImageForAI(input.photoUri, input.photoSize).catch(() => undefined) : undefined;
-  const { data, error } = await sb.functions.invoke('ai', {
-    body: { action: 'estimate_food', hint: input.hint ?? '', image: image ? { data: image.base64, mediaType: image.mediaType } : undefined, units: state.settings.units },
-  });
-  if (error) throw new AIUnavailableError(`The food estimator is unavailable (${error.message}). You can enter the food manually.`);
-  return toEstimate(data, input);
-}
-
-/** NVIDIA failed: use the built-in estimate, and say why at the top of the notes. */
-function fallbackEstimate(input: FoodInput, e: unknown): FoodEstimate {
-  const est = simulateFoodEstimate(input);
-  const why = e instanceof Error ? e.message : 'NVIDIA could not be reached.';
-  return { ...est, aiNotice: why, notes: [`NVIDIA AI didn't work (${why}) This is the built-in estimate from your hint instead.`, ...est.notes] };
+  try {
+    const image = input.photoUri ? await prepareImageForAI(input.photoUri, input.photoSize) : undefined;
+    const { data, error } = await sb.functions.invoke('ai', {
+      body: { action: 'estimate_food', hint: input.hint ?? '', image: image ? { data: image.base64, mediaType: image.mediaType } : undefined, units: state.settings.units, model: aiModels(state.settings).vision },
+    });
+    if (error) throw error;
+    return toEstimate(data, input);
+  } catch (error) {
+    return { ...simulateFoodEstimate(input), aiNotice: error instanceof Error ? error.message : 'The image service is unavailable.' };
+  }
 }
 
 interface ServerEstimate {
@@ -92,7 +79,7 @@ function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: str
     hint: input.hint,
     photoUri: input.photoUri,
     simulated: false,
-    provider: `Claude (${data.model}) via your server`,
+    provider: `NVIDIA (${data.model}) via your server`,
     overallConfidence: data.overall_confidence,
     followUpQuestion: data.follow_up_question ?? undefined,
     notes: data.notes ?? [],
@@ -161,33 +148,25 @@ export function coachContext(state: AppState, today: ISODate) {
 }
 
 export async function coachReply(state: AppState, message: string, today: ISODate): Promise<CoachReply & { simulated: boolean; aiNotice?: string }> {
-  const engine = aiEngine(state.settings);
+  const engine = chatEngine(state.settings);
   if (engine === 'simulated') {
     await delay(500);
     return { ...simulateCoachReply(state, message, today), simulated: true };
   }
   // Emergencies always get the fixed safety text, never a model's improvisation.
   if (isUrgentSymptom(message)) return { ...simulateCoachReply(state, message, today), simulated: false };
-  if (engine === 'nvidia') {
-    try {
-      const history = live(state.chat)
-        .slice(-13)
-        .map((m) => ({ role: (m.role === 'coach' ? 'assistant' : 'user') as 'user' | 'assistant', content: m.text }));
-      // the latest user message is sent separately
-      if (history.length && history[history.length - 1].role === 'user' && history[history.length - 1].content === message) history.pop();
-      const r = await nvidiaCoach({ key: getApiKey()!, model: aiModels(state.settings).chat, message, history, context: coachContext(state, today), tone: state.settings.coachTone });
-      return { text: r.reply, safety: r.safety, proposals: proposalsForIntents(state, r.intents, today), simulated: false };
-    } catch (e) {
-      return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice: e instanceof Error ? e.message : 'NVIDIA could not be reached.' };
-    }
-  }
   const sb = supabase();
   if (!sb) throw new AIUnavailableError('Server AI is not configured. Switch to simulated mode in Settings.');
   const history = live(state.chat).slice(-12).map((m) => ({ role: m.role === 'coach' ? 'assistant' : 'user', content: m.text }));
-  const { data, error } = await sb.functions.invoke('ai', { body: { action: 'coach', message, history, context: coachContext(state, today) } });
-  if (error) throw new AIUnavailableError(`The coach is unavailable right now (${error.message}).`);
-  const d = data as { reply: string; safety: boolean; intents: CoachIntent[] };
-  return { text: d.reply, safety: d.safety, proposals: proposalsForIntents(state, d.intents ?? [], today), simulated: false };
+  try {
+    const { data, error } = await sb.functions.invoke('ai', { body: { action: 'coach', message, history, context: coachContext(state, today), model: selectedChatModel(state.settings.openRouterChatModel) } });
+    if (error) throw error;
+    const d = data as { reply: string; safety: boolean; intents: CoachIntent[] };
+    if (!d || typeof d.reply !== 'string') throw new Error('The coach returned an invalid reply.');
+    return { text: d.reply, safety: d.safety, proposals: proposalsForIntents(state, d.intents ?? [], today), simulated: false };
+  } catch (error) {
+    return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice: error instanceof Error ? error.message : 'The chat service is unavailable.' };
+  }
 }
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));

@@ -7,6 +7,7 @@ import { Badge, Banner, Button, Card, Chip, Columns, Expandable, Field, IconButt
 import { useStore, clearLocalData } from '@/store/AppStore';
 import { AccountCard } from '@/components/AccountCard';
 import { AiSettings } from '@/components/AiSettings';
+import { IntegrationSettings } from '@/components/IntegrationSettings';
 import { useAiEngine } from '@/hooks/useAiEngine';
 import { useAct, useToast } from '@/components/Toast';
 import { computeTargets, macrosFor } from '@/lib/nutrition/targets';
@@ -20,6 +21,8 @@ import { permissionStatus, requestPermission } from '@/lib/notifications/deliver
 import { MAX_COACH_NOTIFICATIONS_PER_DAY, remainingToday } from '@/lib/notifications/policy';
 import { supabase } from '@/lib/sync/supabase';
 import { deleteCloudData } from '@/lib/sync/sync';
+import { clearIntegrationConfig } from '@/lib/integrations/config';
+import { removeApiKey, removeGeminiKey } from '@/lib/ai/apiKey';
 import type { BodyArea, GoalPriority, NutritionTargets, Profile } from '@/lib/types';
 
 const GOALS: { value: GoalPriority; label: string }[] = [
@@ -41,6 +44,7 @@ export default function Settings() {
           </Stack>,
           <Stack key="r" gap={Space.lg}>
             <NotificationsSection />
+            <IntegrationSettings />
             <AccountCard />
             <PrivacySection />
             <AboutSection />
@@ -292,7 +296,12 @@ function PrivacySection() {
       if (confirm === 'cloud' && sync.session) await deleteCloudData(sync.session.user.id);
       // sign out before clearing, so background sync can't re-upload or re-download meanwhile
       if (sync.session) await supabase()?.auth.signOut();
-      await clearLocalData();
+      await clearLocalData(sync.session?.user.id);
+      if (!sync.configured) {
+        await clearIntegrationConfig();
+        await removeApiKey();
+        await removeGeminiKey();
+      }
       doAct({ type: 'REPLACE_STATE', state: emptyState(newId(), nowISO()) });
       setConfirm(null);
       router.replace('/onboarding');
@@ -304,7 +313,7 @@ function PrivacySection() {
   return (
     <Card style={{ gap: Space.sm }}>
       <Text variant="h3">Privacy &amp; your data</Text>
-      <Muted variant="small">Your food log, photos, body weight, workouts and chat are private to you. With an account, cloud data is protected so only your signed-in account can read it. Data is never sold. AI requests send only what&apos;s needed for that request.</Muted>
+      <Muted variant="small">Your food log, photos, body weight, workouts and chat are private to you. With an account, cloud data is protected so only your signed-in account can read it. AI requests send a short context summary or reduced photo to the selected provider.</Muted>
       <Row wrap gap={Space.sm}>
         <Button title="Export my data" kind="secondary" size="sm" icon="download-outline" onPress={exportData} />
         <Button title="Delete data on this device" kind="danger" size="sm" onPress={() => setConfirm('local')} />
@@ -334,14 +343,16 @@ function PrivacySection() {
 
 function AboutSection() {
   const { state, today } = useStore();
-  const engine = useAiEngine();
+  const imageEngine = useAiEngine('food');
+  const chatEngine = useAiEngine('chat');
   const doAct = useAct();
   const [confirm, setConfirm] = useState(false);
   return (
     <Card style={{ gap: Space.sm }}>
       <Text variant="h3">Prototype &amp; design review</Text>
       <Row wrap gap={6}>
-        {engine === 'simulated' ? <Badge kind="simulated" label="Built-in AI answers" /> : <Badge kind="info" label={engine === 'nvidia' ? 'NVIDIA AI' : 'Server AI'} />}
+        <Badge kind={imageEngine === 'simulated' ? 'simulated' : 'info'} label={imageEngine === 'nvidia' ? 'NVIDIA images' : imageEngine === 'server' ? 'Server images' : 'Built-in image estimates'} />
+        <Badge kind={chatEngine === 'simulated' ? 'simulated' : 'info'} label={chatEngine === 'gemini' ? 'Gemini chat' : chatEngine === 'server' ? 'Server chat' : 'Built-in chat'} />
         <Badge kind="simulated" label="Simulated health sync" />
         <Badge kind="info" label="USDA lookup is live" />
       </Row>

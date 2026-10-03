@@ -31,7 +31,7 @@ export default function Coach() {
   const messages = visibleChat(state);
   const pending = pendingProposals(state);
   const decided = state.proposals.filter((p) => p.status !== 'pending').sort((a, b) => (b.decidedAt ?? b.updatedAt).localeCompare(a.decidedAt ?? a.updatedAt)).slice(0, 6);
-  const engine = useAiEngine();
+  const engine = useAiEngine('chat');
   const simulated = engine === 'simulated';
   const toast = useToast();
 
@@ -51,7 +51,7 @@ export default function Coach() {
     setThinking(true);
     try {
       const reply = await coachReply({ ...state, chat: [...state.chat, userMsg] }, body, today);
-      if (reply.aiNotice) toast(`NVIDIA AI didn't answer (${reply.aiNotice}) Showing a built-in reply.`, 'error');
+      if (reply.aiNotice) toast(`OpenRouter didn't answer (${reply.aiNotice}) Showing a built-in reply.`, 'error');
       if (reply.proposals.length) doAct({ type: 'ADD_PROPOSALS', proposals: reply.proposals });
       const t = nowISO();
       doAct({ type: 'ADD_CHAT', messages: [{ id: newId(), role: 'coach', text: reply.text, createdAt: t, updatedAt: t, proposalIds: reply.proposals.map((p) => p.id), simulated: reply.simulated, safety: reply.safety }] });
@@ -100,7 +100,7 @@ export default function Coach() {
       <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: isPhone ? Space.lg : Space.xl, gap: Space.md, paddingBottom: Space.xl }} keyboardShouldPersistTaps="handled">
         {simulated ? (
           <Banner kind="simulated" title="Simulated coach">
-            Replies are built-in answers generated on this device from your data. Add an NVIDIA API key in Settings → AI for real conversational coaching.
+            Replies are built-in answers generated on this device from your data. Sign in to use the shared OpenRouter coach chat.
           </Banner>
         ) : null}
         {messages.length === 0 ? <EmptyState icon="chatbubbles-outline" title="Ask your coach anything" body="It knows your goal, plan, food log and recent progress." /> : null}

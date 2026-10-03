@@ -4,7 +4,7 @@ import type { FoodItem } from '@/lib/types';
 import { C, Space } from '@/constants/theme';
 import { Badge, Button, Card, Expandable, Field, IconButton, Muted, NumberField, Row, Sheet, Stack, Text, Ionicons } from './ui';
 import { MacroLine, SourceLine } from './nutrition';
-import { itemFromFdc, itemFromRef, scaleItem, searchFdc, searchFoods, type FdcResult } from '@/lib/nutrition/lookup';
+import { itemFromFdc, itemFromRef, scaleItem, searchFdcForAccount, searchFoods, type FdcResult } from '@/lib/nutrition/lookup';
 import { markEdited } from '@/lib/nutrition/estimate';
 import type { RefFood } from '@/lib/nutrition/foodDb';
 
@@ -75,8 +75,6 @@ export function FoodItemEditor({ item, onChange, onRemove, extra }: { item: Food
   );
 }
 
-const USDA_KEY = process.env.EXPO_PUBLIC_USDA_API_KEY || 'DEMO_KEY';
-
 /** Search the built-in reference foods and (optionally) USDA FoodData Central. */
 export function FoodSearch({ onPick }: { onPick: (item: FoodItem) => void }) {
   const [q, setQ] = useState('');
@@ -90,7 +88,7 @@ export function FoodSearch({ onPick }: { onPick: (item: FoodItem) => void }) {
     setLoading(true);
     setError(undefined);
     try {
-      setRemote(await searchFdc(q, USDA_KEY));
+      setRemote(await searchFdcForAccount(q));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Lookup failed');
       setRemote(null);

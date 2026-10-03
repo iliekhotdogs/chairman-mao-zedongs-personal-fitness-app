@@ -12,11 +12,14 @@ import { decide, type Candidate } from '@/lib/notifications/policy';
 import { showSystemNotification } from '@/lib/notifications/deliver';
 import { isSupabaseConfigured, supabase } from '@/lib/sync/supabase';
 import { EMPTY_CURSOR, syncNow, type SyncCursor } from '@/lib/sync/sync';
+import { mergeRemote } from '@/lib/sync/merge';
 import type { Proposal } from '@/lib/types';
-import { loadApiKey } from '@/lib/ai/apiKey';
+import { loadApiKey, loadGeminiKey } from '@/lib/ai/apiKey';
+import { loadIntegrationConfig, useIntegrationConfig } from '@/lib/integrations/config';
 
 const STORAGE_KEY = 'fitapp:state:v1';
 const CURSOR_KEY = 'fitapp:sync-cursor:v1';
+const stateKey = (owner: string) => owner === 'local' ? STORAGE_KEY : `${STORAGE_KEY}:user:${owner}`;
 
 export type SyncStatus = 'local_only' | 'signed_out' | 'idle' | 'syncing' | 'error' | 'offline';
 
@@ -33,14 +36,16 @@ interface StoreValue {
     lastSyncAt?: string;
     error?: string;
     syncNow: () => Promise<void>;
+    legacyAvailable: boolean;
+    importLocalData: () => Promise<void>;
   };
   storageError?: string;
 }
 
 const Ctx = createContext<StoreValue | null>(null);
 
-async function loadState(): Promise<AppState | null> {
-  const raw = await AsyncStorage.getItem(STORAGE_KEY);
+async function loadState(owner: string): Promise<AppState | null> {
+  const raw = await AsyncStorage.getItem(stateKey(owner));
   if (!raw) return null;
   const parsed = JSON.parse(raw) as AppState;
   if (parsed.version !== STATE_VERSION) return { ...emptyState(parsed.deviceId ?? newId(), nowISO()), ...parsed, version: STATE_VERSION };
@@ -58,31 +63,80 @@ function proposalCandidate(p: Proposal): Candidate {
 }
 
 export function AppStoreProvider({ children }: { children: React.ReactNode }) {
+  const { config: integrationConfig, loaded: integrationsLoaded } = useIntegrationConfig();
+  const supabaseIdentity = `${integrationConfig.supabaseUrl}|${integrationConfig.supabaseKey}`;
+  const configured = isSupabaseConfigured();
   const [state, dispatch] = useReducer(reducer, undefined, () => emptyState(newId(), nowISO()));
   const [hydrated, setHydrated] = useState(false);
+  const [hydratedScope, setHydratedScope] = useState('');
   const [storageError, setStorageError] = useState<string>();
+  const [legacyAvailable, setLegacyAvailable] = useState(false);
   const [today, setToday] = useState(toISODate());
   const stateRef = useRef(state);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
 
-  // ---- hydrate + persist ----
+  // ---- provider settings and account-scoped state ----
   useEffect(() => {
-    // the AI key lives in its own device-only storage; load it alongside the app data
-    Promise.all([loadState(), loadApiKey()])
-      .then(([s]) => s && dispatch({ type: 'HYDRATE', state: s }))
-      .catch(() => setStorageError('Saved data could not be read. Starting fresh on this device.'))
-      .finally(() => setHydrated(true));
+    Promise.all([loadApiKey(), loadGeminiKey(), loadIntegrationConfig()])
+      .catch(() => setStorageError('Saved settings could not be read.'));
+    loadState('local').then((saved) => setLegacyAvailable(Boolean(saved?.profile))).catch(() => {});
   }, []);
 
+  const [session, setSession] = useState<Session | null>(null);
+  const [authIdentity, setAuthIdentity] = useState('');
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
+  const [lastSyncAt, setLastSyncAt] = useState<string>();
+  const [syncError, setSyncError] = useState<string>();
+  const owner = configured ? (session?.user.id ?? 'signed-out') : 'local';
+  const authReady = !configured || authIdentity === supabaseIdentity;
+  const scopeReady = integrationsLoaded && authReady && hydrated && hydratedScope === owner;
+
   useEffect(() => {
-    if (!hydrated) return;
+    if (!integrationsLoaded || !authReady) return;
+    let active = true;
+    if (owner === 'signed-out') {
+      Promise.resolve().then(() => {
+        if (!active) return;
+        dispatch({ type: 'HYDRATE', state: emptyState(newId(), nowISO()) });
+        setHydratedScope(owner);
+        setHydrated(true);
+      });
+      return () => { active = false; };
+    }
+    loadState(owner)
+      .then(async (saved) => {
+        let next = saved ?? emptyState(newId(), nowISO());
+        if (configured && session?.user.id === owner) {
+          try {
+            const cursorKey = `${CURSOR_KEY}:${owner}`;
+            const raw = await AsyncStorage.getItem(cursorKey);
+            const result = await syncNow(next, owner, raw ? JSON.parse(raw) as SyncCursor : EMPTY_CURSOR);
+            if (!active) return;
+            next = mergeRemote(next, result.rows);
+            await AsyncStorage.setItem(cursorKey, JSON.stringify(result.cursor));
+            setLastSyncAt(nowISO());
+            setSyncError(undefined);
+            setSyncStatus('idle');
+          } catch (error) {
+            if (active) { setSyncError(error instanceof Error ? error.message : String(error)); setSyncStatus('error'); }
+          }
+        }
+        if (active) dispatch({ type: 'HYDRATE', state: next });
+      })
+      .catch(() => { if (active) { dispatch({ type: 'HYDRATE', state: emptyState(newId(), nowISO()) }); setStorageError('Saved data could not be read.'); } })
+      .finally(() => { if (active) { setHydratedScope(owner); setHydrated(true); } });
+    return () => { active = false; };
+  }, [owner, integrationsLoaded, authReady, configured, session?.user.id]);
+
+  useEffect(() => {
+    if (!scopeReady || owner === 'signed-out') return;
     const t = setTimeout(() => {
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(state)).catch(() => setStorageError('Could not save to this device. Storage may be full.'));
+      AsyncStorage.setItem(stateKey(owner), JSON.stringify(state)).catch(() => setStorageError('Could not save to this device. Storage may be full.'));
     }, 250);
     return () => clearTimeout(t);
-  }, [state, hydrated]);
+  }, [state, scopeReady, owner]);
 
   // ---- clock: roll over at midnight ----
   useEffect(() => {
@@ -91,14 +145,16 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const act = useCallback((action: Action) => {
+    if (!scopeReady) return;
     checkAction(stateRef.current, action); // throws for the caller to show
     dispatch(action);
-  }, []);
+  }, [scopeReady]);
 
   // ---- adaptive coaching engine + notifications ----
   const sessionRef = useRef<Session | null>(null);
   const coaching = useRef(false);
   const runCoach = useCallback(async () => {
+    if (!scopeReady) return;
     const s = stateRef.current;
     if (!s.profile || coaching.current) return;
     coaching.current = true;
@@ -140,14 +196,14 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     } finally {
       coaching.current = false;
     }
-  }, []);
+  }, [scopeReady]);
 
   const engineKey = `${state.foodLog.length}|${state.weights.length}|${state.activity.length}|${state.sessions.length}|${state.targets?.updatedAt}|${state.profile?.updatedAt}|${today}`;
   useEffect(() => {
-    if (!hydrated) return;
+    if (!scopeReady) return;
     const t = setTimeout(() => void runCoach(), 800);
     return () => clearTimeout(t);
-  }, [engineKey, hydrated, runCoach]);
+  }, [engineKey, scopeReady, runCoach]);
 
   useEffect(() => {
     const i = setInterval(() => void runCoach(), 15 * 60_000);
@@ -155,32 +211,35 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   }, [runCoach]);
 
   // ---- cloud sync (optional) ----
-  const [session, setSession] = useState<Session | null>(null);
   useEffect(() => {
     sessionRef.current = session;
   }, [session]);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
-  const [lastSyncAt, setLastSyncAt] = useState<string>();
-  const [syncError, setSyncError] = useState<string>();
-  const syncing = useRef(false);
+  const syncing = useRef<string | null>(null);
 
   useEffect(() => {
+    if (!integrationsLoaded) return;
+    let active = true;
     const sb = supabase();
-    if (!sb) return;
-    sb.auth.getSession().then(({ data }) => setSession(data.session));
-    const { data } = sb.auth.onAuthStateChange((_e, s) => setSession(s));
-    return () => data.subscription.unsubscribe();
-  }, []);
+    if (!sb) {
+      Promise.resolve().then(() => { if (active) { setSession(null); setAuthIdentity(supabaseIdentity); } });
+      return () => { active = false; };
+    }
+    sb.auth.getSession().then(({ data }) => { if (active) { setSession(data.session); setAuthIdentity(supabaseIdentity); } });
+    const { data } = sb.auth.onAuthStateChange((_e, s) => { if (active) { setSession(s); setAuthIdentity(supabaseIdentity); } });
+    return () => { active = false; data.subscription.unsubscribe(); };
+  }, [supabaseIdentity, integrationsLoaded]);
 
   const doSync = useCallback(async () => {
-    if (!session || syncing.current) return;
-    syncing.current = true;
+    if (!session || !scopeReady || syncing.current === session.user.id) return;
+    const userId = session.user.id;
+    syncing.current = userId;
     setSyncStatus('syncing');
     try {
-      const cursorKey = `${CURSOR_KEY}:${session.user.id}`;
+      const cursorKey = `${CURSOR_KEY}:${userId}`;
       const raw = await AsyncStorage.getItem(cursorKey);
       const cursor: SyncCursor = raw ? JSON.parse(raw) : EMPTY_CURSOR;
-      const result = await syncNow(stateRef.current, session.user.id, cursor);
+      const result = await syncNow(stateRef.current, userId, cursor);
+      if (sessionRef.current?.user.id !== userId) return;
       // Merged into the current state, so edits made during the network call are kept.
       dispatch({ type: 'MERGE_REMOTE', rows: result.rows });
       await AsyncStorage.setItem(cursorKey, JSON.stringify(result.cursor));
@@ -188,15 +247,25 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       setSyncError(undefined);
       setSyncStatus('idle');
     } catch (e) {
-      setSyncError(e instanceof Error ? e.message : String(e));
-      setSyncStatus('error');
+      if (sessionRef.current?.user.id === userId) {
+        setSyncError(e instanceof Error ? e.message : String(e));
+        setSyncStatus('error');
+      }
     } finally {
-      syncing.current = false;
+      if (syncing.current === userId) syncing.current = null;
     }
-  }, [session]);
+  }, [session, scopeReady]);
+
+  const importLocalData = useCallback(async () => {
+    if (!session || !scopeReady || stateRef.current.profile) throw new Error('This account already has data.');
+    const legacy = await loadState('local');
+    if (!legacy?.profile) throw new Error('No earlier device data was found.');
+    dispatch({ type: 'REPLACE_STATE', state: legacy });
+    setLegacyAvailable(false);
+  }, [session, scopeReady]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured || !session) return;
+    if (!configured || !session || !scopeReady) return;
     const first = setTimeout(() => void doSync(), 0); // sync right after sign-in
     const i = setInterval(() => void doSync(), 120_000);
     const sub = RNAppState.addEventListener('change', (s) => s === 'active' && void doSync());
@@ -205,26 +274,26 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       clearInterval(i);
       sub.remove();
     };
-  }, [session, doSync]);
+  }, [configured, session, scopeReady, doSync]);
 
   // push soon after local edits
   useEffect(() => {
-    if (!session || !hydrated) return;
+    if (!session || !scopeReady) return;
     const t = setTimeout(() => void doSync(), 5000);
     return () => clearTimeout(t);
-  }, [state.foodLog, state.weights, state.sessions, state.proposals, state.plan, state.targets, state.profile, session, hydrated, doSync]);
+  }, [state.foodLog, state.weights, state.sessions, state.proposals, state.plan, state.targets, state.profile, session, scopeReady, doSync]);
 
   const value = useMemo<StoreValue>(
     () => ({
       state,
-      hydrated,
+      hydrated: scopeReady,
       today,
       act,
       storageError,
       // status is derived so it can't go stale when the user signs out
-      sync: { configured: isSupabaseConfigured, session, status: !isSupabaseConfigured ? 'local_only' : !session ? 'signed_out' : syncStatus, lastSyncAt, error: syncError, syncNow: doSync },
+      sync: { configured, session, status: !configured ? 'local_only' : !session ? 'signed_out' : syncStatus, lastSyncAt, error: syncError, syncNow: doSync, legacyAvailable, importLocalData },
     }),
-    [state, hydrated, today, act, storageError, session, syncStatus, lastSyncAt, syncError, doSync],
+    [state, scopeReady, today, act, storageError, session, syncStatus, lastSyncAt, syncError, doSync, configured, legacyAvailable, importLocalData],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
@@ -236,7 +305,6 @@ export function useStore(): StoreValue {
 }
 
 /** Wipe all local data on this device. */
-export async function clearLocalData() {
-  const keys = await AsyncStorage.getAllKeys();
-  await AsyncStorage.multiRemove(keys.filter((k) => k.startsWith('fitapp:')));
+export async function clearLocalData(userId?: string) {
+  await AsyncStorage.multiRemove(userId ? [stateKey(userId), `${CURSOR_KEY}:${userId}`] : [STORAGE_KEY]);
 }
