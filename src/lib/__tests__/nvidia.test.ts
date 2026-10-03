@@ -1,4 +1,4 @@
-import { extractJson, parseFoodJson, parseIntents, stripThinking } from '../ai/nvidia';
+import { extractJson, parseFoodJson, parseIntents, stripThinking, testNvidia } from '../ai/nvidia';
 import { aiEngine, coachReply, estimateFood } from '../ai/provider';
 import { __setApiKeyForTests } from '../ai/apiKey';
 import { buildSampleState } from '../sampleData';
@@ -120,7 +120,8 @@ describe('NVIDIA coach', () => {
     expect(r.text).toBe("Let's do a quick version.");
     for (const p of r.proposals) expect(p.status).toBe('pending');
     const body = JSON.parse(calls[0][1]!.body!);
-    expect(body.model).toBe('nvidia/llama-3.1-nemotron-70b-instruct');
+    expect(body.model).toBe('deepseek-ai/deepseek-v4.1-flash');
+    expect(body.chat_template_kwargs).toEqual({ thinking: false, enable_thinking: false });
   });
 
   it('uses the models chosen in settings', async () => {
@@ -154,5 +155,31 @@ describe('NVIDIA coach', () => {
     const r = await coachReply(sample(), 'I have chest pain', TODAY);
     expect(calls).toHaveLength(0);
     expect(r.text).toMatch(/emergency/);
+  });
+});
+
+describe('thinking models (DeepSeek)', () => {
+  it('retries without the thinking switch if NVIDIA rejects it', async () => {
+    __setApiKeyForTests('nvapi-test');
+    mockFetch((_url, body) => (body && 'chat_template_kwargs' in body ? { status: 400, json: { detail: 'unknown field' } } : chatReply('{"reply":"hi","safety":false,"intents":[]}')));
+    const r = await coachReply(sample(), 'hello', TODAY);
+    expect(r.text).toBe('hi');
+    expect(calls).toHaveLength(2);
+    expect(JSON.parse(calls[1][1]!.body!).max_tokens).toBeGreaterThanOrEqual(4096);
+  });
+
+  it('explains when the model spent its whole allowance thinking', async () => {
+    __setApiKeyForTests('nvapi-test');
+    mockFetch(() => ({ status: 200, json: { choices: [{ finish_reason: 'length', message: { content: null, reasoning_content: 'hmm…' } }] } }));
+    const r = await coachReply(sample(), 'hello', TODAY);
+    expect(r.simulated).toBe(true);
+    expect(r.aiNotice).toMatch(/thinking/);
+  });
+
+  it('the connection test accepts an empty answer and reports seconds', async () => {
+    mockFetch(() => ({ status: 200, json: { choices: [{ finish_reason: 'length', message: { content: '' } }] } }));
+    const r = await testNvidia('nvapi-test', { vision: 'meta/llama-3.2-90b-vision-instruct', chat: 'deepseek-ai/deepseek-v4.1-flash' });
+    expect(r.vision.ok && r.chat.ok).toBe(true);
+    expect(typeof r.chat.seconds).toBe('number');
   });
 });

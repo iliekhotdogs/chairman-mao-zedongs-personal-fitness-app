@@ -18,12 +18,12 @@ import { itemFromFdc, searchFdc } from '../nutrition/lookup';
 
 export const NVIDIA_DEFAULT_MODELS = {
   vision: 'meta/llama-3.2-90b-vision-instruct',
-  chat: 'nvidia/llama-3.1-nemotron-70b-instruct',
+  chat: 'deepseek-ai/deepseek-v4.1-flash',
 } as const;
 
 export const NVIDIA_SUGGESTED_MODELS = {
   vision: ['meta/llama-3.2-90b-vision-instruct', 'meta/llama-3.2-11b-vision-instruct', 'google/gemma-3-12b-it'],
-  chat: ['nvidia/llama-3.1-nemotron-70b-instruct', 'mistralai/mistral-large-2-instruct', 'nvidia/nemotron-3-super-120b-a12b', 'meta/llama-3.2-90b-vision-instruct'],
+  chat: ['deepseek-ai/deepseek-v4.1-flash', 'nvidia/llama-3.1-nemotron-70b-instruct', 'mistralai/mistral-large-2-instruct', 'meta/llama-3.2-90b-vision-instruct'],
 };
 
 export class NvidiaError extends Error {
@@ -46,22 +46,61 @@ function baseUrl(): string {
 type Part = { type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } };
 export type NvMessage = { role: 'system' | 'user' | 'assistant'; content: string | Part[] };
 
-export async function nvidiaChat(args: { key: string; model: string; messages: NvMessage[]; maxTokens?: number; temperature?: number; timeoutMs?: number }): Promise<string> {
+/** Free NVIDIA endpoints queue requests when busy; big models can take a minute or more. */
+export const NVIDIA_TIMEOUTS = { test: 90_000, chat: 120_000, vision: 150_000 };
+
+/**
+ * DeepSeek models "think" before answering, which is slow and can use up the whole reply
+ * budget. For a chat coach a direct answer is better, so thinking is switched off.
+ */
+export function isThinkingModel(model: string): boolean {
+  return /deepseek|nemotron-3|qwq|qwen3|kimi|glm|gpt-oss/i.test(model);
+}
+
+export async function nvidiaChat(args: {
+  key: string;
+  model: string;
+  messages: NvMessage[];
+  maxTokens?: number;
+  temperature?: number;
+  timeoutMs?: number;
+  /** Connection test: any successful answer counts, even an empty one. */
+  allowEmpty?: boolean;
+}): Promise<string> {
+  const thinkingOff = isThinkingModel(args.model) ? { chat_template_kwargs: { thinking: false, enable_thinking: false } } : null;
+  try {
+    return await nvidiaChatOnce(args, thinkingOff);
+  } catch (e) {
+    // Some deployments reject the extra option; retry plainly with more room for the thinking.
+    if (thinkingOff && e instanceof NvidiaError && (e.status === 400 || e.status === 422)) {
+      return nvidiaChatOnce({ ...args, maxTokens: Math.max(args.maxTokens ?? 1024, 4096) }, null);
+    }
+    throw e;
+  }
+}
+
+async function nvidiaChatOnce(
+  args: { key: string; model: string; messages: NvMessage[]; maxTokens?: number; temperature?: number; timeoutMs?: number; allowEmpty?: boolean },
+  extra: Record<string, unknown> | null,
+): Promise<string> {
+  const timeoutMs = args.timeoutMs ?? NVIDIA_TIMEOUTS.chat;
   const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), args.timeoutMs ?? 60_000);
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   let res: Response;
+  let raw: string;
   try {
     res = await fetch(`${baseUrl()}/chat/completions`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${args.key.trim()}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ model: args.model, messages: args.messages, max_tokens: args.maxTokens ?? 1024, temperature: args.temperature ?? 0.2, top_p: 0.7, stream: false }),
+      body: JSON.stringify({ model: args.model, messages: args.messages, max_tokens: args.maxTokens ?? 1024, temperature: args.temperature ?? 0.2, top_p: 0.7, stream: false, ...extra }),
       signal: ctrl.signal,
     });
+    raw = await res.text();
   } catch (e) {
     const aborted = e instanceof Error && e.name === 'AbortError';
     throw new NvidiaError(
       aborted
-        ? 'NVIDIA took too long to answer.'
+        ? `"${args.model}" didn't answer within ${Math.round(timeoutMs / 1000)} s. NVIDIA's free models are often queued when busy; try again, or pick a smaller model in Settings → AI → Models.`
         : Platform.OS === 'web'
           ? "Couldn't reach NVIDIA. On the web version this only works while the Expo dev server is running (npx expo start)."
           : "Couldn't reach NVIDIA. Check your internet connection.",
@@ -69,18 +108,24 @@ export async function nvidiaChat(args: { key: string; model: string; messages: N
   } finally {
     clearTimeout(timer);
   }
-  const raw = await res.text();
+  if (res.status === 202) throw new NvidiaError(`"${args.model}" is still warming up on NVIDIA's side. Try again in a minute.`, 202);
   if (!res.ok) throw new NvidiaError(friendlyStatus(res.status, args.model, raw), res.status);
-  let json: { choices?: { message?: { content?: string | null } }[] };
+  let json: { choices?: { finish_reason?: string; message?: { content?: string | null; reasoning_content?: string | null } }[] };
   try {
     json = JSON.parse(raw);
   } catch {
     throw new NvidiaError('NVIDIA sent an unreadable reply.');
   }
-  const content = json.choices?.[0]?.message?.content;
-  if (!content) throw new NvidiaError('NVIDIA sent an empty reply.');
-  return stripThinking(content);
+  const choice = json.choices?.[0];
+  const content = stripThinking(choice?.message?.content ?? '');
+  if (!content) {
+    if (args.allowEmpty) return '';
+    if (choice?.finish_reason === 'length') throw new NvidiaError(`"${args.model}" used its whole reply allowance on thinking and gave no answer. Try again or pick another chat model.`);
+    throw new NvidiaError('NVIDIA sent an empty reply.');
+  }
+  return content;
 }
+
 
 function friendlyStatus(status: number, model: string, body: string): string {
   const detail = (() => {
@@ -121,13 +166,17 @@ export function extractJson(text: string): Record<string, unknown> {
 // Connection test
 // ---------------------------------------------------------------------------
 
-export async function testNvidia(key: string, models: { vision: string; chat: string }) {
-  const one = async (model: string) => {
+export type ModelTest = { ok: boolean; error?: string; seconds: number };
+
+export async function testNvidia(key: string, models: { vision: string; chat: string }): Promise<{ vision: ModelTest; chat: ModelTest }> {
+  const one = async (model: string): Promise<ModelTest> => {
+    const started = Date.now();
+    const seconds = () => Math.round((Date.now() - started) / 100) / 10;
     try {
-      await nvidiaChat({ key, model, messages: [{ role: 'user', content: 'Reply with the single word OK.' }], maxTokens: 8, timeoutMs: 30_000 });
-      return { ok: true as const };
+      await nvidiaChat({ key, model, messages: [{ role: 'user', content: 'Reply with the single word OK.' }], maxTokens: 16, timeoutMs: NVIDIA_TIMEOUTS.test, allowEmpty: true });
+      return { ok: true, seconds: seconds() };
     } catch (e) {
-      return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+      return { ok: false, error: e instanceof Error ? e.message : String(e), seconds: seconds() };
     }
   };
   const [vision, chat] = await Promise.all([one(models.vision), models.chat === models.vision ? Promise.resolve(null) : one(models.chat)]);
@@ -182,7 +231,7 @@ export async function nvidiaEstimateFood(args: {
   const dataUrl = args.image ? `data:${args.image.mediaType};base64,${args.image.base64}` : undefined;
 
   // Llama 3.2 Vision doesn't accept a system prompt alongside an image, so everything goes in the user turn.
-  const ask = (content: NvMessage['content']) => nvidiaChat({ key: args.key, model: args.model, messages: [{ role: 'user', content }], maxTokens: 1500, temperature: 0.1 });
+  const ask = (content: NvMessage['content']) => nvidiaChat({ key: args.key, model: args.model, messages: [{ role: 'user', content }], maxTokens: 1500, temperature: 0.1, timeoutMs: NVIDIA_TIMEOUTS.vision });
   let reply: string;
   if (!dataUrl) reply = await ask(text);
   else {
@@ -341,8 +390,9 @@ export async function nvidiaCoach(args: {
     key: args.key,
     model: args.model,
     messages: [{ role: 'system', content: coachSystemPrompt(args.context, args.tone) }, ...history, { role: 'user', content: args.message.slice(0, 2000) }],
-    maxTokens: 900,
+    maxTokens: 1500,
     temperature: 0.4,
+    timeoutMs: NVIDIA_TIMEOUTS.chat,
   });
   try {
     const j = extractJson(text);

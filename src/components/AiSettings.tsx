@@ -7,11 +7,11 @@ import { useStore } from '@/store/AppStore';
 import { useAct, useToast } from '@/components/Toast';
 import { useAiEngine } from '@/hooks/useAiEngine';
 import { looksLikeNvidiaKey, maskKey, removeApiKey, saveApiKey, useApiKey } from '@/lib/ai/apiKey';
-import { NVIDIA_DEFAULT_MODELS, NVIDIA_SUGGESTED_MODELS, testNvidia } from '@/lib/ai/nvidia';
+import { NVIDIA_DEFAULT_MODELS, NVIDIA_SUGGESTED_MODELS, testNvidia, type ModelTest } from '@/lib/ai/nvidia';
 import { aiModels } from '@/lib/ai/provider';
 import { nowISO } from '@/lib/dates';
 
-type TestResult = { vision: { ok: boolean; error?: string }; chat: { ok: boolean; error?: string } };
+type TestResult = { vision: ModelTest; chat: ModelTest };
 
 /**
  * Settings → AI. Paste an NVIDIA API key to use real AI; with no key the app uses its
@@ -107,12 +107,21 @@ export function AiSettings() {
         </Stack>
       )}
 
+      {testing ? (
+        <Banner kind="info" title="Testing both models…">NVIDIA&apos;s free models can take up to a minute to answer when they&apos;re busy. Please wait.</Banner>
+      ) : null}
       {result ? (
         result.vision.ok && result.chat.ok ? (
-          <Banner kind="success" title="Connected">Both models answered. Photo estimates and coach chat now use NVIDIA.</Banner>
+          <Banner kind="success" title="Connected">
+            {`Photo model answered in ${result.vision.seconds} s, chat model in ${result.chat.seconds} s. Photo estimates and coach chat now use NVIDIA.`}
+          </Banner>
         ) : (
           <Banner kind="warning" title="Something isn't working yet">
-            {[!result.vision.ok ? `Photo model: ${result.vision.error}` : '', !result.chat.ok ? `Chat model: ${result.chat.error}` : '', 'Until it works, the app uses its built-in answers.'].filter(Boolean).join('\n')}
+            {[
+              result.vision.ok ? `Photo model: OK (${result.vision.seconds} s)` : `Photo model (after ${result.vision.seconds} s): ${result.vision.error}`,
+              result.chat.ok ? `Chat model: OK (${result.chat.seconds} s)` : `Chat model (after ${result.chat.seconds} s): ${result.chat.error}`,
+              'Until it works, the app uses its built-in answers for the failing part.',
+            ].join('\n')}
           </Banner>
         )
       ) : null}

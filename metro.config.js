@@ -17,6 +17,18 @@ function nvidiaProxy(req, res, next) {
   const chunks = [];
   req.on('data', (c) => chunks.push(c));
   req.on('end', async () => {
+    // Log model, status and time (never the key) so slow or failing requests are easy to diagnose.
+    const started = Date.now();
+    let model = '?';
+    try {
+      model = JSON.parse(Buffer.concat(chunks).toString('utf8')).model || '?';
+    } catch {
+      // not JSON; keep "?"
+    }
+    const log = (status) => console.log(`[nvidia] ${model} -> ${status} in ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    res.on('close', () => {
+      if (!res.writableFinished) log('cancelled by app');
+    });
     try {
       const upstream = await fetch(TARGET + req.url.slice(PREFIX.length), {
         method: req.method,
@@ -27,10 +39,14 @@ function nvidiaProxy(req, res, next) {
         },
         body: req.method === 'GET' || req.method === 'HEAD' ? undefined : Buffer.concat(chunks),
       });
+      const body = Buffer.from(await upstream.arrayBuffer());
+      log(upstream.status);
+      if (res.destroyed) return;
       res.statusCode = upstream.status;
       res.setHeader('content-type', upstream.headers.get('content-type') || 'application/json');
-      res.end(Buffer.from(await upstream.arrayBuffer()));
+      res.end(body);
     } catch (e) {
+      log(`network error: ${e && e.message ? e.message : e}`);
       res.statusCode = 502;
       res.setHeader('content-type', 'application/json');
       res.end(JSON.stringify({ error: { message: `Could not reach NVIDIA: ${e && e.message ? e.message : e}` } }));

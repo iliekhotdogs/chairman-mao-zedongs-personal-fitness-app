@@ -16,7 +16,7 @@ The app picks one automatically (`aiEngine()` in `src/lib/ai/provider.ts`):
 - OpenAI-compatible API at `integrate.api.nvidia.com/v1/chat/completions`.
 - Two separate models, both changeable in Settings:
   - Photos: `meta/llama-3.2-90b-vision-instruct`
-  - Chat: `nvidia/llama-3.1-nemotron-70b-instruct`
+  - Chat: `deepseek-ai/deepseek-v4.1-flash` (the app asks it to skip "thinking"; if NVIDIA rejects that option, it retries normally with a larger reply allowance)
 - **Photos:** each photo is shrunk to about 768 px before sending. The model returns JSON, which is validated field by field (absurd values are dropped). Each item is then checked against USDA FoodData Central. USDA values replace the AI's guess only when they roughly agree (within 0.4–2.5×). Restaurant items stay labelled **Visual estimate**, with a prompt to check the official menu, because there's no web search on this path.
 - **Coach:** the coach returns JSON with a reply and *intents*. Only known intents with sane values are kept, and they become the same Accept/Decline cards. A plain-text reply is shown without suggestions.
 - **Safety:** messages about urgent symptoms are never sent to the model; they always get the fixed safety text.
