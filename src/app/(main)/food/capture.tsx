@@ -14,6 +14,7 @@ import { sumItems } from '@/lib/nutrition/lookup';
 import type { Confidence, EstimateItem, FoodEstimate, FoodItem, MealType } from '@/lib/types';
 import { useLayout } from '@/hooks/useLayout';
 import { persistPhoto } from '@/lib/photo';
+import { useAiEngine } from '@/hooks/useAiEngine';
 
 type Phase = 'pick' | 'analyzing' | 'review' | 'error' | 'denied';
 
@@ -35,7 +36,7 @@ export default function CaptureScreen() {
   const date = params.date ?? today;
 
   const [phase, setPhase] = useState<Phase>('pick');
-  const [photo, setPhoto] = useState<{ uri: string; base64?: string | null; mimeType?: string } | null>(null);
+  const [photo, setPhoto] = useState<{ uri: string; width?: number; height?: number } | null>(null);
   const [hint, setHint] = useState('');
   const [meal, setMeal] = useState<MealType>(defaultMealForTime());
   const [estimate, setEstimate] = useState<FoodEstimate | null>(null);
@@ -44,7 +45,8 @@ export default function CaptureScreen() {
   const [error, setError] = useState<string>();
   const [addOpen, setAddOpen] = useState(false);
   const [answered, setAnswered] = useState(false);
-  const server = state.settings.aiMode === 'server';
+  const engine = useAiEngine();
+  const realAI = engine !== 'simulated';
 
   const pick = async (source: 'camera' | 'library') => {
     try {
@@ -55,11 +57,11 @@ export default function CaptureScreen() {
           return;
         }
       }
-      const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], quality: 0.6, base64: server, allowsEditing: false };
+      const opts: ImagePicker.ImagePickerOptions = { mediaTypes: ['images'], quality: 0.8, allowsEditing: false };
       const res = source === 'camera' ? await ImagePicker.launchCameraAsync(opts) : await ImagePicker.launchImageLibraryAsync(opts);
       if (res.canceled || !res.assets?.[0]) return;
       const a = res.assets[0];
-      setPhoto({ uri: a.uri, base64: a.base64, mimeType: a.mimeType });
+      setPhoto({ uri: a.uri, width: a.width, height: a.height });
     } catch {
       setError('Could not open the camera or photo library on this device.');
       setPhase('error');
@@ -71,7 +73,7 @@ export default function CaptureScreen() {
     setPhase('analyzing');
     setError(undefined);
     try {
-      const est = await estimateFood(state, { hint: fullHint, photoUri: photo?.uri, photoBase64: photo?.base64 ?? undefined, mediaType: photo?.mimeType, followUpAnswered: Boolean(extraHint) || answered });
+      const est = await estimateFood(state, { hint: fullHint, photoUri: photo?.uri, photoSize: photo ? { width: photo.width, height: photo.height } : undefined, followUpAnswered: Boolean(extraHint) || answered });
       if (extraHint) {
         setHint(fullHint);
         setAnswered(true);
@@ -111,10 +113,13 @@ export default function CaptureScreen() {
     <Screen maxWidth={980}>
       <PageHeader title="Log a meal" subtitle={phase === 'review' ? 'Review the estimate. Nothing is saved until you accept.' : 'Take or upload a photo and add a short hint.'} right={<Button title="Cancel" kind="ghost" onPress={() => router.back()} />} />
 
-      {!server ? (
-        <Banner kind="simulated" title="Simulated AI">
-          In this prototype the estimate comes from your hint matched against built-in reference foods. The photo itself is not analysed. Connect the server AI in Settings for real photo recognition.
+      {!realAI ? (
+        <Banner kind="simulated" title="Built-in estimates">
+          Without an AI key, the estimate comes from your hint matched against built-in reference foods. The photo itself is not analysed. Add an NVIDIA API key in Settings → AI for real photo recognition.
         </Banner>
+      ) : null}
+      {phase === 'review' && estimate?.aiNotice ? (
+        <Banner kind="warning" title="NVIDIA AI didn't work this time">{`${estimate.aiNotice} This is the built-in estimate from your hint instead. Check the items carefully.`}</Banner>
       ) : null}
 
       {phase === 'denied' && (
@@ -174,7 +179,7 @@ export default function CaptureScreen() {
 
       {phase === 'analyzing' && (
         <Stack gap={Space.md}>
-          <LoadingState label={server ? 'Identifying food and looking up nutrition sources…' : 'Matching your hint to reference foods (simulated)…'} lines={4} />
+          <LoadingState label={realAI ? 'Identifying food and looking up nutrition sources…' : 'Matching your hint to reference foods (built-in)…'} lines={4} />
           <Button title="Cancel" kind="ghost" onPress={() => setPhase('pick')} />
         </Stack>
       )}

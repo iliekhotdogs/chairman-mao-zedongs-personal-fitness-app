@@ -6,7 +6,7 @@ Last run: 2 Oct 2026, Windows 11, Node 24.19, Expo SDK 57.
 
 | Check | Result |
 | --- | --- |
-| Unit tests (`npm test`) | **76 / 76 pass**: food-confirmation rule, accept/reject/expiry of suggestions, one-day vs ongoing changes, permanent limitations not downgraded, notification cap (3/day across devices, quiet hours, dedupe, low priority), voice parsing, progression, activity de-duplication, LWW sync merge incl. tombstones and new-device defaults, plan generator (injuries, equipment, time, weekdays), coach safety replies. |
+| Unit tests (`npm test`) | **89 / 89 pass**: NVIDIA engine selection, JSON validation, fallback to built-in answers on errors, emergencies never sent to the model, separate photo and chat models; food-confirmation rule, accept/reject/expiry of suggestions, one-day vs ongoing changes, permanent limitations not downgraded, notification cap (3/day across devices, quiet hours, dedupe, low priority), voice parsing, progression, activity de-duplication, LWW sync merge incl. tombstones and new-device defaults, plan generator (injuries, equipment, time, weekdays), coach safety replies. |
 | TypeScript (`npm run typecheck`) | Pass |
 | ESLint (`npx expo lint`, React Compiler rules) | 0 problems |
 | `npx expo-doctor` | 21/21 checks pass |
@@ -26,9 +26,18 @@ Last run: 2 Oct 2026, Windows 11, Node 24.19, Expo SDK 57.
 
 **Not re-checked visually after the final audit fixes** (compiled, typechecked and linted only): Activity screen, routine editor, manual-entry screen, UI-states gallery, and Settings → Account section. The browser pane was suspended at the end of the session.
 
+## NVIDIA key (added 3 Oct 2026)
+
+- **Verified:**
+  - In the browser, a fake key was saved and survived a page reload. **Test connection** showed NVIDIA's own "rejected" error for both models.
+  - The coach then fell back to a built-in reply and showed the reason.
+  - Removing the key switched the app back to built-in answers.
+  - The dev-server pass-through reached NVIDIA, which returned a real 403 for the fake key.
+- **Not verified:** a real key with real replies (no key was available), photo upload format on NVIDIA's vision model, and the Android SecureStore path.
+
 ## Simulated (labelled in the app)
 
-- **AI**: photo recognition (hint-based only) and coach chat (rule-based).
+- **AI without a key**: photo recognition (hint-based only) and coach chat (rule-based).
 - **Health Connect**: generated phone + watch data.
 - **Notifications**: local browser/device notifications only. No remote push.
 

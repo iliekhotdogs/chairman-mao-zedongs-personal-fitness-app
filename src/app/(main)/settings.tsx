@@ -6,6 +6,8 @@ import { C, Space } from '@/constants/theme';
 import { Badge, Banner, Button, Card, Chip, Columns, Expandable, Field, IconButton, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, Toggle } from '@/components/ui';
 import { useStore, clearLocalData } from '@/store/AppStore';
 import { AccountCard } from '@/components/AccountCard';
+import { AiSettings } from '@/components/AiSettings';
+import { useAiEngine } from '@/hooks/useAiEngine';
 import { useAct, useToast } from '@/components/Toast';
 import { computeTargets, macrosFor } from '@/lib/nutrition/targets';
 import { latestWeight } from '@/lib/selectors';
@@ -35,6 +37,7 @@ export default function Settings() {
             <TargetsSection />
             <ProfileSection />
             <CoachSection />
+            <AiSettings />
           </Stack>,
           <Stack key="r" gap={Space.lg}>
             <NotificationsSection />
@@ -188,7 +191,7 @@ function ProfileSection() {
 }
 
 function CoachSection() {
-  const { state, sync } = useStore();
+  const { state } = useStore();
   const doAct = useAct();
   return (
     <Card style={{ gap: Space.md }}>
@@ -196,21 +199,6 @@ function CoachSection() {
       <Text variant="smallStrong">Tone</Text>
       <OptionCard title="Supportive coach" body="Encouraging and explains the why." selected={state.settings.coachTone === 'supportive'} onPress={() => doAct({ type: 'UPDATE_SETTINGS', patch: { coachTone: 'supportive' }, now: nowISO() })} />
       <OptionCard title="Direct trainer" body="Short, to the point, no fluff." selected={state.settings.coachTone === 'direct'} onPress={() => doAct({ type: 'UPDATE_SETTINGS', patch: { coachTone: 'direct' }, now: nowISO() })} />
-      <Text variant="smallStrong">AI engine</Text>
-      <Segmented
-        label="AI engine"
-        value={state.settings.aiMode}
-        onChange={(aiMode) => doAct({ type: 'UPDATE_SETTINGS', patch: { aiMode }, now: nowISO() })}
-        options={[{ value: 'simulated', label: 'Simulated (free)' }, { value: 'server', label: 'Server AI (Claude)' }]}
-      />
-      {state.settings.aiMode === 'server' && (!sync.configured || !sync.session) ? (
-        <Banner kind="warning" title="Server AI isn't available yet">
-          It needs the Supabase backend set up with an Anthropic API key, and you need to be signed in. Until then, photo estimates and chat will show an error. Switch back to Simulated to keep testing.
-        </Banner>
-      ) : null}
-      <Expandable title="About AI costs" icon="cash-outline">
-        <Muted variant="small">Simulated mode is free and runs on your device. Server AI calls Anthropic&apos;s Claude API from your backend and is billed per use by Anthropic (roughly a fraction of a cent to a few cents per photo or chat message, depending on length). Your API key stays on the server and is never in the app. See docs/AI_PROVIDER.md.</Muted>
-      </Expandable>
     </Card>
   );
 }
@@ -346,13 +334,14 @@ function PrivacySection() {
 
 function AboutSection() {
   const { state, today } = useStore();
+  const engine = useAiEngine();
   const doAct = useAct();
   const [confirm, setConfirm] = useState(false);
   return (
     <Card style={{ gap: Space.sm }}>
       <Text variant="h3">Prototype &amp; design review</Text>
       <Row wrap gap={6}>
-        <Badge kind="simulated" label="Simulated AI" />
+        {engine === 'simulated' ? <Badge kind="simulated" label="Built-in AI answers" /> : <Badge kind="info" label={engine === 'nvidia' ? 'NVIDIA AI' : 'Server AI'} />}
         <Badge kind="simulated" label="Simulated health sync" />
         <Badge kind="info" label="USDA lookup is live" />
       </Row>

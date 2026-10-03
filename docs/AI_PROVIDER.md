@@ -1,13 +1,29 @@
 # AI provider: what it does, what it costs, how it's protected
 
-## Current state
+## Current state: three engines
 
-The app ships with a **simulated** AI that runs on the device for free:
+The app picks one automatically (`aiEngine()` in `src/lib/ai/provider.ts`):
 
-- Food "photo" estimates come from your *hint* matched to built-in USDA-based reference foods. The image itself isn't analysed.
-- The coach recognises common requests ("20 minutes", "eating out", pain, goal or schedule changes, progress questions) and answers from your data with fixed rules.
+1. **Your NVIDIA key**, when one is saved in **Settings** → **AI**. It always wins.
+2. **Server (Claude)**, when chosen under **Settings** → **AI** → **Advanced** and you're signed in.
+3. **Built-in answers** otherwise. These are free and run on the device:
+   - Food "photo" estimates come from your *hint* matched to built-in USDA-based reference foods. The image itself isn't analysed.
+   - The coach recognises common requests ("20 minutes", "eating out", pain, goal or schedule changes, progress questions) and answers from your data with fixed rules.
+   - Results are labelled **Simulated** in the UI.
 
-Every simulated result is labelled **Simulated** in the UI.
+## NVIDIA (your own key, `src/lib/ai/nvidia.ts`)
+
+- OpenAI-compatible API at `integrate.api.nvidia.com/v1/chat/completions`.
+- Two separate models, both changeable in Settings:
+  - Photos: `meta/llama-3.2-90b-vision-instruct`
+  - Chat: `nvidia/llama-3.1-nemotron-70b-instruct`
+- **Photos:** each photo is shrunk to about 768 px before sending. The model returns JSON, which is validated field by field (absurd values are dropped). Each item is then checked against USDA FoodData Central. USDA values replace the AI's guess only when they roughly agree (within 0.4–2.5×). Restaurant items stay labelled **Visual estimate**, with a prompt to check the official menu, because there's no web search on this path.
+- **Coach:** the coach returns JSON with a reply and *intents*. Only known intents with sane values are kept, and they become the same Accept/Decline cards. A plain-text reply is shown without suggestions.
+- **Safety:** messages about urgent symptoms are never sent to the model; they always get the fixed safety text.
+- **Failure handling:** any NVIDIA failure falls back to the built-in answer, with a visible note explaining why.
+- **Key storage:** device only. Android uses SecureStore; web uses this browser's storage. The key is never synced or exported.
+- **Web:** NVIDIA has no CORS support, so the web app calls a pass-through in `metro.config.js`. This only works while `npx expo start` runs.
+- **Cost:** free development credits on build.nvidia.com. Not intended for a public production app.
 
 ## Server AI (implemented, not yet connected)
 

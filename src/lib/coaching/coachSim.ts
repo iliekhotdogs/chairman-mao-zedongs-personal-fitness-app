@@ -34,6 +34,11 @@ const AREAS: { area: BodyArea; re: RegExp }[] = [
 const URGENT = /\b(chest pain|chest tight|can'?t breathe|short of breath|faint|passed out|dizz)/;
 const RED_FLAGS = /\b(swell|swollen|numb|tingl|sharp|pop(ped)?|snap|can'?t (walk|bear|put weight|move)|fell|fall|bruis|locked|gave way|giving way|worse at night|radiat)/;
 
+/** Chest pain, fainting, trouble breathing: always answered by fixed safety text, never by an AI model. */
+export function isUrgentSymptom(message: string): boolean {
+  return URGENT.test(message.toLowerCase());
+}
+
 function tone(t: CoachTone, supportive: string, direct: string) {
   return t === 'supportive' ? supportive : direct;
 }

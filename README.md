@@ -2,7 +2,7 @@
 
 A fitness app for **Android and desktop browsers** that cuts down food-logging effort, tracks gym progress, and gives personalised coaching. Built with Expo, React Native and TypeScript, so one codebase serves both.
 
-> **Status: working prototype.** Everything runs locally today. AI analysis, health syncing, and push delivery are **simulated** (and labelled as such in the app) until the backend accounts are connected. See [docs/TESTING.md](docs/TESTING.md) for exactly what is real, simulated, or unverified.
+> **Status: working prototype.** Everything runs locally today. Health syncing and push delivery are **simulated** (and labelled as such in the app) until the backend accounts are connected. AI uses built-in answers until you paste an NVIDIA API key in **Settings** → **AI** (see [docs/SETUP.md](docs/SETUP.md) §5). See [docs/TESTING.md](docs/TESTING.md) for exactly what is real, simulated, or unverified.
 
 ## What's in it
 

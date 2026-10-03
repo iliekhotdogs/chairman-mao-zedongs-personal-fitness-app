@@ -13,6 +13,7 @@ import { showSystemNotification } from '@/lib/notifications/deliver';
 import { isSupabaseConfigured, supabase } from '@/lib/sync/supabase';
 import { EMPTY_CURSOR, syncNow, type SyncCursor } from '@/lib/sync/sync';
 import type { Proposal } from '@/lib/types';
+import { loadApiKey } from '@/lib/ai/apiKey';
 
 const STORAGE_KEY = 'fitapp:state:v1';
 const CURSOR_KEY = 'fitapp:sync-cursor:v1';
@@ -68,8 +69,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
   // ---- hydrate + persist ----
   useEffect(() => {
-    loadState()
-      .then((s) => s && dispatch({ type: 'HYDRATE', state: s }))
+    // the AI key lives in its own device-only storage; load it alongside the app data
+    Promise.all([loadState(), loadApiKey()])
+      .then(([s]) => s && dispatch({ type: 'HYDRATE', state: s }))
       .catch(() => setStorageError('Saved data could not be read. Starting fresh on this device.'))
       .finally(() => setHydrated(true));
   }, []);

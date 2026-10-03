@@ -129,6 +129,8 @@ export interface FoodEstimate {
   notes: string[];
   simulated: boolean;
   provider: string;
+  /** Set when the real AI failed and the built-in estimate was used instead. */
+  aiNotice?: string;
 }
 
 export interface WeightEntry extends SyncMeta {
@@ -303,5 +305,7 @@ export interface Settings {
   coachTone: CoachTone;
   notifications: NotificationPrefs;
   aiMode: 'simulated' | 'server';
+  /** NVIDIA model ids used when an NVIDIA API key is saved on this device. Missing = defaults. */
+  aiModels?: { vision: string; chat: string };
   updatedAt: ISODateTime;
 }
