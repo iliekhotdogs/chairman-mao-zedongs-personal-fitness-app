@@ -93,9 +93,10 @@ export function parseQuantity(text: string): QuantitySpec {
 }
 
 /** Grams for a quantity of a reference food, plus a human-readable portion label. */
-export function portionFor(ref: RefFood, q: QuantitySpec, preferLarge = false): { grams: number; label: string; assumed: boolean } {
+export function portionFor(ref: RefFood, q: QuantitySpec, opts: { preferLarge?: boolean; size?: string } = {}): { grams: number; label: string; assumed: boolean } {
   if (q.grams) return { grams: q.grams, label: `${Math.round(q.grams)} g`, assumed: false };
-  const portion = (preferLarge && ref.portions[1]) || ref.portions[0];
+  const sized = opts.size ? ref.portions.find((p) => p.label.toLowerCase().includes(opts.size!)) : undefined;
+  const portion = sized ?? ((opts.preferLarge && ref.portions[1]) || ref.portions[0]);
   if (q.count) {
     const unitPortion = q.unit ? ref.portions.find((p) => p.label.includes(q.unit!.replace(/s$/, ''))) ?? portion : portion;
     const base = unitPortion.label.match(/^(\d+(?:\.\d+)?)\s/);
@@ -103,7 +104,12 @@ export function portionFor(ref: RefFood, q: QuantitySpec, preferLarge = false): 
     const grams = (unitPortion.grams / perLabel) * q.count;
     return { grams, label: `${q.count} × ${unitPortion.label.replace(/^\d+(?:\.\d+)?\s/, '')}`, assumed: false };
   }
-  return { grams: portion.grams, label: portion.label, assumed: true };
+  return { grams: portion.grams, label: portion.label, assumed: !sized };
+}
+
+/** 'small' | 'medium' | 'regular' | 'large' if the phrase names a size. */
+export function sizeWord(text: string): string | undefined {
+  return text.toLowerCase().match(/\b(small|medium|regular|large)\b/)?.[1];
 }
 
 export function sumItems(items: Pick<FoodItem, 'calories' | 'proteinG' | 'carbsG' | 'fatG'>[]) {

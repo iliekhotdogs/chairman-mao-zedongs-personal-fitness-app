@@ -2,7 +2,7 @@ import type { Confidence, EstimateItem, FoodEntry, FoodEstimate, FoodItem, MealT
 import { newId } from '../id';
 import { nowISO } from '../dates';
 import { detectBrand } from './foodDb';
-import { bestMatch, itemFromRef, parseQuantity, portionFor } from './lookup';
+import { bestMatch, itemFromRef, parseQuantity, portionFor, sizeWord } from './lookup';
 
 /**
  * SIMULATED photo estimator used until a real vision AI provider is connected.
@@ -46,7 +46,8 @@ export function simulateFoodEstimate(input: { hint?: string; photoUri?: string }
     }
     if (items.some((i) => i.name === ref.name)) continue;
     const q = parseQuantity(seg);
-    const portion = portionFor(ref, q, Boolean(brand));
+    // Branded doubles are usually the larger 'premium' size unless the user says otherwise.
+    const portion = portionFor(ref, q, { size: sizeWord(seg), preferLarge: Boolean(brand) && ref.id === 'burger_double' });
     const item = itemFromRef(ref, portion.grams, portion.label);
     let confidence: Confidence = portion.assumed ? 'medium' : 'high';
     if (ref.generic) confidence = 'medium';
@@ -87,7 +88,8 @@ function minConfidence(a: Confidence, b: Confidence): Confidence {
 }
 
 function titleCase(s: string) {
-  return s.replace(/\b\w/g, (c) => c.toUpperCase());
+  // capitalise words only (a \b-based regex would turn "wendy's" into "Wendy'S")
+  return s.split(' ').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
 
 export class FoodConfirmationError extends Error {}

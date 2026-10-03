@@ -1,6 +1,6 @@
 import type { AppState } from '../state';
 import type { Insight, ISODate, Proposal, WorkoutSession } from '../types';
-import { addDays, daysBetween, lastNDates, nowISO, weekday } from '../dates';
+import { addDays, daysBetween, lastNDates, nowISO, toISODate, weekday } from '../dates';
 import { newId } from '../id';
 import { macrosFor, roundTo } from '../nutrition/targets';
 import { live, loggedDays, totalsForDay, dayTargets } from '../selectors';
@@ -103,7 +103,7 @@ export function trendAdjustment(state: AppState, today: ISODate): { proposal?: P
   if (pts.length < 6 || daysBetween(pts[0].date, pts[pts.length - 1].date) < 14) return {};
 
   // Don't change targets more than once every two weeks.
-  const recent = state.proposals.find((p) => (p.kind === 'target_change' || p.kind === 'goal_change') && (p.status === 'pending' || (p.status === 'accepted' && p.decidedAt && daysBetween(p.decidedAt.slice(0, 10), today) < 14)));
+  const recent = state.proposals.find((p) => (p.kind === 'target_change' || p.kind === 'goal_change') && (p.status === 'pending' || (p.status === 'accepted' && p.decidedAt && daysBetween(toISODate(new Date(p.decidedAt)), today) < 14)));
   if (recent) return {};
 
   const slope = weightSlopePerDay(pts);
@@ -181,7 +181,7 @@ export function proteinInsight(state: AppState, today: ISODate): Insight | undef
 
 export function loggingInsight(state: AppState, today: ISODate): Insight | undefined {
   if (!state.profile) return undefined;
-  const age = daysBetween(state.profile.createdAt.slice(0, 10), today);
+  const age = daysBetween(toISODate(new Date(state.profile.createdAt)), today);
   if (age < 4) return undefined;
   const n = loggedDays(state, 7, today);
   if (n >= 3) return undefined;
@@ -211,7 +211,9 @@ export function eveningInsight(state: AppState, today: ISODate, hour: number): I
 
 export function missedWorkoutInsight(state: AppState, today: ISODate): Insight | undefined {
   if (!state.plan) return undefined;
-  const past = lastNDates(7, addDays(today, -1));
+  // Only count days since the plan existed — a brand-new user hasn't "missed" anything.
+  const since = toISODate(new Date(state.plan.createdAt));
+  const past = lastNDates(7, addDays(today, -1)).filter((d) => d >= since);
   const planned = past.filter((d) => dayForWeekday(state.plan, weekday(d)));
   if (planned.length < 2) return undefined;
   const done = new Set(live(state.sessions).filter((s) => s.finishedAt).map((s) => s.date));

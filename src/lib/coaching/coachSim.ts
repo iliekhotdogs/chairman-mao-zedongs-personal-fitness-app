@@ -157,10 +157,10 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
 
   // 4. Goal change
   const goalMap: { re: RegExp; goal: GoalPriority }[] = [
-    { re: /\b(cut|lose fat|fat loss|lose weight|lean out)\b/, goal: 'fat_loss' },
-    { re: /\b(bulk|gain muscle|muscle gain|build muscle|put on size)\b/, goal: 'muscle_gain' },
-    { re: /\b(get stronger|strength)\b/, goal: 'strength' },
-    { re: /\b(maintain|maintenance)\b/, goal: 'maintenance' },
+    { re: /\b(cut|cutting|los(e|ing) (fat|weight)|fat loss|weight loss|lean(ing)? out)\b/, goal: 'fat_loss' },
+    { re: /\b(bulk|bulking|gain(ing)? muscle|muscle gain|build(ing)? (muscle|size)|put(ting)? on (size|muscle))\b/, goal: 'muscle_gain' },
+    { re: /\b(get(ting)? stronger|strength)\b/, goal: 'strength' },
+    { re: /\b(maintain|maintaining|maintenance)\b/, goal: 'maintenance' },
   ];
   if (profile && /\b(switch|change|start|want to|move to|focus on)\b/.test(t)) {
     const g = goalMap.find((x) => x.re.test(t));

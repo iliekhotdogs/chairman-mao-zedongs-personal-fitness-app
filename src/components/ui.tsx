@@ -279,7 +279,7 @@ export function Field({ label, hint, error, suffix, style, inputStyle, ...rest }
   );
 }
 
-export function NumberField({ value, onChange, ...rest }: Omit<React.ComponentProps<typeof Field>, 'value' | 'onChangeText'> & { value: number | undefined; onChange: (v: number | undefined) => void }) {
+export function NumberField({ value, onChange, ...rest }: Omit<React.ComponentProps<typeof Field>, 'value' | 'onChangeText' | 'onChange'> & { value: number | undefined; onChange: (v: number | undefined) => void }) {
   const [text, setText] = React.useState(value === undefined || Number.isNaN(value) ? '' : String(value));
   React.useEffect(() => {
     const parsed = parseFloat(text);
@@ -329,6 +329,7 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
             key={o.value}
             onPress={() => onChange(o.value)}
             accessibilityRole="radio"
+            accessibilityLabel={o.label}
             accessibilityState={{ selected: sel }}
             style={[styles.segmentItem, sel ? styles.segmentItemSel : null]}>
             <Text variant="smallStrong" color={sel ? C.text : C.textSecondary} numberOfLines={1}>
@@ -346,6 +347,7 @@ export function OptionCard({ title, body, selected, onPress, icon }: { title: st
     <Pressable
       onPress={onPress}
       accessibilityRole="radio"
+      accessibilityLabel={body ? `${title}. ${body}` : title}
       accessibilityState={{ selected: !!selected }}
       style={({ pressed }) => [styles.card, { padding: Space.md, flexDirection: 'row', gap: Space.md, alignItems: 'center', borderColor: selected ? C.primary : C.border, backgroundColor: selected ? C.primarySoft : C.surface, opacity: pressed ? 0.9 : 1 }]}>
       {icon ? <Ionicons name={icon} size={22} color={selected ? C.primary : C.textSecondary} /> : null}
