@@ -33,7 +33,9 @@ export function useSpeech(onText: (text: string) => void) {
   const [error, setError] = useState<string>();
   const rec = useRef<Recognition | null>(null);
   const cb = useRef(onText);
-  cb.current = onText;
+  useEffect(() => {
+    cb.current = onText;
+  }, [onText]);
 
   useEffect(() => () => rec.current?.abort(), []);
 

@@ -77,15 +77,17 @@ export function MacroBars({ eaten, target }: { eaten: MacroTargets; target: Macr
 
 /** Shows a food photo; resolves private cloud photos to a short-lived signed URL. */
 export function PhotoThumb({ uri, size = 56 }: { uri?: string; size?: number }) {
-  const [src, setSrc] = useState<string | undefined>(uri && !uri.startsWith('storage:') ? uri : undefined);
+  // cloud photos resolve to a short-lived signed URL; local photos are used directly
+  const [signed, setSigned] = useState<{ uri: string; url?: string }>();
   useEffect(() => {
+    if (!uri?.startsWith('storage:')) return;
     let alive = true;
-    if (uri?.startsWith('storage:')) signedPhotoUrl(uri).then((u) => alive && setSrc(u));
-    else setSrc(uri);
+    signedPhotoUrl(uri).then((url) => alive && setSigned({ uri, url }));
     return () => {
       alive = false;
     };
   }, [uri]);
+  const src = uri?.startsWith('storage:') ? (signed?.uri === uri ? signed.url : undefined) : uri;
   if (!src) {
     return (
       <View style={{ width: size, height: size, borderRadius: Radius.md, backgroundColor: C.surfaceAlt, alignItems: 'center', justifyContent: 'center' }}>

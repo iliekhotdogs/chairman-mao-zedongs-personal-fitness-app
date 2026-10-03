@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, TextInput, View } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C, Radius, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, EmptyState, IconButton, Muted, Row, Segmented, Stack, Text, ErrorState } from '@/components/ui';
+import { Badge, Banner, Card, Chip, EmptyState, IconButton, Muted, Row, Segmented, Stack, Text, ErrorState } from '@/components/ui';
 import { InsightCard, ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
@@ -112,7 +112,7 @@ export default function Coach() {
       <View style={{ borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.surface, padding: Space.md, gap: Space.sm }}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
           {PROMPTS.map((p) => (
-            <Chip key={p} label={p} onPress={() => send(p)} />
+            <Chip key={p} label={p} asButton onPress={() => send(p)} />
           ))}
         </ScrollView>
         <Row gap={Space.sm}>

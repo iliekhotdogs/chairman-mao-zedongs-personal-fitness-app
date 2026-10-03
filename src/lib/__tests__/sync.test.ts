@@ -35,6 +35,14 @@ describe('cross-device merge (last write wins)', () => {
     expect(merged.foodLog).toHaveLength(1);
   });
 
+  it("a new device's default settings never overwrite the user's synced settings", () => {
+    const fresh = emptyState('new-device', T2);
+    const remote = { ...fresh.settings, units: 'metric' as const, coachTone: 'direct' as const, updatedAt: T1 };
+    const merged = mergeRemote(fresh, [{ collection: 'singleton', id: 'settings', data: remote, updated_at: T1, deleted: false }]);
+    expect(merged.settings.units).toBe('metric');
+    expect(merged.settings.coachTone).toBe('direct');
+  });
+
   it('collects only local changes since the cursor', () => {
     const s = { ...emptyState('a', T1), foodLog: [entry('old', 1, T1), entry('new', 2, T2)] };
     const rows = localChanges(s, '2026-10-02T10:30:00.000Z');

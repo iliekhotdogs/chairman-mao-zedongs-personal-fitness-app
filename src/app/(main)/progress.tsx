@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import { View } from 'react-native';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
@@ -45,7 +46,9 @@ function Calories() {
       <Card style={{ gap: Space.md }}>
         <Row>
           <Text variant="h3" style={{ flex: 1 }}>Daily calories</Text>
-          <Segmented label="Range" value={range} onChange={setRange} options={[{ value: '14', label: '14 days' }, { value: '30', label: '30 days' }]} />
+          <View style={{ width: 190 }}>
+            <Segmented label="Range" value={range} onChange={setRange} options={[{ value: '14', label: '14 days' }, { value: '30', label: '30 days' }]} />
+          </View>
         </Row>
         {logged.length === 0 ? (
           <EmptyState icon="bar-chart-outline" title="No data yet" body="Log meals for a few days to see your trend." />

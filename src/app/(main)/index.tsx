@@ -10,7 +10,7 @@ import { WeightSheet } from '@/components/WeightSheet';
 import { useStore } from '@/store/AppStore';
 import { useLayout } from '@/hooks/useLayout';
 import { activeSession, activityForDay, latestWeight, pendingProposals, remainingForDay, sessionForDay, workoutForDay } from '@/lib/selectors';
-import { exerciseName } from '@/lib/workouts/exercises';
+import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { dayMinutes } from '@/lib/workouts/generator';
 import { displayWeight } from '@/lib/units';
 
@@ -35,7 +35,7 @@ export default function Dashboard() {
         <Text variant="h3" style={{ flex: 1 }}>Nutrition today</Text>
         {rem.target.adjustment ? <Badge kind="saved" label={`+${rem.target.adjustment.calorieDelta} kcal today`} /> : null}
       </Row>
-      <Row wrap gap={Space.xl} align="center">
+      <Row wrap gap={Space.xl} align="center" style={isPhone ? { justifyContent: 'center' } : undefined}>
         <CaloriesRing eaten={rem.eaten.calories} target={rem.target.calories} size={isPhone ? 140 : 156} />
         <MacroBars eaten={rem.eaten} target={rem.target} />
       </Row>
@@ -146,7 +146,7 @@ function WorkoutCard() {
       <Stack gap={2}>
         {day.exercises.slice(0, 5).map((e, i) => (
           <Muted key={i} variant="small">
-            {exerciseName(e.exerciseId)} · {e.sets}×{e.repMin}–{e.repMax}
+            {exerciseName(e.exerciseId)} · {formatPrescription(e)}
           </Muted>
         ))}
         {day.exercises.length > 5 ? <Muted variant="small">+{day.exercises.length - 5} more</Muted> : null}

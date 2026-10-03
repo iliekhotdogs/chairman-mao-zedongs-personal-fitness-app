@@ -93,6 +93,15 @@ describe('proposal approval rules', () => {
     expect(next.proposals).toHaveLength(1);
   });
 
+  it('a temporary limitation never shortens a permanent one', () => {
+    const s = withTargets();
+    const perm = { ...s, profile: { ...s.profile!, limitations: [{ area: 'knee' as const }] } };
+    const p = proposal({ kind: 'add_limitation', scope: 'ongoing', change: { type: 'add_limitation', limitation: { area: 'knee', until: '2026-10-16' } } });
+    const next = reducer({ ...perm, proposals: [p] }, { type: 'ACCEPT_PROPOSAL', id: 'p1', now: NOW, today: TODAY });
+    expect(next.profile!.limitations).toEqual([{ area: 'knee' }]);
+    expect(next.proposals[0].status).toBe('accepted');
+  });
+
   it('a today-only workout swap does not change the saved plan', () => {
     const s = withTargets();
     const day = { ...s.plan!.days[0], id: 'short', name: 'Short' };

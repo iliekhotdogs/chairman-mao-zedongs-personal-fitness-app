@@ -90,18 +90,26 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
           );
         }
       }
-      proposals.push(
-        mkProposal({
-          kind: 'add_limitation',
-          scope: 'ongoing',
-          title: `Note a ${area.replace('_', ' ')} limitation for 2 weeks`,
-          summary: 'New plans and suggestions will avoid heavy loading of this area until it expires.',
-          rationale: ['You can remove it any time in Settings → Profile.', 'This does not change your current saved plan unless you also generate a new plan.'],
-          change: { type: 'add_limitation', limitation: { area, note: message.slice(0, 120), until: addDays(today, 14) } },
-          dedupeKey: `limit-${area}-${today}`,
-        }),
-      );
-      lines.push(proposals.length > 1 ? "\nI've prepared two optional changes below. Nothing changes unless you accept." : '\nOptional change below. Nothing changes unless you accept.');
+      // Don't propose a temporary note if this area is already covered (it would shorten a permanent one).
+      const until = addDays(today, 14);
+      const existing = profile.limitations.find((l) => l.area === area);
+      const covered = existing && (!existing.until || existing.until >= until);
+      if (!covered) {
+        proposals.push(
+          mkProposal({
+            kind: 'add_limitation',
+            scope: 'ongoing',
+            title: `Note a ${area.replace('_', ' ')} limitation for 2 weeks`,
+            summary: 'New plans and suggestions will avoid heavy loading of this area until it expires.',
+            rationale: ['You can remove it any time in Settings → Profile.', 'This does not change your current saved plan unless you also generate a new plan.'],
+            change: { type: 'add_limitation', limitation: { area, note: message.slice(0, 120), until } },
+            dedupeKey: `limit-${area}-${today}`,
+          }),
+        );
+      } else {
+        lines.push(`• Your profile already notes a ${area.replace('_', ' ')} limitation, so your plan avoids heavy loading there.`);
+      }
+      if (proposals.length) lines.push(proposals.length > 1 ? "\nI've prepared two optional changes below. Nothing changes unless you accept." : '\nOptional change below. Nothing changes unless you accept.');
     } else if (!area) {
       lines.push('\nWhich area is it (knee, shoulder, lower back…)? Then I can suggest exercise swaps.');
     }
@@ -216,7 +224,7 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
     }
     const proposals: Proposal[] = [];
     if (day) {
-      const lighter = { ...day, id: newId(), name: `${day.name} (lighter)`, exercises: day.exercises.map((e) => ({ ...e, sets: Math.max(2, e.sets - 1), note: 'Leave 3+ reps in reserve today' })) };
+      const lighter = { ...day, id: newId(), sourceDayId: day.sourceDayId ?? day.id, name: `${day.name} (lighter)`, exercises: day.exercises.map((e) => ({ ...e, sets: Math.max(2, e.sets - 1), note: 'Leave 3+ reps in reserve today' })) };
       proposals.push(
         mkProposal({
           kind: 'today_workout_swap',

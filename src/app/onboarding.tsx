@@ -9,12 +9,13 @@ import { useAct } from '@/components/Toast';
 import type { BodyArea, DailyActivity, Equipment, Experience, GoalPriority, Profile, Sex, UnitSystem } from '@/lib/types';
 import { computeTargets, macrosFor } from '@/lib/nutrition/targets';
 import { generatePlan, dayMinutes } from '@/lib/workouts/generator';
-import { exerciseName } from '@/lib/workouts/exercises';
+import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { nowISO, toISODate, WEEKDAY_SHORT } from '@/lib/dates';
 import { newId } from '@/lib/id';
 import { cmToFtIn, ftInToCm, kgToLb, lbToKg, round } from '@/lib/units';
 import { buildSampleState } from '@/lib/sampleData';
 import { useLayout } from '@/hooks/useLayout';
+import { AccountCard } from '@/components/AccountCard';
 
 const STEPS = ['Welcome', 'Goal', 'About you', 'Training', 'Lifestyle', 'Your plan'];
 
@@ -45,7 +46,7 @@ function Why({ children }: { children: string }) {
 }
 
 export default function Onboarding() {
-  const { state, today } = useStore();
+  const { state, today, sync } = useStore();
   const doAct = useAct();
   const { isPhone } = useLayout();
   const [step, setStep] = useState(0);
@@ -159,6 +160,12 @@ export default function Onboarding() {
             <Button title="Get started" size="lg" icon="arrow-forward" onPress={next} />
             <Button title="Explore with sample data" kind="secondary" size="lg" icon="flask-outline" onPress={loadSample} />
           </Row>
+          {sync.configured ? (
+            <Expandable title="I already have an account" icon="person-circle-outline" initiallyOpen={!!sync.session}>
+              <AccountCard intro="Sign in and your profile, plan and history download from the cloud. No need to set up again." />
+              {sync.session && !state.profile ? <Muted variant="small">Signed in. Downloading your data… If you are new, tap Get started.</Muted> : null}
+            </Expandable>
+          ) : null}
           <Banner kind="simulated" title="Prototype">
             AI analysis, nutrition lookups, health syncing and notifications are simulated in this version and labelled where they appear.
           </Banner>
@@ -305,7 +312,7 @@ export default function Onboarding() {
                     <Text variant="smallStrong">
                       {d.weekday !== undefined ? WEEKDAY_SHORT[d.weekday] : ''} · {d.name} <Muted variant="small">(~{dayMinutes(d)} min)</Muted>
                     </Text>
-                    <Muted variant="small">{d.exercises.map((e) => `${exerciseName(e.exerciseId)} ${e.sets}×${e.repMin}–${e.repMax}`).join(' · ')}</Muted>
+                    <Muted variant="small">{d.exercises.map((e) => `${exerciseName(e.exerciseId)} ${formatPrescription(e)}`).join(' · ')}</Muted>
                   </Stack>
                 ))}
                 <Expandable title="Why this plan?" icon="help-circle-outline">

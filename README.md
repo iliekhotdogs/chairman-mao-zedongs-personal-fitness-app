@@ -1,56 +1,51 @@
-# Welcome to your Expo app 👋
+# FitCoach
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+A fitness app for **Android and desktop browsers** that cuts down food-logging effort, tracks gym progress, and gives personalised coaching. Built with Expo, React Native and TypeScript, so one codebase serves both.
 
-## Get started
+> **Status: working prototype.** Everything runs locally today. AI analysis, health syncing, and push delivery are **simulated** (and labelled as such in the app) until the backend accounts are connected. See [docs/TESTING.md](docs/TESTING.md) for exactly what is real, simulated, or unverified.
 
-1. Install dependencies
+## What's in it
 
-   ```bash
-   npm install
-   ```
+| Area | What works now |
+| --- | --- |
+| Onboarding | Goals, body stats, experience, equipment, schedule, diet, injuries. Explains why each is asked. Proposes calorie/macro targets and a workout plan for approval. |
+| Dashboard | Calories and macros remaining, today's workout, daily activity, body weight, and at most 1–2 coaching items. Separate phone and desktop layouts. |
+| Photo food logging | Photo + optional hint → itemised estimate with portions, sources, confidence, and follow-up questions. **Nothing is logged until you press Accept.** Manual entry, editing and deletion included. |
+| Adaptive nutrition | Weight-trend target adjustments and one-day activity bonuses (no double counting; wearable estimates discounted). Accept/Decline; today-only vs ongoing clearly marked. |
+| Workouts | Generated plans (goal/experience/equipment/schedule/injuries/time), your own routines, fast manual logging, voice/text logging with review, double-progression suggestions that update the plan only after approval. |
+| AI coach | Chat that uses your data; handles "20 minutes", "eating out", "my knee hurts"; safety rules for pain; supportive or direct tone. |
+| Progress | Calories vs target, weight trend with 7-day average, estimated 1RM per lift, activity review with de-duplication. |
+| Notifications | Preferences, quiet hours, **hard cap of 3/day across devices** (enforced locally and in the database). |
+| Privacy | Per-user Row Level Security, private photo storage, data export, delete device data, delete cloud data. |
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Run it (Windows)
 
 ```bash
-npm run reset-project
+npm install
+npm run web
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+Then open http://localhost:8081. On the first screen choose **Explore with sample data** to see every feature with three weeks of realistic data, or **Get started** to onboard as yourself.
 
-### Other setup steps
+On an Android phone: install **Expo Go** from the Play Store, run `npx expo start`, and scan the QR code (the phone and PC must be on the same Wi-Fi).
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+```bash
+npm test          # 74 unit tests for the business rules
+npm run typecheck # TypeScript
+```
 
-## Learn more
+## Project layout
 
-To learn more about developing your project with Expo, look at the following resources:
+```
+src/app/            screens (Expo Router). (main)/ = signed-in area with the nav shell
+src/components/     UI kit (ui.tsx), charts, coaching cards, food editors
+src/lib/            all business logic, no UI: nutrition, workouts, coaching, sync, notifications
+src/lib/reducer.ts  the single place state changes; enforces confirmation/approval rules
+src/store/          persistence, coaching engine scheduler, cloud sync
+supabase/           database schema (RLS) + Edge Functions (AI, notification cap)
+docs/               setup, AI provider & costs, wearables, testing report, release checklist
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+## Next steps
 
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+See [docs/SETUP.md](docs/SETUP.md) to connect accounts (Supabase, AI provider) and [docs/RELEASE.md](docs/RELEASE.md) for Google Play preparation.

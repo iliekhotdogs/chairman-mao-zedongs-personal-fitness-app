@@ -281,12 +281,14 @@ export function Field({ label, hint, error, suffix, style, inputStyle, ...rest }
 
 export function NumberField({ value, onChange, ...rest }: Omit<React.ComponentProps<typeof Field>, 'value' | 'onChangeText' | 'onChange'> & { value: number | undefined; onChange: (v: number | undefined) => void }) {
   const [text, setText] = React.useState(value === undefined || Number.isNaN(value) ? '' : String(value));
-  React.useEffect(() => {
+  // Sync the text when the value is changed from outside (e.g. +/- buttons), without an effect.
+  const [prev, setPrev] = React.useState(value);
+  if (value !== prev) {
+    setPrev(value);
     const parsed = parseFloat(text);
     if (value !== undefined && parsed !== value) setText(String(value));
     if (value === undefined && text !== '' && !Number.isNaN(parsed)) setText('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
+  }
   return (
     <Field
       keyboardType="decimal-pad"
@@ -303,12 +305,12 @@ export function NumberField({ value, onChange, ...rest }: Omit<React.ComponentPr
   );
 }
 
-export function Chip({ label, selected, onPress, icon }: { label: string; selected?: boolean; onPress?: () => void; icon?: IconName }) {
+export function Chip({ label, selected, onPress, icon, asButton }: { label: string; selected?: boolean; onPress?: () => void; icon?: IconName; asButton?: boolean }) {
   return (
     <Pressable
       onPress={onPress}
-      accessibilityRole="checkbox"
-      accessibilityState={{ checked: !!selected }}
+      accessibilityRole={asButton ? 'button' : 'checkbox'}
+      accessibilityState={asButton ? undefined : { checked: !!selected }}
       accessibilityLabel={label}
       style={({ pressed }) => [styles.chip, selected ? { backgroundColor: C.primarySoft, borderColor: C.primary } : null, pressed ? { opacity: 0.8 } : null]}>
       {icon ? <Ionicons name={icon} size={15} color={selected ? C.primary : C.textSecondary} /> : null}

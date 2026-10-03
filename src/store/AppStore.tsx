@@ -62,7 +62,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   const [storageError, setStorageError] = useState<string>();
   const [today, setToday] = useState(toISODate());
   const stateRef = useRef(state);
-  stateRef.current = state;
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // ---- hydrate + persist ----
   useEffect(() => {
@@ -92,9 +94,13 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // ---- adaptive coaching engine + notifications ----
+  const sessionRef = useRef<Session | null>(null);
+  const coaching = useRef(false);
   const runCoach = useCallback(async () => {
     const s = stateRef.current;
-    if (!s.profile) return;
+    if (!s.profile || coaching.current) return;
+    coaching.current = true;
+    try {
     const now = new Date();
     const date = toISODate(now);
     dispatch({ type: 'EXPIRE_PROPOSALS', today: date, now: nowISO() });
@@ -111,6 +117,16 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     const latest = stateRef.current;
     for (const c of candidates) {
       if (!decide(c, latest.settings.notifications, latest.notifications, date, minutes).send) continue;
+      // Signed in: the server enforces the 3/day cap across ALL devices before we notify.
+      const sb = supabase();
+      if (sb && sessionRef.current) {
+        try {
+          const { data, error } = await sb.functions.invoke('notify', { body: { title: c.title, body: c.body, dedupe_key: c.dedupeKey, local_date: date, push: false } });
+          if (!error && data && data.allowed === false) continue;
+        } catch {
+          /* offline: fall back to the synced local cap */
+        }
+      }
       const shown = await showSystemNotification(c.title, c.body);
       const stamp = nowISO();
       dispatch({
@@ -118,6 +134,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         record: { id: newId(), date, sentAt: stamp, category: c.category, title: c.title, body: c.body, dedupeKey: c.dedupeKey, deviceId: latest.deviceId, delivered: shown ? 'system' : 'in_app', updatedAt: stamp },
       });
       break;
+    }
+    } finally {
+      coaching.current = false;
     }
   }, []);
 
@@ -135,7 +154,10 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
   // ---- cloud sync (optional) ----
   const [session, setSession] = useState<Session | null>(null);
-  const [syncStatus, setSyncStatus] = useState<SyncStatus>(isSupabaseConfigured ? 'signed_out' : 'local_only');
+  useEffect(() => {
+    sessionRef.current = session;
+  }, [session]);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSyncAt, setLastSyncAt] = useState<string>();
   const [syncError, setSyncError] = useState<string>();
   const syncing = useRef(false);
@@ -172,15 +194,12 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   }, [session]);
 
   useEffect(() => {
-    if (!isSupabaseConfigured) return;
-    if (!session) {
-      setSyncStatus('signed_out');
-      return;
-    }
-    void doSync();
+    if (!isSupabaseConfigured || !session) return;
+    const first = setTimeout(() => void doSync(), 0); // sync right after sign-in
     const i = setInterval(() => void doSync(), 120_000);
     const sub = RNAppState.addEventListener('change', (s) => s === 'active' && void doSync());
     return () => {
+      clearTimeout(first);
       clearInterval(i);
       sub.remove();
     };
@@ -200,7 +219,8 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       today,
       act,
       storageError,
-      sync: { configured: isSupabaseConfigured, session, status: syncStatus, lastSyncAt, error: syncError, syncNow: doSync },
+      // status is derived so it can't go stale when the user signs out
+      sync: { configured: isSupabaseConfigured, session, status: !isSupabaseConfigured ? 'local_only' : !session ? 'signed_out' : syncStatus, lastSyncAt, error: syncError, syncNow: doSync },
     }),
     [state, hydrated, today, act, storageError, session, syncStatus, lastSyncAt, syncError, doSync],
   );

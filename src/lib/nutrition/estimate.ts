@@ -9,7 +9,9 @@ import { bestMatch, itemFromRef, parseQuantity, portionFor, sizeWord } from './l
  * It cannot see the photo — it reads the user's hint and matches it against the
  * built-in reference table. Results are labelled as simulated in the UI.
  */
-export function simulateFoodEstimate(input: { hint?: string; photoUri?: string }): FoodEstimate {
+const NEGATION = /^(no|without|hold the|minus|skip the)\b\s*/i;
+
+export function simulateFoodEstimate(input: { hint?: string; photoUri?: string; followUpAnswered?: boolean }): FoodEstimate {
   const hint = input.hint?.trim() ?? '';
   const base = {
     id: newId(),
@@ -38,7 +40,13 @@ export function simulateFoodEstimate(input: { hint?: string; photoUri?: string }
 
   const items: EstimateItem[] = [];
   const unmatched: string[] = [];
+  const removed: string[] = [];
   for (const seg of segments.length ? segments : [hint]) {
+    // "no cheese", "without mayo" are modifiers, not extra foods
+    if (NEGATION.test(seg)) {
+      removed.push(seg.replace(NEGATION, ''));
+      continue;
+    }
     const ref = bestMatch(seg);
     if (!ref) {
       unmatched.push(seg);
@@ -66,7 +74,10 @@ export function simulateFoodEstimate(input: { hint?: string; photoUri?: string }
   let followUpQuestion: string | undefined;
   if (brand) {
     notes.push(`Looks like a ${titleCase(brand)} item. Official restaurant nutrition is used when the server nutrition service is connected; this simulated estimate uses generic fast-food reference values instead.`);
-    followUpQuestion = `Which exact ${titleCase(brand)} menu item and size was it? (e.g. "Dave's Double, no cheese")`;
+    if (!input.followUpAnswered) followUpQuestion = `Which exact ${titleCase(brand)} menu item and size was it? (e.g. "Dave's Double, no cheese")`;
+  }
+  if (removed.length) {
+    notes.push(`Noted: ${removed.map((r) => `no ${r}`).join(', ')}. Generic values may still include it, so lower the calories with Edit if needed.`);
   }
   if (unmatched.length) {
     notes.push(`Couldn't match: ${unmatched.map((u) => `"${u}"`).join(', ')}. Add it manually or rephrase.`);

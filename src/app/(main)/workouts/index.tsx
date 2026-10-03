@@ -8,7 +8,7 @@ import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
 import { live, activeSession } from '@/lib/selectors';
 import { generatePlan, dayMinutes } from '@/lib/workouts/generator';
-import { exerciseName } from '@/lib/workouts/exercises';
+import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { formatDateLabel, nowISO, WEEKDAY_SHORT } from '@/lib/dates';
 import { displayWeight } from '@/lib/units';
 import type { WorkoutPlan } from '@/lib/types';
@@ -71,7 +71,7 @@ export default function Workouts() {
                     <Row key={i}>
                       <Text variant="small" style={{ flex: 1 }}>{exerciseName(e.exerciseId)}</Text>
                       <Muted variant="small">
-                        {e.sets}×{e.repMin}–{e.repMax}
+                        {formatPrescription(e)}
                         {e.targetWeightKg !== undefined && e.targetWeightKg > 0 ? ` @ ${displayWeight(e.targetWeightKg, units)}` : ''}
                       </Muted>
                     </Row>
@@ -149,7 +149,7 @@ export default function Workouts() {
             {preview.days.map((d) => (
               <Stack key={d.id} gap={2}>
                 <Text variant="smallStrong">{d.weekday !== undefined ? `${WEEKDAY_SHORT[d.weekday]} · ` : ''}{d.name}</Text>
-                <Muted variant="small">{d.exercises.map((e) => `${exerciseName(e.exerciseId)} ${e.sets}×${e.repMin}–${e.repMax}`).join(' · ')}</Muted>
+                <Muted variant="small">{d.exercises.map((e) => `${exerciseName(e.exerciseId)} ${formatPrescription(e)}`).join(' · ')}</Muted>
               </Stack>
             ))}
             {preview.rationale.map((r) => (

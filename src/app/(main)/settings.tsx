@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 import { C, Space } from '@/constants/theme';
 import { Badge, Banner, Button, Card, Chip, Columns, Expandable, Field, IconButton, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, Toggle } from '@/components/ui';
 import { useStore, clearLocalData } from '@/store/AppStore';
+import { AccountCard } from '@/components/AccountCard';
 import { useAct, useToast } from '@/components/Toast';
 import { computeTargets, macrosFor } from '@/lib/nutrition/targets';
 import { latestWeight } from '@/lib/selectors';
@@ -37,7 +38,7 @@ export default function Settings() {
           </Stack>,
           <Stack key="r" gap={Space.lg}>
             <NotificationsSection />
-            <AccountSection />
+            <AccountCard />
             <PrivacySection />
             <AboutSection />
           </Stack>,
@@ -276,64 +277,6 @@ function QuietHours({ start, end, onSave }: { start: string; end: string; onSave
   );
 }
 
-function AccountSection() {
-  const { sync } = useStore();
-  const toast = useToast();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string>();
-
-  const auth = async (mode: 'in' | 'up') => {
-    const sb = supabase();
-    if (!sb) return;
-    setBusy(true);
-    setErr(undefined);
-    const { error } = mode === 'in' ? await sb.auth.signInWithPassword({ email, password }) : await sb.auth.signUp({ email, password });
-    setBusy(false);
-    if (error) setErr(error.message);
-    else {
-      setPassword('');
-      toast(mode === 'in' ? 'Signed in' : 'Account created. Check your email if confirmation is required.');
-    }
-  };
-
-  return (
-    <Card style={{ gap: Space.sm }}>
-      <Text variant="h3">Account &amp; sync</Text>
-      {!sync.configured ? (
-        <>
-          <Badge kind="neutral" label="This device only" icon="phone-portrait-outline" />
-          <Muted variant="small">Cloud accounts aren&apos;t set up yet, so your data is saved only on this device/browser. Once the Supabase backend is configured (see docs/SETUP.md), you can sign in here and your data syncs between Android and the website.</Muted>
-        </>
-      ) : sync.session ? (
-        <>
-          <Row wrap gap={6}>
-            <Badge kind={sync.status === 'error' ? 'danger' : 'saved'} label={sync.status === 'syncing' ? 'Syncing…' : sync.status === 'error' ? 'Sync error' : 'Synced'} />
-            <Muted variant="small">{sync.session.user.email}</Muted>
-          </Row>
-          {sync.error ? <Text variant="small" color={C.danger}>{sync.error}</Text> : null}
-          {sync.lastSyncAt ? <Muted variant="small">Last sync {new Date(sync.lastSyncAt).toLocaleTimeString()}</Muted> : null}
-          <Row gap={Space.sm}>
-            <Button title="Sync now" kind="secondary" size="sm" icon="refresh" onPress={() => sync.syncNow()} />
-            <Button title="Sign out" kind="ghost" size="sm" onPress={() => supabase()?.auth.signOut()} />
-          </Row>
-        </>
-      ) : (
-        <>
-          <Muted variant="small">Sign in to sync your data between your phone and computer.</Muted>
-          <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
-          <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry autoComplete="password" />
-          {err ? <Text variant="small" color={C.danger}>{err}</Text> : null}
-          <Row gap={Space.sm}>
-            <Button title="Sign in" loading={busy} onPress={() => auth('in')} disabled={!email || password.length < 8} />
-            <Button title="Create account" kind="secondary" onPress={() => auth('up')} disabled={!email || password.length < 8 || busy} />
-          </Row>
-        </>
-      )}
-    </Card>
-  );
-}
 
 function PrivacySection() {
   const { state, sync } = useStore();
@@ -359,9 +302,10 @@ function PrivacySection() {
   const wipe = async () => {
     try {
       if (confirm === 'cloud' && sync.session) await deleteCloudData(sync.session.user.id);
+      // sign out before clearing, so background sync can't re-upload or re-download meanwhile
+      if (sync.session) await supabase()?.auth.signOut();
       await clearLocalData();
       doAct({ type: 'REPLACE_STATE', state: emptyState(newId(), nowISO()) });
-      if (confirm === 'cloud') await supabase()?.auth.signOut();
       setConfirm(null);
       router.replace('/onboarding');
     } catch (e) {
@@ -392,7 +336,7 @@ function PrivacySection() {
           {confirm === 'cloud'
             ? 'This permanently removes your synced records and food photos from the server, then clears this device and signs you out. Other signed-in devices will keep only their local copy until they are cleared.'
             : sync.session
-              ? 'This clears this device. Your cloud copy stays and will download again when you sign in.'
+              ? 'This clears this device and signs you out. Your cloud copy stays and downloads again when you sign back in.'
               : 'This permanently removes your profile, logs and history from this device. Consider exporting first.'}
         </Muted>
       </Sheet>

@@ -13,6 +13,7 @@ import { confirmEstimate, defaultMealForTime, FoodConfirmationError } from '@/li
 import { sumItems } from '@/lib/nutrition/lookup';
 import type { Confidence, EstimateItem, FoodEstimate, FoodItem, MealType } from '@/lib/types';
 import { useLayout } from '@/hooks/useLayout';
+import { persistPhoto } from '@/lib/photo';
 
 type Phase = 'pick' | 'analyzing' | 'review' | 'error' | 'denied';
 
@@ -42,6 +43,7 @@ export default function CaptureScreen() {
   const [answer, setAnswer] = useState('');
   const [error, setError] = useState<string>();
   const [addOpen, setAddOpen] = useState(false);
+  const [answered, setAnswered] = useState(false);
   const server = state.settings.aiMode === 'server';
 
   const pick = async (source: 'camera' | 'library') => {
@@ -69,8 +71,11 @@ export default function CaptureScreen() {
     setPhase('analyzing');
     setError(undefined);
     try {
-      const est = await estimateFood(state, { hint: fullHint, photoUri: photo?.uri, photoBase64: photo?.base64 ?? undefined, mediaType: photo?.mimeType });
-      if (extraHint) setHint(fullHint);
+      const est = await estimateFood(state, { hint: fullHint, photoUri: photo?.uri, photoBase64: photo?.base64 ?? undefined, mediaType: photo?.mimeType, followUpAnswered: Boolean(extraHint) || answered });
+      if (extraHint) {
+        setHint(fullHint);
+        setAnswered(true);
+      }
       setEstimate(est);
       setItems(est.items);
       setAnswer('');
@@ -81,10 +86,11 @@ export default function CaptureScreen() {
     }
   };
 
-  const accept = () => {
+  const accept = async () => {
     if (!estimate) return;
     try {
-      const entry = confirmEstimate({ estimate, items, meal, date, userAccepted: true });
+      const photoUri = await persistPhoto(estimate.photoUri, estimate.id);
+      const entry = confirmEstimate({ estimate: { ...estimate, photoUri }, items, meal, date, userAccepted: true });
       if (doAct({ type: 'LOG_FOOD', entry }, `Logged ${Math.round(sumItems(items).calories)} kcal`)) router.replace('/food');
     } catch (e) {
       setError(e instanceof FoodConfirmationError ? e.message : 'Could not log this meal.');
@@ -92,6 +98,7 @@ export default function CaptureScreen() {
   };
 
   const discard = () => {
+    setAnswered(false);
     setEstimate(null);
     setItems([]);
     setPhase('pick');

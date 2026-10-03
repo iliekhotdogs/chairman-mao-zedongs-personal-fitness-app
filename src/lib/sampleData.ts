@@ -5,7 +5,7 @@ import { addDays, nowISO, toISODate, weekday } from './dates';
 import { newId } from './id';
 import { computeTargets } from './nutrition/targets';
 import { FOOD_DB } from './nutrition/foodDb';
-import { itemFromRef } from './nutrition/lookup';
+import { itemFromRef, scaleItem } from './nutrition/lookup';
 import { generatePlan, dayForWeekday } from './workouts/generator';
 import { simulatedHealthConnectPull } from './activity/activity';
 import { EXERCISE_BY_ID } from './workouts/exercises';
@@ -91,6 +91,16 @@ export function buildSampleState(deviceId: string, today = toISODate()): AppStat
       const combo = m.options[Math.floor(r() * m.options.length)];
       foodLog.push(makeEntry(date, m.meal, combo, m.meal === 'breakfast' ? 8 : m.meal === 'lunch' ? 13 : m.meal === 'snack' ? 16 : 19));
     }
+  }
+
+  // Scale past days to land within ±5% of target (good adherence), so the weight-trend rule can act.
+  for (let i = 14; i >= 1; i--) {
+    const date = addDays(today, -i);
+    const day = foodLog.filter((e) => e.date === date);
+    const total = day.reduce((s, e) => s + e.items.reduce((t, it) => t + it.calories, 0), 0);
+    if (!total) continue;
+    const k = (targets.calories * (0.95 + r() * 0.1)) / total;
+    for (const e of day) e.items = e.items.map((it) => (it.grams ? scaleItem(it, it.grams * k) : it));
   }
 
   // Workouts: follow the plan on scheduled days over the last 3 weeks, with progression.

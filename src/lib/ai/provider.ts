@@ -6,7 +6,7 @@ import { supabase } from '../sync/supabase';
 import { newId } from '../id';
 import { nowISO, addDays } from '../dates';
 import { remainingForDay, workoutForDay, latestWeight, live } from '../selectors';
-import { exerciseName } from '../workouts/exercises';
+import { exerciseName, formatPrescription } from '../workouts/exercises';
 
 /**
  * Two interchangeable AI back-ends:
@@ -20,7 +20,7 @@ import { exerciseName } from '../workouts/exercises';
 
 export class AIUnavailableError extends Error {}
 
-export async function estimateFood(state: AppState, input: { hint?: string; photoUri?: string; photoBase64?: string; mediaType?: string }): Promise<FoodEstimate> {
+export async function estimateFood(state: AppState, input: { hint?: string; photoUri?: string; photoBase64?: string; mediaType?: string; followUpAnswered?: boolean }): Promise<FoodEstimate> {
   if (state.settings.aiMode !== 'server') {
     await delay(700); // let the UI show its loading state realistically
     return simulateFoodEstimate(input);
@@ -113,7 +113,7 @@ export function coachContext(state: AppState, today: ISODate) {
     units: state.settings.units,
     tone: state.settings.coachTone,
     nutrition_today: rem ? { target: rem.target.calories, eaten: rem.eaten.calories, remaining: rem.remaining } : undefined,
-    workout_today: day ? { name: day.name, exercises: day.exercises.map((e) => `${exerciseName(e.exerciseId)} ${e.sets}×${e.repMin}-${e.repMax}`) } : null,
+    workout_today: day ? { name: day.name, exercises: day.exercises.map((e) => `${exerciseName(e.exerciseId)} ${formatPrescription(e)}`) } : null,
     latest_weight_kg: latestWeight(state)?.weightKg,
     weights_14d: live(state.weights).filter((w) => w.date > addDays(today, -14)).map((w) => [w.date, w.weightKg]),
     sessions_14d: live(state.sessions).filter((s) => s.finishedAt && s.date > addDays(today, -14)).length,

@@ -12,7 +12,7 @@ const Ctx = createContext<(msg: string, kind?: Kind) => void>(() => {});
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toast, setToast] = useState<{ msg: string; kind: Kind } | null>(null);
-  const opacity = useRef(new Animated.Value(0)).current;
+  const [opacity] = useState(() => new Animated.Value(0));
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const insets = useSafeAreaInsets();
 

@@ -16,6 +16,7 @@ const newer = (a?: string, b?: string) => (a ?? '') > (b ?? '');
 
 /** Last-write-wins merge of remote rows into local state. Pure; easy to test. */
 export function mergeRemote(local: AppState, rows: RemoteRecord[]): AppState {
+  if (!rows.length) return local;
   const next: AppState = { ...local };
   for (const c of SYNCED_COLLECTIONS) {
     const incoming = rows.filter((r) => r.collection === c);

@@ -48,18 +48,23 @@ describe('weight trend adjustment', () => {
   it('suggests lowering calories when fat loss is too slow and logging is good', () => {
     const s = sample();
     const r = trendAdjustment(s, TODAY);
-    // sample data has ~-0.1%/week with good logging
-    expect(r.proposal?.kind ?? r.insight?.dedupeKey).toBeTruthy();
-    if (r.proposal) {
-      expect(r.proposal.scope).toBe('ongoing');
-      const next = (r.proposal.change as { type: 'target_change'; next: { calories: number } }).next.calories;
-      expect(next).toBe(s.targets!.calories - 150);
-    }
+    // sample data: ~-0.1%/week (too slow for fat loss) with good logging and adherence
+    expect(r.proposal).toBeDefined();
+    expect(r.proposal!.scope).toBe('ongoing');
+    const next = (r.proposal!.change as { type: 'target_change'; next: { calories: number } }).next.calories;
+    expect(next).toBe(s.targets!.calories - 150);
   });
 
   it('does not change targets without enough weigh-ins', () => {
     const s = { ...sample(), weights: sample().weights.slice(-3) };
     expect(trendAdjustment(s, TODAY)).toEqual({});
+  });
+
+  it('respects a declined target change for a week', () => {
+    const s = sample();
+    const first = trendAdjustment(s, TODAY).proposal!;
+    const declined = { ...first, status: 'rejected' as const, decidedAt: `${TODAY}T12:00:00` };
+    expect(trendAdjustment({ ...s, proposals: [declined] }, '2026-10-05')).toEqual({});
   });
 
   it('does not re-propose while a target change is pending', () => {

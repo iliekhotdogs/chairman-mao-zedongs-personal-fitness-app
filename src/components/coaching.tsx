@@ -5,7 +5,7 @@ import { C, Space } from '@/constants/theme';
 import { Badge, Button, Card, Expandable, IconButton, Muted, Row, Stack, Text } from './ui';
 import { useAct } from './Toast';
 import { useStore } from '@/store/AppStore';
-import { exerciseName } from '@/lib/workouts/exercises';
+import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { nowISO } from '@/lib/dates';
 
 const STATUS = {
@@ -104,7 +104,7 @@ function ChangeDetails({ proposal }: { proposal: Proposal }) {
         <Text variant="smallStrong">{c.day.name}</Text>
         {c.day.exercises.map((e, i) => (
           <Muted key={i} variant="small">
-            {exerciseName(e.exerciseId)} · {e.sets} × {e.repMin}–{e.repMax}
+            {exerciseName(e.exerciseId)} · {formatPrescription(e, ' × ')}
           </Muted>
         ))}
       </Card>

@@ -87,9 +87,10 @@ export function generatePlan(profile: Profile, today: string): WorkoutPlan {
         continue;
       }
       used.add(pick.id);
-      exercises.push({ exerciseId: pick.id, ...prescription(profile.goal, profile.experience, slot.role) });
+      const rx = prescription(profile.goal, profile.experience, slot.role);
+      exercises.push({ exerciseId: pick.id, ...rx, ...(pick.timed ? { repMin: 30, repMax: 45 } : {}) });
     }
-    const day: WorkoutDay = { id: newId(), name: t.name, focus: t.focus, weekday: weekdays[i], exercises };
+    const day: WorkoutDay = { id: newId(), name: t.name, focus: focusFor(exercises) || t.focus, weekday: weekdays[i], exercises };
     return fitToTime(day, profile.sessionMinutes);
   });
 
@@ -104,6 +105,12 @@ export function generatePlan(profile: Profile, today: string): WorkoutPlan {
 
   const now = nowISO();
   return { id: newId(), name: `${split} plan`, source: 'ai_generated', days: workoutDays, rationale: [...rationale, ...notes], createdAt: now, updatedAt: now };
+}
+
+/** Focus label from what the day actually contains (templates can change after limitation swaps). */
+export function focusFor(exercises: PlannedExercise[]): string {
+  const names = [...new Set(exercises.map((e) => EXERCISE_BY_ID[e.exerciseId]?.primary).filter(Boolean))].slice(0, 3) as string[];
+  return names.map((n) => n.replace('_', ' ').replace(/^\w/, (c) => c.toUpperCase())).join(' · ');
 }
 
 /** Drop accessories (then reduce sets) until the session fits the time budget. */
@@ -127,7 +134,7 @@ export function condensedDay(day: WorkoutDay, minutes: number): WorkoutDay {
   const compounds = day.exercises.filter((p) => EXERCISE_BY_ID[p.exerciseId]?.compound);
   const pick = (compounds.length ? compounds : day.exercises).slice(0, minutes <= 20 ? 3 : 4);
   const exercises = pick.map((p) => ({ ...p, sets: 2, restSec: 60, note: 'Superset with the next exercise to save time' }));
-  return { ...day, id: newId(), name: `${day.name} (${minutes}-min version)`, exercises };
+  return { ...day, id: newId(), sourceDayId: day.sourceDayId ?? day.id, name: `${day.name} (${minutes}-min version)`, exercises };
 }
 
 /** Replace exercises that load a painful area with the closest safe alternative, or drop them. */
@@ -150,7 +157,7 @@ export function swapForArea(day: WorkoutDay, area: BodyArea, equipment: Equipmen
       changes.push(`Removed ${ex.name}`);
     }
   }
-  return { day: { ...day, id: newId(), name: `${day.name} (${area.replace('_', ' ')}-friendly)`, exercises }, changes };
+  return { day: { ...day, id: newId(), sourceDayId: day.sourceDayId ?? day.id, name: `${day.name} (${area.replace('_', ' ')}-friendly)`, exercises }, changes };
 }
 
 /** The plan day scheduled for a weekday, if any. */

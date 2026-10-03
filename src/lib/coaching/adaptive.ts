@@ -105,6 +105,9 @@ export function trendAdjustment(state: AppState, today: ISODate): { proposal?: P
   // Don't change targets more than once every two weeks.
   const recent = state.proposals.find((p) => (p.kind === 'target_change' || p.kind === 'goal_change') && (p.status === 'pending' || (p.status === 'accepted' && p.decidedAt && daysBetween(toISODate(new Date(p.decidedAt)), today) < 14)));
   if (recent) return {};
+  // A declined target change is respected for a week before the coach asks again.
+  const declined = state.proposals.find((p) => p.kind === 'target_change' && p.status === 'rejected' && p.decidedAt && daysBetween(toISODate(new Date(p.decidedAt)), today) < 7);
+  if (declined) return {};
 
   const slope = weightSlopePerDay(pts);
   const latest = pts[pts.length - 1].weightKg;
@@ -113,7 +116,7 @@ export function trendAdjustment(state: AppState, today: ISODate): { proposal?: P
   const logged = loggedDays(state, 14, today);
   const loggedDates = lastNDates(14, today).filter((d) => totalsForDay(state, d).calories > 0);
   const avgIntake = loggedDates.length ? Math.round(loggedDates.reduce((s, d) => s + totalsForDay(state, d).calories, 0) / loggedDates.length) : 0;
-  const rateLabel = `${slope * 7 >= 0 ? '+' : ''}${displayWeight(slope * 7, state.settings.units)}/week (${ratePct >= 0 ? '+' : ''}${ratePct.toFixed(2)}% of body weight)`;
+  const rateLabel = `${slope * 7 >= 0 ? '+' : ''}${displayWeight(slope * 7, state.settings.units, 2)}/week (${ratePct >= 0 ? '+' : ''}${ratePct.toFixed(2)}% of body weight)`;
 
   let delta = 0;
   if (ratePct > band.max) delta = -band.high;
@@ -203,7 +206,7 @@ export function eveningInsight(state: AppState, today: ISODate, hour: number): I
   if (left < 700 || protLeft < 40) return undefined;
   return insight({
     dedupeKey: `evening-${today}`,
-    title: `${Math.round(left)} kcal and ${Math.round(protLeft)} g protein left today`,
+    title: `${Math.round(left).toLocaleString()} kcal and ${Math.round(protLeft)} g protein left today`,
     body: 'A protein-forward dinner would close most of the gap. Under-eating repeatedly can slow training progress.',
     priority: 2,
   });

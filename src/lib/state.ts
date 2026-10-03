@@ -35,13 +35,16 @@ export interface AppState {
   deviceId: string;
 }
 
-export function defaultSettings(now: string): Settings {
+/** Timestamp older than any real edit, so defaults never overwrite synced settings. */
+export const EPOCH = '1970-01-01T00:00:00.000Z';
+
+export function defaultSettings(): Settings {
   return {
     units: 'imperial',
     coachTone: 'supportive',
     notifications: { enabled: false, quietStart: '21:30', quietEnd: '07:30', categories: { nutrition: true, workouts: true, checkins: true } },
     aiMode: 'simulated',
-    updatedAt: now,
+    updatedAt: EPOCH,
   };
 }
 
@@ -61,7 +64,7 @@ export function emptyState(deviceId: string, now: string): AppState {
     dismissedInsights: [],
     chat: [],
     notifications: [],
-    settings: defaultSettings(now),
+    settings: defaultSettings(),
     deviceId,
   };
 }

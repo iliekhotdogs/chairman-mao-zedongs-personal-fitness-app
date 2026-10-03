@@ -9,7 +9,7 @@ import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
 import { useSpeech } from '@/hooks/useSpeech';
 import { activeSession, live, workoutForDay } from '@/lib/selectors';
-import { EXERCISES, exerciseName, EXERCISE_BY_ID } from '@/lib/workouts/exercises';
+import { EXERCISES, exerciseName, EXERCISE_BY_ID, formatPrescription } from '@/lib/workouts/exercises';
 import { recommendNext } from '@/lib/workouts/progression';
 import { parseSetUtterance, type ParsedSet } from '@/lib/workouts/voiceParser';
 import { progressionProposal } from '@/lib/coaching/adaptive';
@@ -38,9 +38,9 @@ export default function SessionScreen() {
 }
 
 function plannedDayFor(state: AppState, s: WorkoutSession): WorkoutDay | undefined {
-  const fromPlan = state.plan?.days.find((d) => d.id === s.dayId);
-  if (fromPlan) return fromPlan;
-  return live(state.workoutOverrides).find((o) => o.date === s.date && o.day.name === s.name)?.day;
+  // an approved one-day version (e.g. 20-minute) wins over the full plan day
+  const override = live(state.workoutOverrides).find((o) => o.date === s.date && o.day.name === s.name)?.day;
+  return override ?? state.plan?.days.find((d) => d.id === s.dayId);
 }
 
 function StartView({ preferredDayId }: { preferredDayId?: string }) {
@@ -55,8 +55,9 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
     const session: WorkoutSession = {
       id: newId(),
       date: today,
-      planId: day && !fromOverride ? state.plan?.id : undefined,
-      dayId: day && !fromOverride ? day.id : undefined,
+      // one-day variants stay linked to their plan day so progression still works
+      planId: day && (!fromOverride || state.plan?.days.some((d) => d.id === day.sourceDayId)) ? state.plan?.id : undefined,
+      dayId: day ? (fromOverride ? day.sourceDayId : day.id) : undefined,
       name: day?.name ?? 'Freestyle workout',
       startedAt: now,
       sets: [],
@@ -77,7 +78,7 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
           <Text variant="h2">{first.name}</Text>
           {first.exercises.map((e, i) => (
             <Muted key={i} variant="small">
-              {exerciseName(e.exerciseId)} · {e.sets}×{e.repMin}–{e.repMax}
+              {exerciseName(e.exerciseId)} · {formatPrescription(e)}
             </Muted>
           ))}
           <Button title="Start" size="lg" icon="play" onPress={() => start(first, overridden && !preferred)} />
@@ -224,10 +225,13 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: {
   const units = state.settings.units;
   const ex = EXERCISE_BY_ID[exerciseId];
   const sets = session.sets.filter((s) => s.exerciseId === exerciseId);
-  const others = live(state.sessions).filter((s) => s.id !== session.id);
-  const rec = planned ? recommendNext(planned, others, units) : undefined;
+  const finished = Boolean(session.finishedAt);
+  // during a workout: advice for this session; after finishing: advice for next time
+  const history = finished ? live(state.sessions) : live(state.sessions).filter((s) => s.id !== session.id);
+  const rec = planned ? recommendNext(planned, history, units) : undefined;
   const last = sets[sets.length - 1];
   const bodyweight = ex?.loadType === 'bodyweight';
+  const timed = Boolean(ex?.timed);
   const [weight, setWeight] = useState<number | undefined>(last ? weightValue(last.weightKg, units) : rec?.weightKg !== undefined ? weightValue(rec.weightKg, units) : bodyweight ? 0 : undefined);
   const [reps, setReps] = useState<number>(last?.reps ?? planned?.repMax ?? 8);
   const [editing, setEditing] = useState<LoggedSet | null>(null);
@@ -247,7 +251,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: {
           <Text variant="h3">{exerciseName(exerciseId)}</Text>
           {planned ? (
             <Muted variant="small">
-              Plan: {planned.sets} × {planned.repMin}–{planned.repMax} · rest {Math.round(planned.restSec / 60 * 10) / 10} min
+              Plan: {formatPrescription(planned, ' × ')} · rest {Math.round(planned.restSec / 60 * 10) / 10} min
               {planned.note ? ` · ${planned.note}` : ''}
             </Muted>
           ) : (
@@ -258,7 +262,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: {
       </Row>
       {rec ? (
         <Row align="flex-start" gap={6}>
-          <Badge kind="suggestion" label="Suggested" />
+          <Badge kind="suggestion" label={finished ? 'Next time' : 'Suggested'} />
           <Muted variant="small" style={{ flex: 1 }}>
             {rec.weightKg !== undefined && !bodyweight ? `${displayWeight(rec.weightKg, units)} × ${rec.repMin}–${rec.repMax}. ` : ''}
             {rec.reason}
@@ -269,7 +273,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: {
         <Row key={s.id} style={{ paddingVertical: 2 }}>
           <Text variant="small" color={C.textSecondary} style={{ width: 44 }}>Set {i + 1}</Text>
           <Text variant="bodyStrong" style={{ flex: 1 }}>
-            {bodyweight && s.weightKg === 0 ? 'Bodyweight' : displayWeight(s.weightKg, units)} × {s.reps}
+            {bodyweight && s.weightKg === 0 ? 'Bodyweight' : displayWeight(s.weightKg, units)} × {s.reps}{timed ? ' s' : ''}
           </Text>
           {s.via === 'voice' ? <Ionicons name="mic-outline" size={14} color={C.textMuted} accessibilityLabel="Logged by voice" /> : null}
           <IconButton icon="create-outline" label={`Edit set ${i + 1}`} size={17} color={C.textSecondary} onPress={() => setEditing(s)} />
@@ -279,8 +283,8 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: {
       <Row wrap gap={Space.md} style={{ marginTop: 4 }}>
         <NumberField label={`Weight (${weightUnit(units)})`} value={weight} onChange={setWeight} style={{ width: 130 }} hint={bodyweight ? '0 = bodyweight' : undefined} />
         <Stack gap={6}>
-          <Text variant="smallStrong">Reps</Text>
-          <Stepper value={reps} onChange={setReps} min={1} max={100} />
+          <Text variant="smallStrong">{timed ? 'Seconds' : 'Reps'}</Text>
+          <Stepper value={reps} onChange={setReps} min={1} max={timed ? 300 : 100} step={timed ? 5 : 1} />
         </Stack>
         <View style={{ justifyContent: 'flex-end', paddingBottom: bodyweight ? 22 : 0 }}>
           <Row gap={4}>
@@ -290,7 +294,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: {
           </Row>
         </View>
       </Row>
-      <EditSetSheet set={editing} onClose={() => setEditing(null)} sessionId={session.id} />
+      <EditSetSheet key={editing?.id ?? 'none'} set={editing} onClose={() => setEditing(null)} sessionId={session.id} />
     </Card>
   );
 }
@@ -299,14 +303,9 @@ function EditSetSheet({ set, onClose, sessionId }: { set: LoggedSet | null; onCl
   const { state } = useStore();
   const doAct = useAct();
   const units = state.settings.units;
-  const [w, setW] = useState<number | undefined>();
-  const [r, setR] = useState(8);
-  React.useEffect(() => {
-    if (set) {
-      setW(weightValue(set.weightKg, units));
-      setR(set.reps);
-    }
-  }, [set, units]);
+  // remounted per set (key below), so initial state comes straight from the set
+  const [w, setW] = useState<number | undefined>(set ? weightValue(set.weightKg, units) : undefined);
+  const [r, setR] = useState(set?.reps ?? 8);
   return (
     <Sheet
       visible={!!set}

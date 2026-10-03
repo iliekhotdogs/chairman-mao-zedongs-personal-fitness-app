@@ -42,12 +42,18 @@ export const EXERCISES: Exercise[] = [
   { id: 'box_squat_bw', name: 'Bodyweight Box Squat', aliases: ['box squat', 'bodyweight squat', 'air squat'], primary: 'quads', pattern: 'squat', equipment: ANY, loadType: 'bodyweight', stresses: ['knee'], compound: true },
   { id: 'glute_bridge_bw', name: 'Single-leg Glute Bridge', aliases: ['single leg bridge', 'single leg glute bridge'], primary: 'glutes', pattern: 'hinge', equipment: ANY, loadType: 'bodyweight', stresses: [], compound: false },
   // Core / carry
-  { id: 'plank', name: 'Plank', aliases: ['plank', 'planks'], primary: 'core', pattern: 'core', equipment: ANY, loadType: 'bodyweight', stresses: [], compound: false },
+  { id: 'plank', name: 'Plank', aliases: ['plank', 'planks'], primary: 'core', pattern: 'core', equipment: ANY, loadType: 'bodyweight', stresses: [], compound: false, timed: true },
   { id: 'dead_bug', name: 'Dead Bug', aliases: ['dead bug', 'deadbug'], primary: 'core', pattern: 'core', equipment: ANY, loadType: 'bodyweight', stresses: [], compound: false },
-  { id: 'farmer_carry', name: "Farmer's Carry", aliases: ['farmer carry', 'farmers walk', "farmer's walk"], primary: 'full_body', pattern: 'carry', equipment: DB, loadType: 'dumbbell', stresses: ['wrist'], compound: true },
+  { id: 'farmer_carry', name: "Farmer's Carry", aliases: ['farmer carry', 'farmers walk', "farmer's walk"], primary: 'full_body', pattern: 'carry', equipment: DB, loadType: 'dumbbell', stresses: ['wrist'], compound: true, timed: true },
 ];
 
 export const EXERCISE_BY_ID: Record<string, Exercise> = Object.fromEntries(EXERCISES.map((e) => [e.id, e]));
+
+/** "3×8–12" or "3×30–45 s" for timed holds. */
+export function formatPrescription(p: { exerciseId: string; sets: number; repMin: number; repMax: number }, sep = '×'): string {
+  const timed = EXERCISE_BY_ID[p.exerciseId]?.timed;
+  return `${p.sets}${sep}${p.repMin}–${p.repMax}${timed ? ' s' : ''}`;
+}
 
 export function exerciseName(id: string): string {
   return EXERCISE_BY_ID[id]?.name ?? id;

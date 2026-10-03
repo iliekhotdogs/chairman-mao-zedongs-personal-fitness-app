@@ -150,6 +150,8 @@ export interface Exercise {
   loadType: 'barbell' | 'dumbbell' | 'machine' | 'cable' | 'bodyweight';
   stresses: BodyArea[]; // body areas loaded heavily; used to avoid aggravating limitations
   compound: boolean;
+  /** held for time (plank, carries): rep ranges are seconds */
+  timed?: boolean;
 }
 
 export interface PlannedExercise {
@@ -168,6 +170,8 @@ export interface WorkoutDay {
   focus: string;
   weekday?: number;
   exercises: PlannedExercise[];
+  /** for one-day variants (short/lighter/swapped): the plan day they were derived from */
+  sourceDayId?: string;
 }
 
 export interface WorkoutPlan extends SyncMeta {

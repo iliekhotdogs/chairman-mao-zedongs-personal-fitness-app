@@ -78,6 +78,13 @@ describe('simulated photo estimate', () => {
     expect(e.items[0].source.label).toMatch(/not official/);
   });
 
+  it('treats "no cheese" as a modifier, and does not re-ask an answered question', () => {
+    const e = simulateFoodEstimate({ hint: "Wendy's double burger, Dave's Double, no cheese", followUpAnswered: true });
+    expect(e.items.map((i) => i.name)).toEqual(['Double cheeseburger (generic fast food)']);
+    expect(e.notes.join(' ')).toMatch(/no cheese/);
+    expect(e.followUpQuestion).toBeUndefined();
+  });
+
   it('reports unmatched foods', () => {
     const e = simulateFoodEstimate({ hint: 'chicken and zorblax' });
     expect(e.items).toHaveLength(1);

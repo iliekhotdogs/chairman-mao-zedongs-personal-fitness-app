@@ -83,8 +83,8 @@ export function checkAction(state: AppState, action: Action): void {
     case 'ADD_SETS':
     case 'UPDATE_SET': {
       const sets = action.type === 'ADD_SETS' ? action.sets : [action.set];
-      if (sets.some((s) => !Number.isFinite(s.weightKg) || s.weightKg < 0 || !Number.isInteger(s.reps) || s.reps <= 0 || s.reps > 100)) {
-        throw new RuleViolation('Each set needs a weight (0 or more) and 1–100 reps.');
+      if (sets.some((s) => !Number.isFinite(s.weightKg) || s.weightKg < 0 || !Number.isInteger(s.reps) || s.reps <= 0 || s.reps > 300)) {
+        throw new RuleViolation('Each set needs a weight (0 or more) and 1–300 reps (or seconds for holds).');
       }
       return;
     }
@@ -275,13 +275,17 @@ function applyProposal(state: AppState, id: string, now: string): AppState {
       const ov: WorkoutOverride = { id: newId(), date: c.date, day: c.day, proposalId: p.id, updatedAt: now };
       return { ...state, proposals, workoutOverrides: [...others, ov] };
     }
-    case 'add_limitation':
+    case 'add_limitation': {
       if (!state.profile) return { ...state, proposals };
+      const current = state.profile.limitations.find((l) => l.area === c.limitation.area);
+      // never shorten an existing permanent (or longer) limitation
+      if (current && (!current.until || (c.limitation.until && current.until >= c.limitation.until))) return { ...state, proposals };
       return {
         ...state,
         proposals,
         profile: { ...state.profile, limitations: [...state.profile.limitations.filter((l) => l.area !== c.limitation.area), c.limitation], updatedAt: now },
       };
+    }
     case 'new_plan':
       return { ...state, proposals, plan: c.plan };
     default:
