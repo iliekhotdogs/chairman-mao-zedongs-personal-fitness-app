@@ -144,3 +144,15 @@ describe('workout logging', () => {
     expect(reducer(b, { type: 'LOG_WEIGHT', entry: { id: 'w3', date: TODAY, weightKg: 5, updatedAt: NOW } })).toBe(b);
   });
 });
+
+describe('clearing the coach chat', () => {
+  it('hides every message and keeps tombstones so the deletion syncs', () => {
+    const s0 = emptyState('d', '2026-10-02T08:00:00.000Z');
+    const msg = (id: string) => ({ id, role: 'user' as const, text: 'hi', createdAt: '2026-10-02T08:00:00.000Z', updatedAt: '2026-10-02T08:00:00.000Z' });
+    const s1 = reducer(s0, { type: 'ADD_CHAT', messages: [msg('a'), msg('b')] });
+    const s2 = reducer(s1, { type: 'CLEAR_CHAT', now: '2026-10-02T09:00:00.000Z' });
+    expect(s2.chat.filter((m) => !m.deleted)).toHaveLength(0);
+    expect(s2.chat.every((m) => m.updatedAt === '2026-10-02T09:00:00.000Z')).toBe(true);
+    expect(() => checkAction(s1, { type: 'CLEAR_CHAT', now: '2026-10-02T09:00:00.000Z' })).not.toThrow();
+  });
+});

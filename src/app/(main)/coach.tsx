@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, TextInput, View } from 'rea
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C, Radius, Space } from '@/constants/theme';
-import { Badge, Banner, Card, Chip, EmptyState, IconButton, Muted, Row, Segmented, Stack, Text, ErrorState } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, EmptyState, IconButton, Muted, Row, Segmented, Sheet, Stack, Text, ErrorState } from '@/components/ui';
 import { InsightCard, ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
 import { useAct, useToast } from '@/components/Toast';
@@ -26,6 +26,7 @@ export default function Coach() {
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<{ msg: string; retry: string } | null>(null);
   const [tab, setTab] = useState<'chat' | 'suggestions'>('chat');
+  const [confirmClear, setConfirmClear] = useState(false);
   const scroll = useRef<ScrollView>(null);
   const messages = visibleChat(state);
   const pending = pendingProposals(state);
@@ -144,6 +145,7 @@ export default function Coach() {
             <Text variant="h1" accessibilityRole="header">Coach</Text>
             <Muted variant="small">Suggestions are never applied without your OK.</Muted>
           </Stack>
+          {messages.length ? <IconButton icon="trash-outline" label="Clear chat" color={C.textSecondary} onPress={() => setConfirmClear(true)} /> : null}
           {!isPhone ? <View style={{ width: 240 }}>{toneSwitch}</View> : null}
         </Row>
         {isPhone ? toneSwitch : null}
@@ -161,6 +163,27 @@ export default function Coach() {
       ) : (
         <ScrollView contentContainerStyle={{ padding: Space.lg, paddingBottom: 80 }}>{suggestions}</ScrollView>
       )}
+      <Sheet
+        visible={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        title="Clear the chat?"
+        footer={
+          <Row gap={Space.sm}>
+            <Button title="Cancel" kind="secondary" style={{ flex: 1 }} onPress={() => setConfirmClear(false)} />
+            <Button
+              title="Clear chat"
+              kind="danger"
+              style={{ flex: 1 }}
+              onPress={() => {
+                doAct({ type: 'CLEAR_CHAT', now: nowISO() }, 'Chat cleared');
+                setError(null);
+                setConfirmClear(false);
+              }}
+            />
+          </Row>
+        }>
+        <Muted>This deletes all coach messages on this device, and on your other devices if you&apos;re signed in. Suggestions waiting for your decision stay in the Suggestions list.</Muted>
+      </Sheet>
     </KeyboardAvoidingView>
   );
 }
