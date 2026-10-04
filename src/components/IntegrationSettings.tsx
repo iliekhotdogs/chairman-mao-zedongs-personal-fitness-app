@@ -31,7 +31,7 @@ export function IntegrationSettings() {
     <Card style={{ gap: Space.sm }}>
       <Text variant="h3">API connections</Text>
       <Badge kind="info" label="Managed by FitCoach" />
-      <Muted variant="small">Your account uses the app&apos;s Supabase project. OpenRouter, NVIDIA, and USDA keys are kept on the server; you do not need to enter API keys.</Muted>
+      <Muted variant="small">Your account uses the app&apos;s Supabase project. Groq and USDA keys are kept on the server; you do not need to enter API keys.</Muted>
     </Card>
   );
 
@@ -112,7 +112,7 @@ export function IntegrationSettings() {
           <Text variant="bodyStrong">USDA FoodData Central</Text>
           <Badge kind={usdaSource === 'DEMO_KEY' ? 'neutral' : 'info'} label={usdaSource} />
         </Row>
-        <Muted variant="small">Used for manual food search and to source NVIDIA photo estimates. The demo key has strict rate limits.</Muted>
+        <Muted variant="small">Used for manual food search and to source AI photo estimates. The demo key has strict rate limits.</Muted>
         {editingUsda || !config.usdaKey ? (
           <Stack gap={Space.sm}>
             <Field label="USDA API key" value={usdaKey} onChangeText={setUsdaKey} secureTextEntry autoCapitalize="none" autoCorrect={false} />
@@ -134,7 +134,7 @@ export function IntegrationSettings() {
         {testResult ? <Banner kind={testResult.includes(' works:') ? 'success' : 'warning'}>{testResult}</Banner> : null}
       </Stack>
 
-      <Muted variant="small">For a shared-account build, put NVIDIA and OpenRouter keys in Supabase Edge Function secrets; see docs/SETUP.md.</Muted>
+      <Muted variant="small">For a shared-account build, put the Groq key in Supabase Edge Function secrets; see docs/SETUP.md.</Muted>
     </Card>
   );
 }
