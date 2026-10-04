@@ -115,11 +115,11 @@ export default function CaptureScreen() {
 
       {!realAI ? (
         <Banner kind="simulated" title="Built-in estimates">
-          Without a Supabase connection, the estimate comes from your hint matched against built-in reference foods. The photo itself is not analysed. Sign in to use shared NVIDIA photo analysis.
+          Without a Supabase connection, the estimate comes from your hint matched against built-in reference foods. The photo itself is not analysed. Sign in to use shared photo analysis.
         </Banner>
       ) : null}
       {phase === 'review' && estimate?.aiNotice ? (
-        <Banner kind="warning" title="NVIDIA AI didn't work this time">{`${estimate.aiNotice} This is the built-in estimate from your hint instead. Check the items carefully.`}</Banner>
+        <Banner kind="warning" title="Photo AI didn't work this time">{`${estimate.aiNotice} This is the built-in estimate from your hint instead. Check the items carefully.`}</Banner>
       ) : null}
 
       {phase === 'denied' && (

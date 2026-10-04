@@ -1,6 +1,6 @@
 # FitCoach account setup (fitdih)
 
-This repository is configured locally for the `fitdih` Supabase project. As of 3 October 2026, `ADMIN_USER_ID` is saved in fitdih for the existing Wesley account; the migration and both `ai` and `admin-stats` functions are deployed with JWT verification; the owner admin screen has been verified. `OPENROUTER_API_KEY` is intentionally blank at the owner’s request, and `NVIDIA_API_KEY` is still missing. The saved NVIDIA key must be entered as a secret by the owner because browser storage could not be read through the permitted tool. Every person creates an email/password account; Supabase Auth assigns a unique user ID. The app stores each account's browser/device cache under that ID and synchronizes only rows owned by that ID. RLS in `0001_init.sql` enforces the boundary in Postgres.
+This repository is configured locally for the `fitdih` Supabase project. As of 3 October 2026, `ADMIN_USER_ID` is saved in fitdih for the existing Wesley account; the migration and both `ai` and `admin-stats` functions are deployed with JWT verification; the owner admin screen has been verified. As of 4 October 2026, coach chat and meal photos use `GROQ_API_KEY`. The `OPENROUTER_API_KEY`, `NVIDIA_API_KEY` and `GEMINI_API_KEY` secrets are still set but unused (the Gemini project has no prepaid credits). Every person creates an email/password account; Supabase Auth assigns a unique user ID. The app stores each account's browser/device cache under that ID and synchronizes only rows owned by that ID. RLS in `0001_init.sql` enforces the boundary in Postgres.
 
 ## 1. Database
 
@@ -23,8 +23,7 @@ Create `.env.local` from `.env.example` and set `EXPO_PUBLIC_SUPABASE_URL` and `
 
 In **Edge Functions → Secrets**, set:
 
-- `OPENROUTER_API_KEY`: the owner's OpenRouter key for coach chat.
-- `NVIDIA_API_KEY`: the owner's existing NVIDIA key for meal photos. The default model remains `meta/llama-3.2-90b-vision-instruct`.
+- `GROQ_API_KEY`: the owner's Groq key for coach chat and meal photos.
 - `FDC_API_KEY`: the owner's USDA FoodData Central key, for manual search and optional photo-estimate sourcing. Without it, USDA's restricted `DEMO_KEY` is used.
 - `ADMIN_USER_ID`: the owner account's Supabase Auth UUID.
 
@@ -39,7 +38,7 @@ supabase functions deploy admin-stats --project-ref nmovowhobqeaokzdspfp
 
 Existing notification behavior uses `supabase/functions/notify/index.ts`; deploy it separately if cross-device notification claims are wanted.
 
-The AI gateway validates each user's token and permits only the listed free OpenRouter chat models and the two NVIDIA vision models. It defaults to 5 AI calls per user per UTC day and 40 shared AI calls per UTC day. Set `AI_DAILY_LIMIT` and `AI_GLOBAL_DAILY_LIMIT` as optional function secrets to adjust these caps. OpenRouter free-tier limits can change; keep the global cap below your current account limit. USDA manual search has a separate quota.
+The AI gateway validates each user's token and permits only the Groq chat models listed in `src/lib/ai/groqModels.ts`; meal photos always use `qwen/qwen3.8-27b`, the only Groq model on this account that reads images. It defaults to 5 AI calls per user per UTC day and 40 shared AI calls per UTC day. Set `AI_DAILY_LIMIT` and `AI_GLOBAL_DAILY_LIMIT` as optional function secrets to adjust these caps. Groq's free tier limits `qwen/qwen3.8-27b` to 1000 output tokens per minute across all users, so only about one photo per minute succeeds; keep the global cap below your current account limit. USDA manual search has a separate quota.
 
 ## 5. Check the result
 
@@ -47,6 +46,6 @@ The AI gateway validates each user's token and permits only the listed free Open
 2. Create a second account and confirm that it starts with a blank profile and cannot see the first account's data.
 3. Log food and a workout in one account, sign out, then sign back in and confirm they return.
 4. In the owner account, open **Settings → Account & sync → Admin stats**. Other accounts should not see that button, and direct requests to `admin-stats` should return 403.
-5. Test coach chat with OpenRouter and a meal photo with NVIDIA. If a provider fails, the app uses built-in responses with a visible warning.
+5. Test coach chat and a meal photo. If a provider fails, the app uses built-in responses with a visible warning.
 
 If you already used FitCoach before accounts were added, sign in to a new empty account and use **Import earlier data from this device**. This is explicit so older local data cannot silently enter another person's account.

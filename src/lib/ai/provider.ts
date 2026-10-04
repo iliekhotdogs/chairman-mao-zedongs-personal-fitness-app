@@ -8,12 +8,11 @@ import { nowISO, addDays } from '../dates';
 import { remainingForDay, workoutForDay, latestWeight, live } from '../selectors';
 import { exerciseName, formatPrescription } from '../workouts/exercises';
 import { getApiKey, getGeminiKey } from './apiKey';
-import { NVIDIA_DEFAULT_MODELS } from './nvidia';
 import { GEMINI_DEFAULT_MODEL } from './gemini';
 import { prepareImageForAI } from './image';
-import { selectedChatModel } from './openrouterModels';
+import { GROQ_VISION_MODEL, selectedChatModel } from './groqModels';
 
-/** Signed-in accounts use the owner's server-side NVIDIA key (and OpenRouter for chat when set).
+/** Signed-in accounts use the owner's server-side Groq key for chat and meal photos.
  * Without Supabase, the app offers built-in answers. AI only proposes changes. */
 
 export class AIUnavailableError extends Error {}
@@ -45,10 +44,6 @@ export function geminiModel(settings: AppState['settings']): string {
   return settings.geminiModel || GEMINI_DEFAULT_MODEL;
 }
 
-export function aiModels(settings: AppState['settings']) {
-  return { vision: settings.aiModels?.vision || NVIDIA_DEFAULT_MODELS.vision, chat: settings.aiModels?.chat || NVIDIA_DEFAULT_MODELS.chat };
-}
-
 type FoodInput = { hint?: string; photoUri?: string; photoSize?: { width?: number; height?: number }; followUpAnswered?: boolean };
 
 export async function estimateFood(state: AppState, input: FoodInput): Promise<FoodEstimate> {
@@ -62,7 +57,7 @@ export async function estimateFood(state: AppState, input: FoodInput): Promise<F
   try {
     const image = input.photoUri ? await prepareImageForAI(input.photoUri, input.photoSize) : undefined;
     const { data, error } = await sb.functions.invoke('ai', {
-      body: { action: 'estimate_food', hint: input.hint ?? '', image: image ? { data: image.base64, mediaType: image.mediaType } : undefined, units: state.settings.units, model: aiModels(state.settings).vision },
+      body: { action: 'estimate_food', hint: input.hint ?? '', image: image ? { data: image.base64, mediaType: image.mediaType } : undefined, units: state.settings.units, model: GROQ_VISION_MODEL },
     });
     if (error) throw error;
     return toEstimate(data, input);
@@ -89,7 +84,7 @@ function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: str
     hint: input.hint,
     photoUri: input.photoUri,
     simulated: false,
-    provider: `NVIDIA (${data.model}) via your server`,
+    provider: `Groq (${data.model}) via your server`,
     overallConfidence: data.overall_confidence,
     followUpQuestion: data.follow_up_question ?? undefined,
     notes: data.notes ?? [],
@@ -169,7 +164,7 @@ export async function coachReply(state: AppState, message: string, today: ISODat
   if (!sb) throw new AIUnavailableError('Server AI is not configured. Switch to simulated mode in Settings.');
   const history = live(state.chat).slice(-12).map((m) => ({ role: m.role === 'coach' ? 'assistant' : 'user', content: m.text }));
   try {
-    const { data, error } = await sb.functions.invoke('ai', { body: { action: 'coach', message, history, context: coachContext(state, today), model: selectedChatModel(state.settings.openRouterChatModel) } });
+    const { data, error } = await sb.functions.invoke('ai', { body: { action: 'coach', message, history, context: coachContext(state, today), model: selectedChatModel(state.settings.chatModel) } });
     if (error) throw error;
     const d = data as { reply: string; safety: boolean; intents: CoachIntent[] };
     if (!d || typeof d.reply !== 'string') throw new Error('The coach returned an invalid reply.');

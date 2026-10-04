@@ -1,8 +1,7 @@
 import { __setApiKeyForTests, __setGeminiKeyForTests } from '../ai/apiKey';
 import { aiEngine, chatEngine, coachReply, estimateFood } from '../ai/provider';
 import { buildSampleState } from '../sampleData';
-import { selectedChatModel } from '../ai/openrouterModels';
-import { NVIDIA_DEFAULT_MODELS } from '../ai/nvidia';
+import { GROQ_VISION_MODEL, selectedChatModel } from '../ai/groqModels';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   jest.requireActual('@react-native-async-storage/async-storage/jest/async-storage-mock'),
@@ -21,19 +20,19 @@ afterEach(() => {
   __setGeminiKeyForTests(null);
 });
 
-describe('shared OpenRouter gateway', () => {
+describe('shared Groq gateway', () => {
   it('uses Supabase for chat even when old device keys exist', async () => {
     __setApiKeyForTests('nvapi-old');
     __setGeminiKeyForTests('gemini-old');
     const state = sample();
-    state.settings.openRouterChatModel = 'google/gemma-4-31b-it:free';
+    state.settings.chatModel = 'openai/gpt-oss-20b';
     mockInvoke.mockResolvedValue({ data: { reply: 'Shorter workout?', safety: false, intents: [{ type: 'short_on_time', minutes: 20 }] }, error: null });
     expect(aiEngine(state.settings)).toBe('server');
     expect(chatEngine(state.settings)).toBe('server');
     const result = await coachReply(state, 'I have 20 minutes', TODAY);
     expect(result.simulated).toBe(false);
     expect(result.proposals.every((proposal) => proposal.status === 'pending')).toBe(true);
-    expect(mockInvoke).toHaveBeenCalledWith('ai', { body: expect.objectContaining({ action: 'coach', model: 'google/gemma-4-31b-it:free' }) });
+    expect(mockInvoke).toHaveBeenCalledWith('ai', { body: expect.objectContaining({ action: 'coach', model: 'openai/gpt-oss-20b' }) });
   });
 
   it('keeps urgent symptoms off the model', async () => {
@@ -42,17 +41,16 @@ describe('shared OpenRouter gateway', () => {
     expect(mockInvoke).not.toHaveBeenCalled();
   });
 
-  it('keeps meal photos on the original NVIDIA model', async () => {
+  it('sends meal photos to the Groq vision model', async () => {
     const state = sample();
-    state.settings.aiModels = { vision: NVIDIA_DEFAULT_MODELS.vision, chat: NVIDIA_DEFAULT_MODELS.chat };
-    mockInvoke.mockResolvedValue({ data: { items: [], overall_confidence: 'low', notes: [], model: NVIDIA_DEFAULT_MODELS.vision }, error: null });
+    mockInvoke.mockResolvedValue({ data: { items: [], overall_confidence: 'low', notes: [], model: GROQ_VISION_MODEL }, error: null });
     const result = await estimateFood(state, { hint: 'apple' });
-    expect(result.provider).toContain('NVIDIA');
-    expect(mockInvoke).toHaveBeenCalledWith('ai', { body: expect.objectContaining({ action: 'estimate_food', model: NVIDIA_DEFAULT_MODELS.vision }) });
-    expect(selectedChatModel('paid/unknown')).toContain(':free');
+    expect(result.provider).toContain('Groq');
+    expect(mockInvoke).toHaveBeenCalledWith('ai', { body: expect.objectContaining({ action: 'estimate_food', model: GROQ_VISION_MODEL }) });
+    expect(selectedChatModel('google/gemma-4-31b-it:free')).toBe('openai/gpt-oss-120b');
   });
 
-  it('labels a failed NVIDIA call as a hint-based fallback', async () => {
+  it('labels a failed photo call as a hint-based fallback', async () => {
     mockInvoke.mockResolvedValue({ data: null, error: new Error('provider unavailable') });
     const result = await estimateFood(sample(), { hint: 'apple' });
     expect(result.simulated).toBe(true);
@@ -68,7 +66,7 @@ describe('shared OpenRouter gateway', () => {
     expect(result.aiNotice).toBe('NVIDIA is not configured on the server.');
   });
 
-  it('keeps a failed OpenRouter coach reply clearly simulated', async () => {
+  it('keeps a failed Groq coach reply clearly simulated', async () => {
     mockInvoke.mockResolvedValue({ data: null, error: new Error('provider unavailable') });
     const result = await coachReply(sample(), 'Can I shorten my workout?', TODAY);
     expect(result.simulated).toBe(true);

@@ -2,7 +2,7 @@
 
 A fitness app for **Android and desktop browsers** that cuts down food-logging effort, tracks gym progress, and gives personalised coaching. Built with Expo, React Native and TypeScript, so one codebase serves both.
 
-> **Status: working prototype.** Accounts and per-user sync use Supabase. Coach chat uses the owner’s OpenRouter key; meal photos keep the owner’s NVIDIA key and original vision model. Both keys belong in Supabase Edge Function secrets. Database migration and functions must be deployed before these features work end to end. See [setup](docs/SETUP.md) and [verification](docs/TESTING.md).
+> **Status: working prototype.** Accounts and per-user sync use Supabase. Coach chat and meal photos use the owner’s Groq key, stored as a Supabase Edge Function secret. Database migration and functions must be deployed before these features work end to end. See [setup](docs/SETUP.md) and [verification](docs/TESTING.md).
 
 ## What's in it
 

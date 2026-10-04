@@ -1,16 +1,13 @@
 // Shared AI gateway. Deploy with JWT verification enabled.
-// Secrets: OPENROUTER_API_KEY, NVIDIA_API_KEY, optional FDC_API_KEY, AI_DAILY_LIMIT,
-// AI_GLOBAL_DAILY_LIMIT. Never place the OpenRouter key in Expo env vars.
+// Secrets: GROQ_API_KEY, optional FDC_API_KEY, AI_DAILY_LIMIT, AI_GLOBAL_DAILY_LIMIT.
+// Never place the Groq key in Expo env vars.
 import { createClient } from 'npm:@supabase/supabase-js@2';
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-const CHAT_MODELS = [
-  'qwen/qwen3.8-27b:free',
-  'google/gemma-4-26b-a4b-it:free',
-  'google/gemma-4-31b-it:free',
-  'nvidia/nemotron-3.5-lightning:free',
-];
-const VISION_MODELS = ['meta/llama-3.2-90b-vision-instruct', 'meta/llama-3.2-11b-vision-instruct'];
+// Must match src/lib/ai/groqModels.ts.
+const CHAT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
+// The only Groq model on this account that accepts images.
+const VISION_MODEL = 'qwen/qwen3.8-27b';
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -21,29 +18,28 @@ const safeNumber = (value: unknown, max: number) => typeof value === 'number' &&
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.slice(0, max) : '';
 
 type Completion = { text: string; input: number; output: number };
-async function complete(model: string, messages: unknown[]): Promise<Completion> {
-  const key = Deno.env.get('OPENROUTER_API_KEY');
-  if (!key) throw new Error('OpenRouter is not configured on the server.');
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+async function complete(model: string, messages: unknown[], maxTokens: number): Promise<Completion> {
+  const key = Deno.env.get('GROQ_API_KEY');
+  if (!key) throw new Error('Groq is not configured on the server.');
+  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json', 'X-Title': 'FitCoach' },
-    body: JSON.stringify({ model, messages, temperature: 0.3, max_tokens: 4096 }),
+    headers: { Authorization: `Bearer ${key.trim()}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: maxTokens }),
     signal: AbortSignal.timeout(90_000),
   });
   if (!response.ok) {
-    if (response.status === 429) throw new Error('OpenRouter free-model limit reached. Try again later.');
-    if (response.status === 401 || response.status === 403) throw new Error('The server OpenRouter key was rejected.');
-    throw new Error(`OpenRouter request failed (${response.status}).`);
+    console.error(`Groq ${response.status} for ${model}: ${(await response.text().catch(() => '')).slice(0, 300)}`);
+    if (response.status === 429) throw new Error('Groq rate limit reached. Try again in a minute.');
+    if (response.status === 401 || response.status === 403) throw new Error('The server Groq key was rejected. Check GROQ_API_KEY in Supabase.');
+    if (response.status === 404) throw new Error(`Groq doesn't offer "${model}" to this key.`);
+    throw new Error(`Groq request failed (${response.status}).`);
   }
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content;
-  const reply = typeof content === 'string' ? content : Array.isArray(content) ? content.map((part: { text?: string }) => part.text ?? '').join('') : '';
-  if (!reply.trim()) throw new Error('The selected model returned an empty reply. Try another model.');
+  // Reasoning models may inline their thinking; only the answer after it is used.
+  const reply = (typeof content === 'string' ? content : '').replace(/<think>[\s\S]*?<\/think>/g, '');
+  if (!reply.trim()) throw new Error('The model returned an empty reply. Try another model.');
   return { text: reply, input: safeNumber(data.usage?.prompt_tokens, 10_000_000), output: safeNumber(data.usage?.completion_tokens, 10_000_000) };
-}
-
-class NvidiaStatusError extends Error {
-  constructor(message: string, readonly status: number) { super(message); }
 }
 
 const FOOD_INSTRUCTIONS = `You estimate food and portion sizes for a calorie-tracking app, from a meal photo and/or a short user hint.
@@ -53,30 +49,6 @@ If one key detail is missing (size, sauce, brand), ask ONE short follow_up_quest
 Reply with ONLY a JSON object, no other text, in exactly this shape:
 {"items":[{"name":"Grilled chicken breast","portion":"1 palm-size piece","grams":120,"calories":198,"protein_g":37,"carbs_g":0,"fat_g":4.3,"confidence":"medium","portion_assumption":"About the size of a palm, 2 cm thick","usda_search_query":"chicken breast roasted"}],"overall_confidence":"medium","follow_up_question":null,"notes":["Short note about assumptions"]}
 Up to 8 items. "usda_search_query" is a short generic USDA food search term. "notes" has at most 3 short sentences.`;
-
-async function nvidiaComplete(model: string, messages: unknown[]): Promise<Completion> {
-  const key = Deno.env.get('NVIDIA_API_KEY');
-  if (!key) throw new Error('NVIDIA meal-photo AI is not configured on the server.');
-  const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key.trim()}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ model, messages, temperature: 0.1, max_tokens: 1500, stream: false }),
-    signal: AbortSignal.timeout(150_000),
-  });
-  if (response.status === 202) throw new NvidiaStatusError(`NVIDIA model "${model}" is warming up. Try again in a minute.`, 202);
-  if (!response.ok) {
-    const detail = (await response.text().catch(() => '')).slice(0, 200);
-    console.error(`NVIDIA ${response.status} for ${model}: ${detail}`);
-    if (response.status === 429) throw new NvidiaStatusError('NVIDIA image-model limit reached. Try again later.', 429);
-    if (response.status === 401 || response.status === 403) throw new NvidiaStatusError('The server NVIDIA key was rejected. Check NVIDIA_API_KEY in Supabase.', response.status);
-    if (response.status === 404) throw new NvidiaStatusError(`NVIDIA doesn't offer "${model}" to this key.`, 404);
-    throw new NvidiaStatusError(`NVIDIA image request failed (${response.status}).`, response.status);
-  }
-  const data = await response.json();
-  const reply = data.choices?.[0]?.message?.content;
-  if (typeof reply !== 'string' || !reply.trim()) throw new Error('The NVIDIA model returned an empty reply.');
-  return { text: reply, input: safeNumber(data.usage?.prompt_tokens, 10_000_000), output: safeNumber(data.usage?.completion_tokens, 10_000_000) };
-}
 
 function parseObject(reply: string): Record<string, unknown> {
   const start = reply.indexOf('{');
@@ -100,8 +72,9 @@ function validatedIntents(value: unknown): unknown[] {
 }
 
 async function coach(body: Record<string, unknown>) {
-  const model = text(body.model, 100);
-  if (!CHAT_MODELS.includes(model)) throw new Error('Choose a supported free chat model.');
+  // Older app builds still send OpenRouter ids; those get the default Groq model.
+  const requested = text(body.model, 100);
+  const model = CHAT_MODELS.includes(requested) ? requested : CHAT_MODELS[0];
   const message = text(body.message, 2000);
   if (!message.trim()) throw new Error('Enter a message first.');
   const context = body.context && typeof body.context === 'object' ? JSON.stringify(body.context).slice(0, 6000) : '{}';
@@ -112,11 +85,11 @@ async function coach(body: Record<string, unknown>) {
   while (history.length && history[0].role !== 'user') history.shift();
   const system = [
     'You are FitCoach, a concise fitness and nutrition coach. Respond ONLY with a JSON object: {"reply":string,"safety":boolean,"intents":array}. Keep reply under 150 words.',
-    'Never claim to edit a plan or log. Changes require the user to accept a card. Allowed intents: short_on_time {minutes}, pain {area,red_flags}, low_energy, goal_change {goal}, training_days {days}. Use [] when no change is needed.',
+    'Never claim to edit a plan or log. Changes require the user to accept a card. Each intent is a flat object with a "type" field, exactly one of: {"type":"short_on_time","minutes":10-120}, {"type":"pain","area":"knee"|"lower_back"|"shoulder"|"wrist"|"elbow"|"hip"|"ankle"|"neck","red_flags":boolean}, {"type":"low_energy"}, {"type":"goal_change","goal":"fat_loss"|"muscle_gain"|"strength"|"maintenance"}, {"type":"training_days","days":1-6}. Use [] when no change is needed.',
     'Do not diagnose injuries, recommend extreme diets, or tell users to train through pain. For chest pain, fainting or trouble breathing, urge emergency medical help and return no intents.',
     `User context: ${context}`,
   ].join('\n');
-  const response = await complete(model, [{ role: 'system', content: system }, ...history, { role: 'user', content: message }]);
+  const response = await complete(model, [{ role: 'system', content: system }, ...history, { role: 'user', content: message }], 4096);
   const value = parseObject(response.text);
   const reply = text(value.reply, 2000).trim();
   if (!reply) throw new Error('The selected model returned no coach reply.');
@@ -152,8 +125,6 @@ async function usdaItem(item: VisionItem) {
 }
 
 async function estimateFood(body: Record<string, unknown>) {
-  const model = text(body.model, 100);
-  if (!VISION_MODELS.includes(model)) throw new Error('Choose a supported NVIDIA image model.');
   const hint = text(body.hint, 300);
   const image = body.image as { data?: unknown; mediaType?: unknown } | undefined;
   const data = text(image?.data, 7_000_001);
@@ -161,25 +132,14 @@ async function estimateFood(body: Record<string, unknown>) {
   if (!hint && !data) throw new Error('Send a photo or a hint.');
   if (image && (!['image/jpeg', 'image/png', 'image/webp'].includes(mime) || !/^[A-Za-z0-9+/=]+$/.test(data) || data.length > 7_000_000)) throw new Error('Use a smaller JPEG, PNG, or WebP photo.');
   const prompt = `${FOOD_INSTRUCTIONS}\n\nUser hint: ${hint || '(none)'}${data ? '' : '\nThere is no photo; estimate from the hint only.'}`;
-  const dataUrl = data ? `data:${mime};base64,${data}` : '';
-  // Llama 3.2 Vision doesn't accept a system prompt alongside an image, so everything goes in the user turn.
-  const ask = (content: unknown) => nvidiaComplete(model, [{ role: 'user', content }]);
-  let response: Completion;
-  if (!dataUrl) response = await ask(prompt);
-  else {
-    try {
-      response = await ask([{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: dataUrl } }]);
-    } catch (error) {
-      // Some NVIDIA-hosted vision models only accept the older inline <img> form.
-      if (!(error instanceof NvidiaStatusError) || (error.status !== 400 && error.status !== 422)) throw error;
-      response = await ask(`${prompt}\n<img src="${dataUrl}" />`);
-    }
-  }
+  const content = data ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:${mime};base64,${data}` } }] : prompt;
+  // Groq's free tier allows 1000 output tokens per minute for this model, and max_tokens counts against it.
+  const response = await complete(VISION_MODEL, [{ role: 'user', content }], 900);
   let value: Record<string, unknown>;
   try {
     value = parseObject(response.text.replace(/```(?:json)?/gi, ''));
   } catch (error) {
-    console.error(`Unusable ${model} reply: ${response.text.slice(0, 500)}`);
+    console.error(`Unusable ${VISION_MODEL} reply: ${response.text.slice(0, 500)}`);
     throw error;
   }
   if (!Array.isArray(value.items)) throw new Error('The model returned an invalid meal estimate.');
@@ -200,7 +160,7 @@ async function estimateFood(body: Record<string, unknown>) {
       source_kind: 'visual_estimate', source_label: 'Visual estimate (no matching USDA value)', source_url: null,
     };
   }));
-  return { result: { items, overall_confidence: ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes: Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [], model }, tokens: response };
+  return { result: { items, overall_confidence: ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes: Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [], model: VISION_MODEL }, tokens: response };
 }
 
 Deno.serve(async (request) => {
@@ -235,12 +195,7 @@ Deno.serve(async (request) => {
     } catch (error) { return json({ error: error instanceof Error ? error.message : 'USDA search failed.' }, 502); }
   }
   if (body.action !== 'coach' && body.action !== 'estimate_food') return json({ error: 'Unknown action.' }, 400);
-  if (body.action === 'coach' && !Deno.env.get('OPENROUTER_API_KEY')) {
-    return json({ error: 'OpenRouter is not configured on the server.' }, 503);
-  }
-  if (body.action === 'estimate_food' && !Deno.env.get('NVIDIA_API_KEY')) {
-    return json({ error: 'NVIDIA meal-photo AI is not configured on the server.' }, 503);
-  }
+  if (!Deno.env.get('GROQ_API_KEY')) return json({ error: 'Groq is not configured on the server.' }, 503);
   const day = new Date().toISOString().slice(0, 10);
   const { data: claim, error: claimError } = await admin.rpc('claim_ai_request', {
     p_user: auth.user.id, p_day: day,

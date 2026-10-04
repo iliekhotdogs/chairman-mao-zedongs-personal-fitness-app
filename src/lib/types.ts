@@ -305,9 +305,10 @@ export interface Settings {
   coachTone: CoachTone;
   notifications: NotificationPrefs;
   aiMode: 'simulated' | 'server';
-  /** The vision id is used for NVIDIA photos; chat is retained for old saved settings. */
+  /** Retained for old saved settings; the server picks the photo model. */
   aiModels?: { vision: string; chat: string };
   geminiModel?: string;
-  openRouterChatModel?: string;
+  /** Groq coach model; see src/lib/ai/groqModels.ts. */
+  chatModel?: string;
   updatedAt: ISODateTime;
 }
