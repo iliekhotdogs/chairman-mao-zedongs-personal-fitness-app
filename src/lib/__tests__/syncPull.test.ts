@@ -1,4 +1,4 @@
-import { emptyState } from '../state';
+import { emptyState, SYNCED_COLLECTIONS } from '../state';
 import { EMPTY_CURSOR, keysetFilter, listAllPaths, parseCursor, PULL_PAGE_SIZE, pullSince, SETTLE_WINDOW_MS, syncNow, timestampMs, type SyncCursor } from '../sync/sync';
 
 /**
@@ -78,8 +78,10 @@ function builder() {
   return b;
 }
 
+const mockUploads: string[] = [];
 const mockClient = {
   from: () => builder(),
+  storage: { from: () => ({ upload: async (path: string) => { mockUploads.push(path); return { error: null }; } }) },
   rpc: async (name: string) => {
     mockCalls.push({ filters: [`rpc:${name}`] });
     return name === 'server_time' && mockRpcAvailable ? { data: mockServerNow, error: null } : { data: null, error: { message: 'function not found' } };
@@ -271,5 +273,42 @@ describe('syncNow', () => {
     expect(Date.parse(pushed.updated_at)).toBeLessThan(Date.parse(future));
     expect(res.rows.some((r) => r.id === 'w1')).toBe(true);
     expect(res.cursor.lastPulledAt).toBe(mockServerNow);
+  });
+});
+
+describe('photo uploads', () => {
+  const realFetch = globalThis.fetch;
+  beforeEach(() => {
+    mockUploads.length = 0;
+    globalThis.fetch = jest.fn(async () => ({ blob: async () => ({}) })) as never;
+  });
+  afterEach(() => { globalThis.fetch = realFetch; });
+
+  it('uploads local food and progress photos and returns their storage uris', async () => {
+    const stamp = '2026-10-01T09:00:00.000Z';
+    const state = {
+      ...emptyState('d', TS),
+      foodLog: [{ id: 'f1', date: '2026-10-01', photoUri: 'file:///meal.jpg', updatedAt: stamp }],
+      progressPhotos: [
+        { id: 'p1', date: '2026-10-01', uri: 'file:///front.jpg', updatedAt: stamp },
+        { id: 'p2', date: '2026-10-01', uri: 'storage:food-photos/user-1/progress/p2.jpg', updatedAt: stamp },
+      ],
+    } as never;
+    const res = await syncNow(state, USER, EMPTY_CURSOR);
+    expect(mockUploads.sort()).toEqual([`${USER}/f1.jpg`, `${USER}/progress/p1.jpg`]);
+    const food = res.rows.find((r) => r.id === 'f1' && r.collection === 'foodLog');
+    expect((food?.data as { photoUri?: string })?.photoUri).toBe(`storage:food-photos/${USER}/f1.jpg`);
+    // Once progressPhotos is a synced collection, its new storage uri merges back the same way.
+    if ((SYNCED_COLLECTIONS as readonly string[]).includes('progressPhotos')) {
+      const progress = res.rows.filter((r) => (r.collection as string) === 'progressPhotos' && r.id === 'p1');
+      expect(progress.some((r) => (r.data as { uri?: string }).uri === `storage:food-photos/${USER}/progress/p1.jpg`)).toBe(true);
+    }
+  });
+
+  it('works when the state has no progressPhotos', async () => {
+    const state = { ...emptyState('d', TS) };
+    delete (state as { progressPhotos?: unknown }).progressPhotos;
+    await expect(syncNow(state, USER, EMPTY_CURSOR)).resolves.toBeDefined();
+    expect(mockUploads).toHaveLength(0);
   });
 });

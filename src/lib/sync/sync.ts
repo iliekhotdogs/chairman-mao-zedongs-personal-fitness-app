@@ -91,32 +91,61 @@ type PulledRow = RemoteRecord & { synced_at: string };
 
 const isLocalPhoto = (uri?: string) => Boolean(uri && !uri.startsWith('storage:'));
 
-/** Upload local food photos to the user's private folder, returning the updated state. */
-async function uploadPhotos(state: AppState, userId: string): Promise<AppState> {
-  const sb = supabase();
-  if (!sb) return state;
+/** Synced progress photo (the `progressPhotos` collection; typed loosely so this file
+ * does not depend on its exact type). */
+type ProgressPhotoLike = { id: string; uri?: string; updatedAt: string; deleted?: boolean };
+type WithProgress = AppState & { progressPhotos?: ProgressPhotoLike[] };
+
+/**
+ * Upload every local photo in `items` (field `field`) to the user's private folder and
+ * point the entry at `storage:food-photos/<path>`. Failures keep the local photo for a retry.
+ */
+async function uploadList<T extends { id: string; updatedAt: string; deleted?: boolean }>(
+  sb: SupabaseClient, items: T[], field: 'photoUri' | 'uri', pathFor: (item: T) => string,
+): Promise<{ items: T[]; changed: boolean }> {
   let changed = false;
-  const foodLog = await Promise.all(
-    state.foodLog.map(async (e) => {
-      if (e.deleted || !isLocalPhoto(e.photoUri)) return e;
+  const next = await Promise.all(
+    items.map(async (e) => {
+      const uri = (e as Record<string, unknown>)[field] as string | undefined;
+      if (e.deleted || !isLocalPhoto(uri)) return e;
       try {
-        const blob = await (await fetch(e.photoUri!)).blob();
-        const path = `${userId}/${e.id}.jpg`;
+        const blob = await (await fetch(uri!)).blob();
+        const path = pathFor(e);
         const { error } = await sb.storage.from('food-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: true });
         if (error) {
           log.warn('sync', `Photo upload failed for ${e.id}; will retry.`, error);
           return e;
         }
         changed = true;
-        return { ...e, photoUri: `storage:food-photos/${path}`, updatedAt: new Date().toISOString() };
+        return { ...e, [field]: `storage:food-photos/${path}`, updatedAt: new Date().toISOString() };
       } catch (err) {
         log.warn('sync', `Photo upload failed for ${e.id}; will retry.`, err);
         return e; // keep the local photo; retry next sync
       }
     }),
   );
-  return changed ? { ...state, foodLog } : state;
+  return { items: next, changed };
 }
+
+/** Upload local food and progress photos to the user's private folder, returning the updated state. */
+async function uploadPhotos(state: AppState, userId: string): Promise<AppState> {
+  const sb = supabase();
+  if (!sb) return state;
+  const food = await uploadList(sb, state.foodLog, 'photoUri', (e) => `${userId}/${e.id}.jpg`);
+  const progressList = (state as WithProgress).progressPhotos;
+  const progress = Array.isArray(progressList)
+    ? await uploadList(sb, progressList, 'uri', (p) => `${userId}/progress/${p.id}.jpg`)
+    : { items: progressList, changed: false };
+  if (!food.changed && !progress.changed) return state;
+  return { ...state, foodLog: food.items, ...(progress.changed ? { progressPhotos: progress.items } : {}) } as AppState;
+}
+
+/** Entries of `after` that differ (by identity) from the same index in `before`. */
+const changedEntries = <T,>(after: T[] | undefined, before: T[] | undefined): T[] =>
+  Array.isArray(after) ? after.filter((e, i) => e !== before?.[i]) : [];
+
+/** Collections whose photo uploads are merged back as rows. */
+const PHOTO_COLLECTIONS = new Set<string>(['foodLog', 'progressPhotos']);
 
 /**
  * Two-way sync: push local changes, then pull everything newer than the cursor.
@@ -140,7 +169,13 @@ export async function syncNow(state: AppState, userId: string, cursor: SyncCurso
   const pulled = await pullSince(sb, userId, cursor);
   // Local photo uploads are returned as rows too, so the caller merges everything into the
   // CURRENT state (edits made during the network call are not lost).
-  const photoRows = localChanges({ ...withPhotos, foodLog: withPhotos.foodLog.filter((e, i) => e !== state.foodLog[i]) }, cursor.lastPushedAt).filter((r) => r.collection === 'foodLog');
+  // (progressPhotos is included once it is a synced collection; see SYNCED_COLLECTIONS.)
+  const photoState = {
+    ...withPhotos,
+    foodLog: changedEntries(withPhotos.foodLog, state.foodLog),
+    progressPhotos: changedEntries((withPhotos as WithProgress).progressPhotos, (state as WithProgress).progressPhotos),
+  } as AppState;
+  const photoRows = localChanges(photoState, cursor.lastPushedAt).filter((r) => PHOTO_COLLECTIONS.has(r.collection));
   return { rows: [...photoRows, ...pulled.rows], cursor: { ...pulled.cursor, lastPushedAt: startedAt }, pushed: rows.length, pulled: pulled.rows.length };
 }
 
