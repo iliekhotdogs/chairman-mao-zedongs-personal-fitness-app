@@ -1,38 +1,52 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Space } from '@/constants/theme';
-import { Badge, Card, Chip, Muted, Row, Stack, Text } from '@/components/ui';
+import { Badge, Card, KeyValue, Muted, Row, Stack, Text } from '@/components/ui';
 import { useStore } from '@/store/AppStore';
-import { useAct } from '@/components/Toast';
-import { nowISO } from '@/lib/dates';
-import { GROQ_CHAT_MODELS, selectedChatModel } from '@/lib/ai/groqModels';
+import { fetchAiInfo, type AiInfo } from '@/lib/ai/provider';
 
+/** Read-only view of the AI the app owner chose. Users do not pick models. */
 export function AiSettings() {
-  const { state, sync } = useStore();
-  const doAct = useAct();
-  const chat = selectedChatModel(state.settings.chatModel);
+  const { sync } = useStore();
+  const [info, setInfo] = useState<AiInfo>();
+  const [error, setError] = useState('');
+  const signedIn = Boolean(sync.session);
+
+  useEffect(() => {
+    let active = true;
+    if (!sync.configured || !signedIn) return;
+    fetchAiInfo()
+      .then((next) => { if (active) { setInfo(next); setError(''); } })
+      .catch((e) => { if (active) setError(e instanceof Error ? e.message : 'AI info is unavailable.'); });
+    return () => { active = false; };
+  }, [sync.configured, signedIn]);
+
+  const badge = !sync.configured
+    ? <Badge kind="simulated" label="Built-in answers" />
+    : info && !info.enabled
+      ? <Badge kind="neutral" label="AI switched off" />
+      : <Badge kind="info" label="Shared AI via Supabase" />;
 
   return (
     <Card style={{ gap: Space.md }}>
-      <Text variant="h3">AI models</Text>
-      <Row wrap gap={Space.sm}>
-        <Badge kind={sync.configured ? 'info' : 'simulated'} label={sync.configured ? 'Shared AI via Supabase' : 'Built-in answers'} />
-      </Row>
-      <Muted variant="small">{sync.configured
-        ? 'Coach chat and meal photos use the app owner’s Groq key. The key stays on the server; each account has a daily limit.'
-        : 'Connect the app to Supabase to enable shared AI. Until then, coaching and meal estimates use built-in answers.'}</Muted>
-      <Stack gap={Space.sm}>
-        <Text variant="bodyStrong">Coach chat · Groq</Text>
-        <Row wrap gap={Space.sm}>
-          {GROQ_CHAT_MODELS.map((model) => (
-            <Chip key={model.id} label={model.label} selected={chat === model.id} onPress={() => doAct({ type: 'UPDATE_SETTINGS', patch: { chatModel: model.id }, now: nowISO() })} />
-          ))}
-        </Row>
-      </Stack>
-      <Stack gap={Space.sm}>
-        <Text variant="bodyStrong">Meal photos · Groq</Text>
-        <Muted variant="small">Photos use Qwen3.8 27B, the Groq model that reads images. Check estimates before adding them to your log.</Muted>
-      </Stack>
-      <Muted variant="small">Chat messages, a short fitness summary and reduced meal photos go through Supabase to Groq. Groq has rate limits, so a request may occasionally fall back to a built-in answer.</Muted>
+      <Text variant="h3">Coach AI</Text>
+      <Row wrap gap={Space.sm}>{badge}</Row>
+      {!sync.configured ? (
+        <Muted variant="small">Connect the app to Supabase to enable shared AI. Until then, coaching and meal estimates use built-in answers.</Muted>
+      ) : !signedIn ? (
+        <Muted variant="small">Sign in to use the shared coach AI.</Muted>
+      ) : info ? (
+        <Stack gap={Space.sm}>
+          <KeyValue k="Coach AI" v={`${info.providerLabel} · ${info.chatModelLabel}`} />
+          <KeyValue k="Meal photos" v={`${info.providerLabel} · ${info.visionModelLabel}`} />
+          <KeyValue k="Used today" v={`${info.usedToday} of ${info.perUserDailyLimit}`} />
+          {!info.enabled ? <Muted variant="small">The app owner has switched AI off for now. Coaching and meal estimates use built-in answers.</Muted> : null}
+        </Stack>
+      ) : error ? (
+        <Muted variant="small">{error}</Muted>
+      ) : (
+        <Muted variant="small">Loading…</Muted>
+      )}
+      <Muted variant="small">The app owner chooses the AI provider and model. Keys stay on the server and each account has a daily limit. Chat messages, a short fitness summary and reduced meal photos go through Supabase to that provider; if it is busy, you get a built-in answer instead.</Muted>
     </Card>
   );
 }

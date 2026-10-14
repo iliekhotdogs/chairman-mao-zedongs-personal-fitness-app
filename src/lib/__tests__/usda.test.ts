@@ -9,7 +9,9 @@ describe('USDA lookup', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
     await searchFdc('apple', 'DEMO_KEY');
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toContain('/foods/search?api_key=DEMO_KEY');
+    expect(url).toBe('https://api.nal.usda.gov/fdc/v1/foods/search');
+    expect(url).not.toContain('api_key');
+    expect((init?.headers as Record<string, string>)['X-Api-Key']).toBe('DEMO_KEY');
     expect(init?.method).toBe('POST');
     expect(JSON.parse(init?.body as string)).toEqual({ query: 'apple', pageSize: 8, dataType: ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'] });
   });

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Image, Linking, Platform, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/lib/nav';
 import * as ImagePicker from 'expo-image-picker';
 
 import { C, Radius, Space } from '@/constants/theme';
@@ -110,8 +111,8 @@ export default function CaptureScreen() {
 
   // ---------- render ----------
   return (
-    <Screen maxWidth={980}>
-      <PageHeader title="Log a meal" subtitle={phase === 'review' ? 'Review the estimate. Nothing is saved until you accept.' : 'Take or upload a photo and add a short hint.'} right={<Button title="Cancel" kind="ghost" onPress={() => router.back()} />} />
+    <Screen size="medium">
+      <PageHeader title="Log a meal" subtitle={phase === 'review' ? 'Review the estimate. Nothing is saved until you accept.' : 'Take or upload a photo and add a short hint.'} right={<Button title="Cancel" kind="ghost" onPress={() => goBack('/food')} />} />
 
       {!realAI ? (
         <Banner kind="simulated" title="Built-in estimates">

@@ -7,18 +7,16 @@ import { newId } from '../id';
 import { nowISO, addDays } from '../dates';
 import { remainingForDay, workoutForDay, latestWeight, live } from '../selectors';
 import { exerciseName, formatPrescription } from '../workouts/exercises';
-import { getApiKey, getGeminiKey } from './apiKey';
-import { GEMINI_DEFAULT_MODEL } from './gemini';
 import { prepareImageForAI } from './image';
-import { GROQ_VISION_MODEL, selectedChatModel } from './groqModels';
 
-/** Signed-in accounts use the owner's server-side Groq key for chat and meal photos.
+/** Signed-in accounts use the server-side AI gateway (supabase/functions/ai). The
+ * admin picks the provider and models there; the client never sends a model.
  * Without Supabase, the app offers built-in answers. AI only proposes changes. */
 
 export class AIUnavailableError extends Error {}
 
 /** supabase-js reports any non-2xx as a generic message; the gateway's own reason is in the body. */
-async function functionErrorMessage(error: unknown, fallback: string): Promise<string> {
+export async function functionErrorMessage(error: unknown, fallback: string): Promise<string> {
   const context = (error as { context?: unknown } | null)?.context;
   if (context instanceof Response) {
     const body = await context.clone().json().catch(() => null) as { error?: unknown } | null;
@@ -27,27 +25,39 @@ async function functionErrorMessage(error: unknown, fallback: string): Promise<s
   return error instanceof Error ? error.message : fallback;
 }
 
-export type AIEngine = 'nvidia' | 'gemini' | 'server' | 'simulated';
+export type AIEngine = 'server' | 'simulated';
 
-/** In the account build, calls go through the authenticated Supabase gateway. */
-export function aiEngine(settings: AppState['settings'], key: string | null = getApiKey()): AIEngine {
-  void settings; void key;
+/** In the account build, chat and meal photos go through the authenticated Supabase gateway. */
+export function aiEngine(): AIEngine {
   return isSupabaseConfigured() ? 'server' : 'simulated';
 }
 
-export function chatEngine(settings: AppState['settings'], key: string | null = getGeminiKey()): AIEngine {
-  void settings; void key;
-  return isSupabaseConfigured() ? 'server' : 'simulated';
+/** What the admin has configured, as reported by the gateway's `info` action. */
+export interface AiInfo {
+  enabled: boolean;
+  provider: string;
+  providerLabel: string;
+  chatModel: string;
+  chatModelLabel: string;
+  visionModel: string;
+  visionModelLabel: string;
+  perUserDailyLimit: number;
+  usedToday: number;
 }
 
-export function geminiModel(settings: AppState['settings']): string {
-  return settings.geminiModel || GEMINI_DEFAULT_MODEL;
+export async function fetchAiInfo(): Promise<AiInfo> {
+  const sb = supabase();
+  if (!sb) throw new AIUnavailableError('Server AI is not configured.');
+  const { data, error } = await sb.functions.invoke('ai', { body: { action: 'info' } });
+  if (error) throw new Error(await functionErrorMessage(error, 'AI info is unavailable.'));
+  if (!data || typeof data.providerLabel !== 'string') throw new Error('AI info is unavailable.');
+  return data as AiInfo;
 }
 
 type FoodInput = { hint?: string; photoUri?: string; photoSize?: { width?: number; height?: number }; followUpAnswered?: boolean };
 
 export async function estimateFood(state: AppState, input: FoodInput): Promise<FoodEstimate> {
-  const engine = aiEngine(state.settings);
+  const engine = aiEngine();
   if (engine === 'simulated') {
     await delay(700); // let the UI show its loading state realistically
     return simulateFoodEstimate(input);
@@ -57,7 +67,7 @@ export async function estimateFood(state: AppState, input: FoodInput): Promise<F
   try {
     const image = input.photoUri ? await prepareImageForAI(input.photoUri, input.photoSize) : undefined;
     const { data, error } = await sb.functions.invoke('ai', {
-      body: { action: 'estimate_food', hint: input.hint ?? '', image: image ? { data: image.base64, mediaType: image.mediaType } : undefined, units: state.settings.units, model: GROQ_VISION_MODEL },
+      body: { action: 'estimate_food', hint: input.hint ?? '', image: image ? { data: image.base64, mediaType: image.mediaType } : undefined, units: state.settings.units },
     });
     if (error) throw error;
     return toEstimate(data, input);
@@ -75,6 +85,7 @@ interface ServerEstimate {
   follow_up_question?: string | null;
   notes: string[];
   model: string;
+  provider?: string;
 }
 
 function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: string }): FoodEstimate {
@@ -84,7 +95,7 @@ function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: str
     hint: input.hint,
     photoUri: input.photoUri,
     simulated: false,
-    provider: `Groq (${data.model}) via your server`,
+    provider: `${data.provider ?? 'Server AI'} (${data.model}) via your server`,
     overallConfidence: data.overall_confidence,
     followUpQuestion: data.follow_up_question ?? undefined,
     notes: data.notes ?? [],
@@ -153,7 +164,7 @@ export function coachContext(state: AppState, today: ISODate) {
 }
 
 export async function coachReply(state: AppState, message: string, today: ISODate): Promise<CoachReply & { simulated: boolean; aiNotice?: string }> {
-  const engine = chatEngine(state.settings);
+  const engine = aiEngine();
   if (engine === 'simulated') {
     await delay(500);
     return { ...simulateCoachReply(state, message, today), simulated: true };
@@ -164,7 +175,7 @@ export async function coachReply(state: AppState, message: string, today: ISODat
   if (!sb) throw new AIUnavailableError('Server AI is not configured. Switch to simulated mode in Settings.');
   const history = live(state.chat).slice(-12).map((m) => ({ role: m.role === 'coach' ? 'assistant' : 'user', content: m.text }));
   try {
-    const { data, error } = await sb.functions.invoke('ai', { body: { action: 'coach', message, history, context: coachContext(state, today), model: selectedChatModel(state.settings.chatModel) } });
+    const { data, error } = await sb.functions.invoke('ai', { body: { action: 'coach', message, history, context: coachContext(state, today) } });
     if (error) throw error;
     const d = data as { reply: string; safety: boolean; intents: CoachIntent[] };
     if (!d || typeof d.reply !== 'string') throw new Error('The coach returned an invalid reply.');

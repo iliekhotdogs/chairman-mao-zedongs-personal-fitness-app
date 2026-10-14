@@ -3,9 +3,10 @@ import { View } from 'react-native';
 import { Redirect, router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, Columns, Field, Muted, NumberField, OptionCard, ProgressBar, Row, Screen, Segmented, Stack, Text, Expandable, Ionicons } from '@/components/ui';
+import { AccentRule, Badge, Banner, Button, Card, Chip, Columns, Field, Muted, NumberField, OptionCard, ProgressBar, Row, Screen, Segmented, Stack, Text, Expandable, Ionicons } from '@/components/ui';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
+import { LogoMark } from '@/components/Brand';
 import type { BodyArea, DailyActivity, Equipment, Experience, GoalPriority, Profile, Sex, UnitSystem } from '@/lib/types';
 import { computeTargets, macrosFor } from '@/lib/nutrition/targets';
 import { generatePlan, dayMinutes } from '@/lib/workouts/generator';
@@ -100,11 +101,14 @@ export default function Onboarding() {
 
   const validBody = age !== undefined && age >= 16 && age <= 90 && heightCm !== undefined && heightCm > 120 && heightCm < 230 && weightKg !== undefined && weightKg > 35 && weightKg < 300;
   const canNext = step !== 2 || validBody;
+  // Signed in but the first sync of this session hasn't finished: a profile may still be on its
+  // way from the server, and finishing now would overwrite it. A failed sync releases the hold.
+  const firstSyncPending = sync.configured && !!sync.session && !sync.lastSyncAt && sync.status !== 'error';
   const next = () => setStep((s) => Math.min(STEPS.length - 1, s + 1));
   const back = () => setStep((s) => Math.max(0, s - 1));
 
   const finish = () => {
-    if (!profile || !targets) return;
+    if (!profile || !targets || firstSyncPending) return;
     const finalTargets = calorieOverride && Math.abs(calorieOverride - targets.calories) >= 10 ? { ...targets, ...macrosFor(calorieOverride, profile.startWeightKg, profile.goal), method: `${targets.method} · adjusted by you` } : targets;
     doAct({ type: 'UPDATE_SETTINGS', patch: { units }, now: nowISO() });
     const ok = doAct({
@@ -118,12 +122,13 @@ export default function Onboarding() {
   };
 
   const loadSample = () => {
+    if (firstSyncPending) return;
     doAct({ type: 'REPLACE_STATE', state: buildSampleState(state.deviceId, today) }, 'Sample data loaded');
     router.replace('/');
   };
 
   return (
-    <Screen maxWidth={720}>
+    <Screen size="narrow">
       {step > 0 ? (
         <Stack gap={6}>
           <Row>
@@ -135,10 +140,9 @@ export default function Onboarding() {
 
       {step === 0 && (
         <Stack gap={Space.lg} style={{ paddingTop: isPhone ? Space.xl : Space.xxxl }}>
-          <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' }}>
-            <Text variant="h1" color="#fff">F</Text>
-          </View>
+          <LogoMark size={56} />
           <Text variant="display">Your coach for food, training, and progress</Text>
+          <AccentRule width={48} />
           <Muted>
             Log meals from a photo, follow a training plan built around you, and get suggestions that adapt to your real results. You approve every change.
           </Muted>
@@ -157,9 +161,10 @@ export default function Onboarding() {
           <Text variant="smallStrong">Takes about 2 minutes.</Text>
           <Field label="What should we call you? (optional)" value={name} onChangeText={setName} placeholder="First name" autoComplete="given-name" />
           <Row wrap gap={Space.sm}>
-            <Button title="Get started" size="lg" icon="arrow-forward" onPress={next} />
-            <Button title="Explore with sample data" kind="secondary" size="lg" icon="flask-outline" onPress={loadSample} />
+            <Button title="Get started" size="lg" icon="arrow-forward" onPress={next} loading={firstSyncPending} disabled={firstSyncPending} />
+            <Button title="Explore with sample data" kind="secondary" size="lg" icon="flask-outline" onPress={loadSample} disabled={firstSyncPending} />
           </Row>
+          {firstSyncPending ? <Muted variant="small" accessibilityLiveRegion="polite">Checking your account for existing data…</Muted> : null}
           {sync.configured ? (
             <Expandable title="I already have an account" icon="person-circle-outline" initiallyOpen={!!sync.session}>
               <AccountCard intro="Sign in and your profile, plan and history download from the cloud. No need to set up again." />
@@ -283,9 +288,9 @@ export default function Onboarding() {
                 const m = calorieOverride ? macrosFor(calorieOverride, profile.startWeightKg, goal) : targets;
                 return (
                   <Row gap={Space.lg}>
-                    <Stack gap={0}><Text variant="h2" color={C.protein}>{m.proteinG} g</Text><Muted variant="small">protein</Muted></Stack>
-                    <Stack gap={0}><Text variant="h2" color={C.carbs}>{m.carbsG} g</Text><Muted variant="small">carbs</Muted></Stack>
-                    <Stack gap={0}><Text variant="h2" color={C.fat}>{m.fatG} g</Text><Muted variant="small">fat</Muted></Stack>
+                    <Stack gap={0}><Text variant="numberSm" color={C.protein}>{m.proteinG} g</Text><Muted variant="small">protein</Muted></Stack>
+                    <Stack gap={0}><Text variant="numberSm" color={C.carbs}>{m.carbsG} g</Text><Muted variant="small">carbs</Muted></Stack>
+                    <Stack gap={0}><Text variant="numberSm" color={C.fat}>{m.fatG} g</Text><Muted variant="small">fat</Muted></Stack>
                   </Row>
                 );
               })()}
@@ -326,7 +331,8 @@ export default function Onboarding() {
             )}
             <Segmented label="Plan choice" value={wantPlan && plan ? 'yes' : 'no'} onChange={(v) => setWantPlan(v === 'yes')} options={[{ value: 'yes', label: 'Use this plan' }, { value: 'no', label: "I'll build my own" }]} />
           </Card>
-          <Button title="Accept and start" size="lg" icon="checkmark" onPress={finish} full={isPhone} />
+          <Button title="Accept and start" size="lg" icon="checkmark" onPress={finish} full={isPhone} loading={firstSyncPending} disabled={firstSyncPending} />
+          {firstSyncPending ? <Muted variant="small" accessibilityLiveRegion="polite">Waiting for your account to finish syncing, so existing data isn&apos;t overwritten…</Muted> : null}
         </Stack>
       )}
 

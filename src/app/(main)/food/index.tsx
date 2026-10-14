@@ -10,6 +10,7 @@ import { useAct } from '@/components/Toast';
 import { addDays, formatDateLabel, formatTime, nowISO } from '@/lib/dates';
 import { foodForDay, remainingForDay } from '@/lib/selectors';
 import { sumItems } from '@/lib/nutrition/lookup';
+import { discardLocalPhoto } from '@/lib/photo';
 import type { FoodEntry, MealType } from '@/lib/types';
 
 const ORDER: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
@@ -41,6 +42,7 @@ export default function FoodLog() {
         right={
           <Row gap={Space.sm}>
             <Button title="Snap" icon="camera" onPress={() => router.push({ pathname: '/food/capture', params: { date } })} />
+            <Button title="Scan" kind="secondary" icon="barcode-outline" onPress={() => router.push({ pathname: '/food/barcode', params: { date } })} />
             <Button title="Add" kind="secondary" icon="add" onPress={() => router.push({ pathname: '/food/manual', params: { date } })} />
           </Row>
         }
@@ -97,7 +99,7 @@ export default function FoodLog() {
               icon="trash-outline"
               style={{ flex: 1 }}
               onPress={() => {
-                if (toDelete) doAct({ type: 'DELETE_FOOD', id: toDelete.id, now: nowISO() }, 'Meal deleted');
+                if (toDelete && doAct({ type: 'DELETE_FOOD', id: toDelete.id, now: nowISO() }, 'Meal deleted')) void discardLocalPhoto(toDelete.photoUri);
                 setToDelete(null);
               }}
             />

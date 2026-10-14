@@ -3,7 +3,8 @@ import { Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Columns, IconButton, Muted, PageHeader, Row, SectionTitle, Screen, Stack, Text, Ionicons, ProgressBar } from '@/components/ui';
+import { Badge, Banner, Button, Card, Columns, Muted, Row, SectionTitle, Screen, Stack, Text, Ionicons, ProgressBar } from '@/components/ui';
+import { TodayHero } from '@/components/TodayHero';
 import { CaloriesRing, MacroBars } from '@/components/nutrition';
 import { InsightCard, ProposalCard } from '@/components/coaching';
 import { WeightSheet } from '@/components/WeightSheet';
@@ -46,6 +47,7 @@ export default function Dashboard() {
       <Row wrap gap={Space.sm}>
         <Button title="Snap a meal" icon="camera" onPress={() => router.push('/food/capture')} />
         <Button title="Add manually" kind="secondary" icon="add" onPress={() => router.push('/food/manual')} />
+        <Button title="Scan barcode" kind="secondary" icon="barcode-outline" onPress={() => router.push('/food/barcode')} />
       </Row>
     </Card>
   );
@@ -71,11 +73,7 @@ export default function Dashboard() {
 
   return (
     <Screen>
-      <PageHeader
-        title={`${greeting()}${name}`}
-        subtitle={dateLabel}
-        right={isPhone ? <IconButton icon="settings-outline" label="Settings" onPress={() => router.push('/settings')} /> : undefined}
-      />
+      <TodayHero greeting={`${greeting()}${name}`} dateLabel={dateLabel} />
       {storageError ? <Banner kind="danger" title="Storage problem">{storageError}</Banner> : null}
       {isDesktop ? (
         <Row align="flex-start" gap={Space.lg}>

@@ -3,14 +3,18 @@ import {
   ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text as RNText, TextInput, View,
   type PressableProps, type StyleProp, type TextInputProps, type TextProps, type TextStyle, type ViewProps, type ViewStyle,
 } from 'react-native';
+import Animated, { Easing, FadeInDown, ReduceMotion, useAnimatedStyle, useReducedMotion, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { C, Font, MaxContentWidth, Radius, Space, Type } from '@/constants/theme';
+import { C, Font, MaxWidths, Motion, Radius, Space, Type } from '@/constants/theme';
 import { useLayout } from '@/hooks/useLayout';
 
 export type IconName = React.ComponentProps<typeof Ionicons>['name'];
 export { Ionicons };
+
+/** Pressable state on react-native-web also carries `hovered`. */
+type PState = { pressed: boolean; hovered?: boolean };
 
 // ---------- Text ----------
 
@@ -22,19 +26,72 @@ export function Text({ variant = 'body', color, style, ...rest }: TextProps & { 
 
 export const Muted = (p: TextProps & { variant?: Variant }) => <Text color={C.textSecondary} {...p} />;
 
+/** Short accent underline used under display headings. */
+export function AccentRule({ width = 36, style }: { width?: number; style?: StyleProp<ViewStyle> }) {
+  return <View style={[{ width, height: 3, borderRadius: 2, backgroundColor: C.accent }, style]} />;
+}
+
+// ---------- Motion ----------
+
+/** Entrance fade + slide for a block of content. `index` staggers siblings. Respects reduced motion. */
+export function Reveal({ children, index = 0, style }: { children: React.ReactNode; index?: number; style?: StyleProp<ViewStyle> }) {
+  return (
+    <Animated.View entering={FadeInDown.duration(Motion.enter).delay(index * Motion.stagger).reduceMotion(ReduceMotion.System)} style={style}>
+      {children}
+    </Animated.View>
+  );
+}
+
+/** Animates a number from its previous value to `target` (ease-out). Returns the current display value. */
+export function useCountUp(target: number, duration: number = Motion.countUp) {
+  const reduce = useReducedMotion();
+  const [value, setValue] = React.useState(0);
+  const last = React.useRef(0);
+  React.useEffect(() => {
+    if (reduce || !Number.isFinite(target)) return;
+    const from = last.current;
+    const start = Date.now();
+    let raf = 0;
+    const tick = () => {
+      const t = Math.min(1, (Date.now() - start) / duration);
+      const v = from + (target - from) * (1 - Math.pow(1 - t, 3));
+      last.current = v;
+      setValue(v);
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration, reduce]);
+  return reduce || !Number.isFinite(target) ? target : value;
+}
+
+/** A big number that counts up on mount/changes. */
+export function CountUp({ value, format = (v) => Math.round(v).toLocaleString(), variant = 'number', color, style }: { value: number; format?: (v: number) => string; variant?: Variant; color?: string; style?: StyleProp<TextStyle> }) {
+  const v = useCountUp(value);
+  return (
+    <Text variant={variant} color={color} style={style} accessibilityLabel={format(value)}>
+      {format(v)}
+    </Text>
+  );
+}
+
 // ---------- Layout ----------
 
-export function Screen({ children, scroll = true, maxWidth = MaxContentWidth, padded = true, contentStyle }: { children: React.ReactNode; scroll?: boolean; maxWidth?: number; padded?: boolean; contentStyle?: StyleProp<ViewStyle> }) {
+export type ScreenSize = keyof typeof MaxWidths;
+
+export function Screen({ children, scroll = true, size = 'wide', maxWidth, padded = true, contentStyle, scrollRef }: { children: React.ReactNode; scroll?: boolean; size?: ScreenSize; maxWidth?: number; padded?: boolean; contentStyle?: StyleProp<ViewStyle>; scrollRef?: React.Ref<ScrollView> }) {
   const insets = useSafeAreaInsets();
   const { isPhone } = useLayout();
   const inner = (
-    <View style={[{ width: '100%', maxWidth, alignSelf: 'center', paddingHorizontal: padded ? (isPhone ? Space.lg : Space.xxl) : 0, paddingTop: isPhone ? Math.max(insets.top, Space.md) + Space.sm : Space.xxl, paddingBottom: Space.xxxl * 2, gap: Space.lg }, contentStyle]}>
+    <Animated.View
+      entering={FadeInDown.duration(Motion.enter).reduceMotion(ReduceMotion.System)}
+      style={[{ width: '100%', maxWidth: maxWidth ?? MaxWidths[size], alignSelf: 'center', paddingHorizontal: padded ? (isPhone ? Space.lg : Space.xxl) : 0, paddingTop: isPhone ? Math.max(insets.top, Space.md) + Space.md : Space.xxl + Space.sm, paddingBottom: Space.xxxl * 2, gap: Space.lg }, contentStyle]}>
       {children}
-    </View>
+    </Animated.View>
   );
   if (!scroll) return <View style={{ flex: 1, backgroundColor: C.bg }}>{inner}</View>;
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scrollRef} style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
       {inner}
     </ScrollView>
   );
@@ -44,7 +101,7 @@ export function Row({ style, gap = Space.sm, align = 'center', wrap, ...rest }: 
   return <View {...rest} style={[{ flexDirection: 'row', alignItems: align, gap, flexWrap: wrap ? 'wrap' : 'nowrap' }, style]} />;
 }
 
-export function Stack({ style, gap = Space.sm, ...rest }: ViewProps & { gap?: number }) {
+export function Stack({ style, gap = Space.sm, ...rest }: ViewProps & { gap?: number; ref?: React.Ref<View> }) {
   return <View {...rest} style={[{ gap }, style]} />;
 }
 
@@ -65,13 +122,15 @@ export function Columns({ children, ratio = [1, 1], gap = Space.lg }: { children
   );
 }
 
-export function PageHeader({ title, subtitle, right }: { title: string; subtitle?: string; right?: React.ReactNode }) {
+export function PageHeader({ title, subtitle, eyebrow, right }: { title: string; subtitle?: string; eyebrow?: string; right?: React.ReactNode }) {
   return (
-    <Row align="flex-start" style={{ marginBottom: Space.xs }}>
-      <Stack gap={2} style={{ flex: 1 }}>
+    <Row align="flex-end" wrap gap={Space.md} style={{ marginBottom: Space.sm }}>
+      <Stack gap={Space.sm} style={{ flex: 1, minWidth: 220 }}>
+        {eyebrow ? <Text variant="eyebrow" color={C.textSecondary}>{eyebrow}</Text> : null}
         <Text variant="h1" accessibilityRole="header">
           {title}
         </Text>
+        <AccentRule />
         {subtitle ? <Muted>{subtitle}</Muted> : null}
       </Stack>
       {right}
@@ -81,8 +140,8 @@ export function PageHeader({ title, subtitle, right }: { title: string; subtitle
 
 export function SectionTitle({ children, right }: { children: React.ReactNode; right?: React.ReactNode }) {
   return (
-    <Row style={{ marginTop: Space.sm }}>
-      <Text variant="h3" style={{ flex: 1 }} accessibilityRole="header">
+    <Row style={{ marginTop: Space.md }}>
+      <Text variant="h2" style={{ flex: 1 }} accessibilityRole="header">
         {children}
       </Text>
       {right}
@@ -92,19 +151,36 @@ export function SectionTitle({ children, right }: { children: React.ReactNode; r
 
 // ---------- Surfaces ----------
 
-export function Card({ style, tone = 'default', dashed, children, ...rest }: ViewProps & { tone?: 'default' | 'suggestion' | 'pending' | 'saved' | 'simulated' | 'danger' | 'info' | 'muted'; dashed?: boolean }) {
-  const tones = {
-    default: { bg: C.surface, border: C.border },
-    suggestion: { bg: C.suggestionSoft, border: '#D9CCFB' },
-    pending: { bg: C.warningSoft, border: '#F7D9A8' },
-    saved: { bg: C.successSoft, border: '#B7E4CB' },
-    simulated: { bg: C.simulatedSoft, border: C.borderStrong },
-    danger: { bg: C.dangerSoft, border: '#F9C9C4' },
-    info: { bg: C.infoSoft, border: '#C7DBFB' },
-    muted: { bg: C.surfaceAlt, border: C.border },
-  }[tone];
+export type CardTone = 'default' | 'suggestion' | 'pending' | 'saved' | 'simulated' | 'danger' | 'info' | 'muted' | 'accent';
+
+const TONES: Record<CardTone, { bg: string; border: string }> = {
+  default: { bg: C.surface, border: C.border },
+  suggestion: { bg: C.suggestionSoft, border: C.suggestionBorder },
+  pending: { bg: C.warningSoft, border: C.warningBorder },
+  saved: { bg: C.successSoft, border: C.successBorder },
+  simulated: { bg: C.simulatedSoft, border: C.borderStrong },
+  danger: { bg: C.dangerSoft, border: C.dangerBorder },
+  info: { bg: C.infoSoft, border: C.infoBorder },
+  muted: { bg: C.surfaceAlt, border: C.border },
+  accent: { bg: C.primarySoft, border: C.primaryBorder },
+};
+
+export function Card({ style, tone = 'default', dashed, children, onPress, ...rest }: ViewProps & { tone?: CardTone; dashed?: boolean; onPress?: () => void }) {
+  const t = TONES[tone];
+  const base = [styles.card, { backgroundColor: t.bg, borderColor: t.border, borderStyle: dashed ? 'dashed' : 'solid' } as ViewStyle];
+  if (onPress) {
+    return (
+      <Pressable
+        {...(rest as PressableProps)}
+        onPress={onPress}
+        accessibilityRole={rest.accessibilityRole ?? 'button'}
+        style={({ pressed, hovered }: PState) => [...base, hovered ? { borderColor: C.borderStrong, backgroundColor: tone === 'default' ? C.surfaceHover : t.bg } : null, pressed ? { opacity: 0.85 } : null, style]}>
+        {children}
+      </Pressable>
+    );
+  }
   return (
-    <View {...rest} style={[styles.card, { backgroundColor: tones.bg, borderColor: tones.border, borderStyle: dashed ? 'dashed' : 'solid' }, style]}>
+    <View {...rest} style={[...base, style]}>
       {children}
     </View>
   );
@@ -116,16 +192,18 @@ export const Divider = ({ style }: { style?: StyleProp<ViewStyle> }) => <View st
 
 type ButtonKind = 'primary' | 'secondary' | 'ghost' | 'danger' | 'accept' | 'reject';
 
+const BUTTONS: Record<ButtonKind, { bg: string; fg: string; border: string; hoverBg: string; hoverBorder: string }> = {
+  primary: { bg: C.primary, fg: C.onPrimary, border: C.primary, hoverBg: C.primaryHover, hoverBorder: C.primaryHover },
+  accept: { bg: C.primary, fg: C.onPrimary, border: C.primary, hoverBg: C.primaryHover, hoverBorder: C.primaryHover },
+  secondary: { bg: C.surfaceAlt, fg: C.text, border: C.borderStrong, hoverBg: C.surfaceRaised, hoverBorder: C.textMuted },
+  reject: { bg: C.surfaceAlt, fg: C.text, border: C.borderStrong, hoverBg: C.surfaceRaised, hoverBorder: C.textMuted },
+  ghost: { bg: 'transparent', fg: C.primary, border: 'transparent', hoverBg: C.primarySoft, hoverBorder: 'transparent' },
+  danger: { bg: 'transparent', fg: C.danger, border: C.dangerBorder, hoverBg: C.dangerSoft, hoverBorder: C.danger },
+};
+
 export function Button({ title, kind = 'primary', icon, loading, disabled, size = 'md', style, full, ...rest }: PressableProps & { title: string; kind?: ButtonKind; icon?: IconName; loading?: boolean; size?: 'sm' | 'md' | 'lg'; style?: StyleProp<ViewStyle>; full?: boolean }) {
-  const palette = {
-    primary: { bg: C.primary, fg: C.onPrimary, border: C.primary },
-    accept: { bg: C.primary, fg: C.onPrimary, border: C.primary },
-    secondary: { bg: C.surface, fg: C.text, border: C.borderStrong },
-    reject: { bg: C.surface, fg: C.text, border: C.borderStrong },
-    ghost: { bg: 'transparent', fg: C.primary, border: 'transparent' },
-    danger: { bg: C.surface, fg: C.danger, border: '#F3B2AB' },
-  }[kind];
-  const pad = size === 'sm' ? { paddingVertical: 7, paddingHorizontal: 12 } : size === 'lg' ? { paddingVertical: 14, paddingHorizontal: 20 } : { paddingVertical: 11, paddingHorizontal: 16 };
+  const palette = BUTTONS[kind];
+  const pad = size === 'sm' ? { paddingVertical: 7, paddingHorizontal: 12 } : size === 'lg' ? { paddingVertical: 15, paddingHorizontal: 24 } : { paddingVertical: 11, paddingHorizontal: 18 };
   const isDisabled = disabled || loading;
   return (
     <Pressable
@@ -134,14 +212,21 @@ export function Button({ title, kind = 'primary', icon, loading, disabled, size 
       accessibilityLabel={title}
       disabled={isDisabled}
       {...rest}
-      style={({ pressed }) => [
+      style={({ pressed, hovered }: PState) => [
         styles.button,
         pad,
-        { backgroundColor: palette.bg, borderColor: palette.border, opacity: isDisabled ? 0.5 : pressed ? 0.85 : 1, alignSelf: full ? 'stretch' : 'flex-start', minHeight: size === 'sm' ? 34 : 44 },
+        {
+          backgroundColor: hovered && !isDisabled ? palette.hoverBg : palette.bg,
+          borderColor: hovered && !isDisabled ? palette.hoverBorder : palette.border,
+          opacity: isDisabled ? 0.45 : pressed ? 0.8 : 1,
+          transform: [{ scale: pressed && !isDisabled ? 0.98 : 1 }],
+          alignSelf: full ? 'stretch' : 'flex-start',
+          minHeight: size === 'sm' ? 34 : size === 'lg' ? 52 : 44,
+        },
         style,
       ]}>
       {loading ? <ActivityIndicator size="small" color={palette.fg} /> : icon ? <Ionicons name={icon} size={size === 'sm' ? 15 : 18} color={palette.fg} /> : null}
-      <Text variant={size === 'sm' ? 'smallStrong' : 'bodyStrong'} color={palette.fg}>
+      <Text variant={size === 'sm' ? 'smallStrong' : 'bodyStrong'} color={palette.fg} style={size === 'lg' ? { letterSpacing: 0.3 } : undefined}>
         {title}
       </Text>
     </Pressable>
@@ -150,7 +235,7 @@ export function Button({ title, kind = 'primary', icon, loading, disabled, size 
 
 export function IconButton({ icon, label, onPress, color = C.text, size = 22, style }: { icon: IconName; label: string; onPress?: () => void; color?: string; size?: number; style?: StyleProp<ViewStyle> }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={8} style={({ pressed }) => [{ padding: 8, borderRadius: Radius.pill, opacity: pressed ? 0.6 : 1 }, style]}>
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={8} style={({ pressed, hovered }: PState) => [{ padding: 8, borderRadius: Radius.pill, opacity: pressed ? 0.6 : 1 }, style, hovered ? { backgroundColor: C.surfaceRaised } : null]}>
       <Ionicons name={icon} size={size} color={color} />
     </Pressable>
   );
@@ -158,26 +243,27 @@ export function IconButton({ icon, label, onPress, color = C.text, size = 22, st
 
 // ---------- Badges & banners ----------
 
-export type BadgeKind = 'suggestion' | 'pending' | 'saved' | 'simulated' | 'sourced' | 'estimate' | 'neutral' | 'danger' | 'info' | 'rejected';
+export type BadgeKind = 'suggestion' | 'pending' | 'saved' | 'simulated' | 'sourced' | 'estimate' | 'neutral' | 'danger' | 'info' | 'rejected' | 'accent';
 
-const BADGES: Record<BadgeKind, { bg: string; fg: string; icon?: IconName }> = {
-  suggestion: { bg: '#EBE4FF', fg: C.suggestion, icon: 'sparkles' },
-  pending: { bg: '#FDEBC8', fg: '#93370D', icon: 'time-outline' },
-  saved: { bg: '#D1FADF', fg: C.success, icon: 'checkmark-circle' },
-  simulated: { bg: '#E4E7EC', fg: C.simulated, icon: 'flask-outline' },
-  sourced: { bg: '#DCEBFF', fg: C.info, icon: 'document-text-outline' },
-  estimate: { bg: '#FDEBC8', fg: '#93370D', icon: 'eye-outline' },
-  neutral: { bg: C.surfaceAlt, fg: C.textSecondary },
-  danger: { bg: '#FEE4E2', fg: C.danger, icon: 'alert-circle' },
-  info: { bg: '#DCEBFF', fg: C.info, icon: 'information-circle-outline' },
-  rejected: { bg: C.surfaceAlt, fg: C.textSecondary, icon: 'close-circle-outline' },
+const BADGES: Record<BadgeKind, { bg: string; fg: string; border: string; icon?: IconName }> = {
+  suggestion: { bg: C.suggestionSoft, fg: C.suggestion, border: C.suggestionBorder, icon: 'sparkles' },
+  pending: { bg: C.warningSoft, fg: C.warning, border: C.warningBorder, icon: 'time-outline' },
+  saved: { bg: C.successSoft, fg: C.success, border: C.successBorder, icon: 'checkmark-circle' },
+  simulated: { bg: C.simulatedSoft, fg: C.simulated, border: C.borderStrong, icon: 'flask-outline' },
+  sourced: { bg: C.infoSoft, fg: C.info, border: C.infoBorder, icon: 'document-text-outline' },
+  estimate: { bg: C.warningSoft, fg: C.warning, border: C.warningBorder, icon: 'eye-outline' },
+  neutral: { bg: C.surfaceAlt, fg: C.textSecondary, border: C.border },
+  danger: { bg: C.dangerSoft, fg: C.danger, border: C.dangerBorder, icon: 'alert-circle' },
+  info: { bg: C.infoSoft, fg: C.info, border: C.infoBorder, icon: 'information-circle-outline' },
+  rejected: { bg: C.surfaceAlt, fg: C.textSecondary, border: C.border, icon: 'close-circle-outline' },
+  accent: { bg: C.primarySoft, fg: C.primary, border: C.primaryBorder },
 };
 
 export function Badge({ kind = 'neutral', label, icon }: { kind?: BadgeKind; label: string; icon?: IconName | null }) {
   const b = BADGES[kind];
   const ic = icon === null ? undefined : icon ?? b.icon;
   return (
-    <View style={[styles.badge, { backgroundColor: b.bg }]} accessibilityLabel={label}>
+    <View style={[styles.badge, { backgroundColor: b.bg, borderColor: b.border }]} accessibilityLabel={label}>
       {ic ? <Ionicons name={ic} size={12} color={b.fg} /> : null}
       <Text variant="caption" color={b.fg}>
         {label}
@@ -245,6 +331,22 @@ export function ErrorState({ title = 'Something went wrong', body, onRetry, seco
   );
 }
 
+/** A placeholder bar with a moving highlight (static when reduced motion is on). */
+export function Skeleton({ width = '100%', height = 12, radius = 6, style }: { width?: ViewStyle['width']; height?: number; radius?: number; style?: StyleProp<ViewStyle> }) {
+  const reduce = useReducedMotion();
+  const x = useSharedValue(0);
+  React.useEffect(() => {
+    if (reduce) return;
+    x.set(withRepeat(withTiming(1, { duration: 1300, easing: Easing.inOut(Easing.ease) }), -1, false));
+  }, [reduce, x]);
+  const shine = useAnimatedStyle(() => ({ left: `${-40 + x.get() * 140}%` as `${number}%` }));
+  return (
+    <View style={[{ width, height, borderRadius: radius, backgroundColor: C.surfaceAlt, overflow: 'hidden' }, style]}>
+      {reduce ? null : <Animated.View style={[{ position: 'absolute', top: 0, bottom: 0, width: '40%', backgroundColor: C.surfaceRaised, opacity: 0.9 }, shine]} />}
+    </View>
+  );
+}
+
 export function LoadingState({ label, lines = 3 }: { label: string; lines?: number }) {
   return (
     <Card style={{ gap: Space.md }} accessibilityLabel={label} accessibilityRole="progressbar">
@@ -253,7 +355,7 @@ export function LoadingState({ label, lines = 3 }: { label: string; lines?: numb
         <Muted>{label}</Muted>
       </Row>
       {Array.from({ length: lines }).map((_, i) => (
-        <View key={i} style={{ height: 12, borderRadius: 6, backgroundColor: C.surfaceAlt, width: `${90 - i * 18}%` }} />
+        <Skeleton key={i} width={`${90 - i * 18}%`} />
       ))}
     </Card>
   );
@@ -261,15 +363,24 @@ export function LoadingState({ label, lines = 3 }: { label: string; lines?: numb
 
 // ---------- Inputs ----------
 
-export function Field({ label, hint, error, suffix, style, inputStyle, ...rest }: TextInputProps & { label?: string; hint?: string; error?: string; suffix?: string; style?: StyleProp<ViewStyle>; inputStyle?: StyleProp<TextStyle> }) {
+export function Field({ label, hint, error, suffix, style, inputStyle, ...rest }: TextInputProps & { label?: string; hint?: string; error?: string; suffix?: string; style?: StyleProp<ViewStyle>; inputStyle?: StyleProp<TextStyle>; ref?: React.Ref<TextInput> }) {
+  const [focused, setFocused] = React.useState(false);
   return (
     <Stack gap={6} style={style}>
-      {label ? <Text variant="smallStrong">{label}</Text> : null}
-      <View style={[styles.inputWrap, error ? { borderColor: C.danger } : null]}>
+      {label ? <Text variant="smallStrong" color={C.textSecondary}>{label}</Text> : null}
+      <View style={[styles.inputWrap, focused ? { borderColor: C.primary } : null, error ? { borderColor: C.danger } : null]}>
         <TextInput
           placeholderTextColor={C.textMuted}
           accessibilityLabel={label ?? rest.placeholder}
           {...rest}
+          onFocus={(e) => {
+            setFocused(true);
+            rest.onFocus?.(e);
+          }}
+          onBlur={(e) => {
+            setFocused(false);
+            rest.onBlur?.(e);
+          }}
           style={[styles.input, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null, inputStyle]}
         />
         {suffix ? <Muted variant="small" style={{ paddingRight: 12 }}>{suffix}</Muted> : null}
@@ -312,7 +423,7 @@ export function Chip({ label, selected, onPress, icon, asButton }: { label: stri
       accessibilityRole={asButton ? 'button' : 'checkbox'}
       accessibilityState={asButton ? undefined : { checked: !!selected }}
       accessibilityLabel={label}
-      style={({ pressed }) => [styles.chip, selected ? { backgroundColor: C.primarySoft, borderColor: C.primary } : null, pressed ? { opacity: 0.8 } : null]}>
+      style={({ pressed, hovered }: PState) => [styles.chip, hovered && !selected ? { borderColor: C.borderStrong, backgroundColor: C.surfaceRaised } : null, selected ? { backgroundColor: C.primarySoft, borderColor: C.primaryBorder } : null, pressed ? { opacity: 0.8 } : null]}>
       {icon ? <Ionicons name={icon} size={15} color={selected ? C.primary : C.textSecondary} /> : null}
       <Text variant="smallStrong" color={selected ? C.primary : C.text}>
         {label}
@@ -333,7 +444,7 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
             accessibilityRole="radio"
             accessibilityLabel={o.label}
             accessibilityState={{ selected: sel }}
-            style={[styles.segmentItem, sel ? styles.segmentItemSel : null]}>
+            style={({ hovered }: PState) => [styles.segmentItem, sel ? styles.segmentItemSel : hovered ? { backgroundColor: C.surfaceHover } : null]}>
             <Text variant="smallStrong" color={sel ? C.text : C.textSecondary} numberOfLines={1}>
               {o.label}
             </Text>
@@ -351,7 +462,7 @@ export function OptionCard({ title, body, selected, onPress, icon }: { title: st
       accessibilityRole="radio"
       accessibilityLabel={body ? `${title}. ${body}` : title}
       accessibilityState={{ selected: !!selected }}
-      style={({ pressed }) => [styles.card, { padding: Space.md, flexDirection: 'row', gap: Space.md, alignItems: 'center', borderColor: selected ? C.primary : C.border, backgroundColor: selected ? C.primarySoft : C.surface, opacity: pressed ? 0.9 : 1 }]}>
+      style={({ pressed, hovered }: PState) => [styles.card, { padding: Space.md, flexDirection: 'row', gap: Space.md, alignItems: 'center', borderColor: selected ? C.primaryBorder : hovered ? C.borderStrong : C.border, backgroundColor: selected ? C.primarySoft : hovered ? C.surfaceHover : C.surface, opacity: pressed ? 0.9 : 1 }]}>
       {icon ? <Ionicons name={icon} size={22} color={selected ? C.primary : C.textSecondary} /> : null}
       <Stack gap={2} style={{ flex: 1 }}>
         <Text variant="bodyStrong">{title}</Text>
@@ -381,8 +492,8 @@ export function Toggle({ value, onChange, label, description }: { value: boolean
         <Text variant="bodyStrong">{label}</Text>
         {description ? <Muted variant="small">{description}</Muted> : null}
       </Stack>
-      <View style={[styles.switchTrack, { backgroundColor: value ? C.primary : C.borderStrong }]}>
-        <View style={[styles.switchThumb, { transform: [{ translateX: value ? 18 : 0 }] }]} />
+      <View style={[styles.switchTrack, { backgroundColor: value ? C.primary : C.surfaceRaised, borderColor: value ? C.primary : C.borderStrong }]}>
+        <View style={[styles.switchThumb, { backgroundColor: value ? C.onPrimary : C.textSecondary, transform: [{ translateX: value ? 18 : 0 }] }]} />
       </View>
     </Pressable>
   );
@@ -393,7 +504,7 @@ export function Toggle({ value, onChange, label, description }: { value: boolean
 export function ProgressBar({ value, max, color = C.primary, height = 8, over }: { value: number; max: number; color?: string; height?: number; over?: boolean }) {
   const pct = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
   return (
-    <View style={{ height, borderRadius: height, backgroundColor: C.surfaceAlt, overflow: 'hidden' }} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: Math.round(max), now: Math.round(value) }}>
+    <View style={{ height, borderRadius: height, backgroundColor: C.surfaceRaised, overflow: 'hidden' }} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: Math.round(max), now: Math.round(value) }}>
       <View style={{ width: `${pct * 100}%`, height, borderRadius: height, backgroundColor: over ? C.warning : color }} />
     </View>
   );
@@ -401,13 +512,13 @@ export function ProgressBar({ value, max, color = C.primary, height = 8, over }:
 
 export function Stat({ label, value, unit, sub, color }: { label: string; value: string | number; unit?: string; sub?: string; color?: string }) {
   return (
-    <Stack gap={2}>
-      <Muted variant="caption">{label.toUpperCase()}</Muted>
-      <Row gap={4} align="flex-end">
-        <Text variant="h2" color={color}>
+    <Stack gap={4}>
+      <Text variant="eyebrow" color={C.textSecondary}>{label}</Text>
+      <Row gap={6} align="flex-end">
+        <Text variant="numberSm" color={color}>
           {value}
         </Text>
-        {unit ? <Muted variant="small" style={{ marginBottom: 2 }}>{unit}</Muted> : null}
+        {unit ? <Muted variant="small" style={{ marginBottom: 4 }}>{unit}</Muted> : null}
       </Row>
       {sub ? <Muted variant="small">{sub}</Muted> : null}
     </Stack>
@@ -428,7 +539,7 @@ export function Expandable({ title, children, initiallyOpen = false, icon }: { t
   const [open, setOpen] = React.useState(initiallyOpen);
   return (
     <View>
-      <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6 }}>
+      <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={({ hovered }: PState) => [{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, borderRadius: Radius.sm }, hovered ? { opacity: 0.8 } : null]}>
         {icon ? <Ionicons name={icon} size={15} color={C.textSecondary} /> : null}
         <Text variant="smallStrong" color={C.textSecondary} style={{ flex: 1 }}>
           {title}
@@ -447,7 +558,7 @@ export function Sheet({ visible, onClose, title, children, footer }: { visible: 
     <Modal visible={visible} transparent animationType={isPhone ? 'slide' : 'fade'} onRequestClose={onClose}>
       <View style={[styles.backdrop, { justifyContent: isPhone ? 'flex-end' : 'center' }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onClose} accessibilityLabel="Close" />
-        <View style={[styles.sheet, isPhone ? { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, paddingBottom: Math.max(insets.bottom, Space.lg) } : { width: 520, alignSelf: 'center' }]}>
+        <View style={[styles.sheet, isPhone ? { borderBottomLeftRadius: 0, borderBottomRightRadius: 0, borderBottomWidth: 0, paddingBottom: Math.max(insets.bottom, Space.lg) } : { width: 520, alignSelf: 'center' }]}>
           <Row>
             <Text variant="h2" style={{ flex: 1 }} accessibilityRole="header">
               {title}
@@ -467,17 +578,17 @@ export function Sheet({ visible, onClose, title, children, footer }: { visible: 
 const styles = StyleSheet.create({
   card: { borderRadius: Radius.lg, borderWidth: 1, padding: Space.lg, gap: Space.sm },
   button: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Space.sm, borderRadius: Radius.md, borderWidth: 1 },
-  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: Radius.pill, alignSelf: 'flex-start' },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: Radius.pill, borderWidth: 1, alignSelf: 'flex-start' },
   emptyIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
-  inputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: C.borderStrong, borderRadius: Radius.md, backgroundColor: C.surface, minHeight: 44 },
+  inputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: C.borderStrong, borderRadius: Radius.md, backgroundColor: C.bgDeep, minHeight: 44 },
   input: { flex: 1, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: C.text, minHeight: 44 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.pill, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface, minHeight: 36 },
-  segment: { flexDirection: 'row', backgroundColor: C.surfaceAlt, borderRadius: Radius.md, padding: 3, gap: 2 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.pill, borderWidth: 1, borderColor: C.border, backgroundColor: C.surfaceAlt, minHeight: 36 },
+  segment: { flexDirection: 'row', backgroundColor: C.bgDeep, borderRadius: Radius.md, borderWidth: 1, borderColor: C.border, padding: 3, gap: 2 },
   segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 10, borderRadius: Radius.sm, minHeight: 36 },
-  segmentItemSel: { backgroundColor: C.surface, shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 3, shadowOffset: { width: 0, height: 1 }, elevation: 1 },
+  segmentItemSel: { backgroundColor: C.surfaceRaised },
   stepBtn: { backgroundColor: C.surfaceAlt },
-  switchTrack: { width: 44, height: 26, borderRadius: 13, padding: 3 },
-  switchThumb: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#fff' },
-  backdrop: { flex: 1, backgroundColor: 'rgba(16,24,40,0.45)', padding: 0 },
-  sheet: { backgroundColor: C.surface, borderRadius: Radius.xl, padding: Space.xl, gap: Space.md, maxWidth: '100%' },
+  switchTrack: { width: 46, height: 28, borderRadius: 14, padding: 3, borderWidth: 1 },
+  switchThumb: { width: 20, height: 20, borderRadius: 10 },
+  backdrop: { flex: 1, backgroundColor: C.overlay, padding: 0 },
+  sheet: { backgroundColor: C.surface, borderRadius: Radius.xl, borderWidth: 1, borderColor: C.border, padding: Space.xl, gap: Space.md, maxWidth: '100%' },
 });

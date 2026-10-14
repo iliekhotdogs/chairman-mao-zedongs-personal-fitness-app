@@ -1,7 +1,5 @@
-import { __setApiKeyForTests, __setGeminiKeyForTests } from '../ai/apiKey';
-import { aiEngine, chatEngine, coachReply, estimateFood } from '../ai/provider';
+import { aiEngine, coachReply, estimateFood, fetchAiInfo } from '../ai/provider';
 import { buildSampleState } from '../sampleData';
-import { GROQ_VISION_MODEL, selectedChatModel } from '../ai/groqModels';
 
 jest.mock('@react-native-async-storage/async-storage', () =>
   jest.requireActual('@react-native-async-storage/async-storage/jest/async-storage-mock'),
@@ -16,23 +14,18 @@ const TODAY = '2026-10-02';
 const sample = () => ({ ...buildSampleState('dev', TODAY), proposals: [] });
 afterEach(() => {
   mockInvoke.mockReset();
-  __setApiKeyForTests(null);
-  __setGeminiKeyForTests(null);
 });
 
-describe('shared Groq gateway', () => {
-  it('uses Supabase for chat even when old device keys exist', async () => {
-    __setApiKeyForTests('nvapi-old');
-    __setGeminiKeyForTests('gemini-old');
+describe('shared AI gateway', () => {
+  it('uses Supabase for chat and never sends a model', async () => {
     const state = sample();
-    state.settings.chatModel = 'openai/gpt-oss-20b';
     mockInvoke.mockResolvedValue({ data: { reply: 'Shorter workout?', safety: false, intents: [{ type: 'short_on_time', minutes: 20 }] }, error: null });
-    expect(aiEngine(state.settings)).toBe('server');
-    expect(chatEngine(state.settings)).toBe('server');
+    expect(aiEngine()).toBe('server');
     const result = await coachReply(state, 'I have 20 minutes', TODAY);
     expect(result.simulated).toBe(false);
     expect(result.proposals.every((proposal) => proposal.status === 'pending')).toBe(true);
-    expect(mockInvoke).toHaveBeenCalledWith('ai', { body: expect.objectContaining({ action: 'coach', model: 'openai/gpt-oss-20b' }) });
+    expect(mockInvoke).toHaveBeenCalledWith('ai', { body: expect.objectContaining({ action: 'coach' }) });
+    expect(mockInvoke.mock.calls[0][1].body).not.toHaveProperty('model');
   });
 
   it('keeps urgent symptoms off the model', async () => {
@@ -41,13 +34,30 @@ describe('shared Groq gateway', () => {
     expect(mockInvoke).not.toHaveBeenCalled();
   });
 
-  it('sends meal photos to the Groq vision model', async () => {
+  it('labels meal estimates with the provider the server used', async () => {
     const state = sample();
-    mockInvoke.mockResolvedValue({ data: { items: [], overall_confidence: 'low', notes: [], model: GROQ_VISION_MODEL }, error: null });
+    mockInvoke.mockResolvedValue({ data: { items: [], overall_confidence: 'low', notes: [], model: 'gemini-3.8-flash', provider: 'Gemini' }, error: null });
     const result = await estimateFood(state, { hint: 'apple' });
-    expect(result.provider).toContain('Groq');
-    expect(mockInvoke).toHaveBeenCalledWith('ai', { body: expect.objectContaining({ action: 'estimate_food', model: GROQ_VISION_MODEL }) });
-    expect(selectedChatModel('google/gemma-4-31b-it:free')).toBe('openai/gpt-oss-120b');
+    expect(result.provider).toBe('Gemini (gemini-3.8-flash) via your server');
+    expect(mockInvoke).toHaveBeenCalledWith('ai', { body: expect.objectContaining({ action: 'estimate_food' }) });
+    expect(mockInvoke.mock.calls[0][1].body).not.toHaveProperty('model');
+  });
+
+  it('reads the admin-chosen provider from the info action', async () => {
+    const info = { enabled: true, provider: 'groq', providerLabel: 'Groq', chatModel: 'openai/gpt-oss-120b', chatModelLabel: 'GPT-OSS 120B', visionModel: 'qwen/qwen3.8-27b', visionModelLabel: 'Qwen3.8 27B', perUserDailyLimit: 5, usedToday: 1 };
+    mockInvoke.mockResolvedValue({ data: info, error: null });
+    await expect(fetchAiInfo()).resolves.toEqual(info);
+    expect(mockInvoke).toHaveBeenCalledWith('ai', { body: { action: 'info' } });
+  });
+
+  it('shows the kill-switch message when AI is switched off', async () => {
+    const error = Object.assign(new Error('Edge Function returned a non-2xx status code'), {
+      context: new Response(JSON.stringify({ error: 'Coach AI is switched off by the app owner right now. Built-in answers still work.' }), { status: 503 }),
+    });
+    mockInvoke.mockResolvedValue({ data: null, error });
+    const result = await coachReply(sample(), 'Can I shorten my workout?', TODAY);
+    expect(result.simulated).toBe(true);
+    expect(result.aiNotice).toMatch(/switched off/);
   });
 
   it('labels a failed photo call as a hint-based fallback', async () => {
@@ -66,7 +76,7 @@ describe('shared Groq gateway', () => {
     expect(result.aiNotice).toBe('NVIDIA is not configured on the server.');
   });
 
-  it('keeps a failed Groq coach reply clearly simulated', async () => {
+  it('keeps a failed coach reply clearly simulated', async () => {
     mockInvoke.mockResolvedValue({ data: null, error: new Error('provider unavailable') });
     const result = await coachReply(sample(), 'Can I shorten my workout?', TODAY);
     expect(result.simulated).toBe(true);

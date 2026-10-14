@@ -2,7 +2,7 @@
 
 A fitness app for **Android and desktop browsers** that cuts down food-logging effort, tracks gym progress, and gives personalised coaching. Built with Expo, React Native and TypeScript, so one codebase serves both.
 
-> **Status: working prototype.** Accounts and per-user sync use Supabase. Coach chat and meal photos use the owner’s Groq key, stored as a Supabase Edge Function secret. Database migration and functions must be deployed before these features work end to end. See [setup](docs/SETUP.md) and [verification](docs/TESTING.md).
+> **Status: working prototype.** Accounts and per-user sync use Supabase. Coach chat and meal photos go through the server AI gateway, a Supabase Edge Function that holds the provider key. Database migration and functions must be deployed before these features work end to end. See [setup](docs/SETUP.md) and [verification](docs/TESTING.md).
 
 ## What's in it
 
@@ -30,8 +30,9 @@ Then open http://localhost:8081. On the first screen choose **Explore with sampl
 On an Android phone: install **Expo Go** from the Play Store, run `npx expo start`, and scan the QR code (the phone and PC must be on the same Wi-Fi).
 
 ```bash
-npm test          # 74 unit tests for the business rules
+npm test          # unit tests (business rules, sync, storage, export)
 npm run typecheck # TypeScript
+npm run lint      # ESLint
 ```
 
 ## Project layout
@@ -45,6 +46,20 @@ src/store/          persistence, coaching engine scheduler, cloud sync
 supabase/           database schema (RLS) + Edge Functions (AI, notification cap)
 docs/               setup, AI provider & costs, wearables, testing report, release checklist
 ```
+
+## Web deploy (Vercel)
+
+The website is a static export served by Vercel. `vercel.json` at the repo root already sets the build command, output folder, SPA rewrite and asset caching.
+
+1. Import the repository in Vercel. Build command: `npm run build:web` (runs `expo export --platform web`). Output directory: `dist`. Node 20 or 22.
+2. Set environment variables (Production and Preview):
+   - `EXPO_PUBLIC_SUPABASE_URL`
+   - `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+   - optional `EXPO_PUBLIC_USDA_API_KEY` (otherwise USDA's rate-limited `DEMO_KEY` is used)
+
+   These are public values baked into the bundle. Never put secret or service-role keys in `EXPO_PUBLIC_*` variables.
+3. In Supabase, **Authentication > URL Configuration**: set the Site URL to the Vercel domain and add it (and any preview or custom domains) to the Redirect URLs, so sign-up confirmation and password-reset links return to the site.
+4. To check locally: `npm run build:web`, then serve `dist/` (for example `npx serve -s dist`) and refresh on a nested route.
 
 ## Next steps
 

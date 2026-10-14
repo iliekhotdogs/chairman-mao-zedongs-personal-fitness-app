@@ -1,5 +1,6 @@
 import React from 'react';
-import { router } from 'expo-router';
+import { Redirect } from 'expo-router';
+import { goBack } from '@/lib/nav';
 
 import { Space } from '@/constants/theme';
 import { Badge, Banner, Button, Card, Columns, EmptyState, ErrorState, LoadingState, Muted, PageHeader, Row, Screen, SectionTitle, Stack, Text } from '@/components/ui';
@@ -24,10 +25,16 @@ const base = (over: Partial<Proposal>): Proposal => ({
   ...over,
 });
 
-export default function StatesGallery() {
+/** Development-only: production builds send visitors home. */
+export default function StatesRoute() {
+  if (!__DEV__) return <Redirect href="/" />;
+  return <StatesGallery />;
+}
+
+function StatesGallery() {
   return (
     <Screen>
-      <PageHeader title="UI states" subtitle="Design review: how each state looks" right={<Button title="Back" kind="ghost" onPress={() => router.back()} />} />
+      <PageHeader title="UI states" subtitle="Design review: how each state looks" right={<Button title="Back" kind="ghost" onPress={() => goBack('/settings')} />} />
 
       <SectionTitle>Coaching suggestion lifecycle</SectionTitle>
       <Muted variant="small">Violet tag = AI suggestion · Amber = waiting for your approval · Green = accepted and saved · Grey = declined/expired (nothing changed).</Muted>

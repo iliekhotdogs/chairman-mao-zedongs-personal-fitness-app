@@ -1,6 +1,6 @@
 import type {
   ActivityRecord, ChatMessage, DayAdjustment, FoodEntry, Insight, IntegrationState, ISODate, NotificationRecord,
-  NutritionTargets, Profile, Proposal, Settings, SyncMeta, WeightEntry, WorkoutDay, WorkoutPlan, WorkoutSession,
+  NutritionTargets, Profile, ProgressPhoto, Proposal, Settings, SyncMeta, WeightEntry, WorkoutDay, WorkoutPlan, WorkoutSession,
 } from './types';
 
 export const STATE_VERSION = 1;
@@ -20,6 +20,7 @@ export interface AppState {
   workoutOverrides: WorkoutOverride[];
   foodLog: FoodEntry[];
   weights: WeightEntry[];
+  progressPhotos: ProgressPhoto[];
   plan?: WorkoutPlan;
   routines: WorkoutPlan[]; // user-created routines
   sessions: WorkoutSession[];
@@ -55,6 +56,7 @@ export function emptyState(deviceId: string, now: string): AppState {
     workoutOverrides: [],
     foodLog: [],
     weights: [],
+    progressPhotos: [],
     routines: [],
     sessions: [],
     activity: [],
@@ -70,9 +72,30 @@ export function emptyState(deviceId: string, now: string): AppState {
 }
 
 /** Collections that sync record-by-record (each item has id/updatedAt/deleted). */
-export const SYNCED_COLLECTIONS = ['dayAdjustments', 'workoutOverrides', 'foodLog', 'weights', 'routines', 'sessions', 'activity', 'proposals', 'chat', 'notifications'] as const;
+export const SYNCED_COLLECTIONS = ['dayAdjustments', 'workoutOverrides', 'foodLog', 'weights', 'routines', 'sessions', 'activity', 'proposals', 'chat', 'notifications', 'progressPhotos'] as const;
 export type SyncedCollection = (typeof SYNCED_COLLECTIONS)[number];
 
 /** Single documents that sync as a whole. */
 export const SYNCED_SINGLETONS = ['profile', 'targets', 'plan', 'settings'] as const;
 export type SyncedSingleton = (typeof SYNCED_SINGLETONS)[number];
+
+type SignatureKey = SyncedCollection | SyncedSingleton;
+
+/**
+ * A cheap content signature: per key, the item count plus the newest `updatedAt`.
+ * Every edit (including deletes, which are tombstones) bumps `updatedAt`, so this
+ * changes on edits as well as additions, unlike a plain length check.
+ */
+export function contentSignature(state: AppState, keys: readonly SignatureKey[] = [...SYNCED_COLLECTIONS, ...SYNCED_SINGLETONS]): string {
+  return keys
+    .map((k) => {
+      const v = state[k] as { updatedAt?: string }[] | { updatedAt?: string } | undefined;
+      if (Array.isArray(v)) {
+        let max = '';
+        for (const x of v) if (x.updatedAt && x.updatedAt > max) max = x.updatedAt;
+        return `${k}:${v.length}:${max}`;
+      }
+      return `${k}:${v?.updatedAt ?? '-'}`;
+    })
+    .join('|');
+}

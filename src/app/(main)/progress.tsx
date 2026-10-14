@@ -1,11 +1,14 @@
 import React, { useMemo, useState } from 'react';
 import { View } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Button, Card, Chip, EmptyState, IconButton, Muted, PageHeader, Row, Screen, Segmented, Stack, Stat, Text, Columns } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, IconButton, Muted, PageHeader, Row, Screen, SectionTitle, Segmented, Stack, Stat, Text, Columns } from '@/components/ui';
+import { Timeline } from '@/components/Timeline';
+import { milestones } from '@/lib/streaks';
 import { BarChart, LineChart } from '@/components/charts';
 import { WeightSheet } from '@/components/WeightSheet';
+import { ProgressPhotosSection } from '@/components/ProgressPhotos';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
 import { dayTargets, live, totalsForDay } from '@/lib/selectors';
@@ -15,19 +18,39 @@ import { weightSlopePerDay } from '@/lib/coaching/adaptive';
 import { progressionSeries } from '@/lib/workouts/progression';
 import { exerciseName } from '@/lib/workouts/exercises';
 
-type Tab = 'calories' | 'weight' | 'strength';
+type Tab = 'calories' | 'weight' | 'strength' | 'photos';
+const TABS: Tab[] = ['calories', 'weight', 'strength', 'photos'];
 const shortDate = (d: string) => parseISODate(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
 export default function Progress() {
-  const [tab, setTab] = useState<Tab>('calories');
+  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
+  const [tab, setTab] = useState<Tab>(TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'calories');
   return (
     <Screen>
-      <PageHeader title="Progress" subtitle="Calories, body weight and strength" right={<Button title="Activity" kind="secondary" icon="footsteps-outline" onPress={() => router.push('/activity')} />} />
-      <Segmented label="Progress view" value={tab} onChange={setTab} options={[{ value: 'calories', label: 'Calories' }, { value: 'weight', label: 'Weight' }, { value: 'strength', label: 'Strength' }]} />
+      <PageHeader title="Progress" subtitle="Calories, body weight, strength and photos" right={<Button title="Activity" kind="secondary" icon="footsteps-outline" onPress={() => router.push('/activity')} />} />
+      <Segmented label="Progress view" value={tab} onChange={setTab} options={[{ value: 'calories', label: 'Calories' }, { value: 'weight', label: 'Weight' }, { value: 'strength', label: 'Strength' }, { value: 'photos', label: 'Photos' }]} />
       {tab === 'calories' && <Calories />}
       {tab === 'weight' && <Weight />}
       {tab === 'strength' && <Strength />}
+      {tab === 'photos' && <ProgressPhotosSection />}
+      <Milestones />
     </Screen>
+  );
+}
+
+function Milestones() {
+  const { state, today } = useStore();
+  const units = state.settings.units;
+  const items = useMemo(() => milestones(state, { today, formatWeight: (kg) => displayWeight(kg, units) }), [state, today, units]);
+  return (
+    <Stack gap={Space.lg} style={{ marginTop: Space.xl }}>
+      <SectionTitle>Milestones</SectionTitle>
+      {items.length ? (
+        <Timeline items={items} />
+      ) : (
+        <EmptyState icon="flag-outline" title="Your story starts here" body="Log meals, finish workouts and weigh in. Firsts, streaks, weight changes and PRs show up on this timeline." />
+      )}
+    </Stack>
   );
 }
 

@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Platform, Share } from 'react-native';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, Columns, Expandable, Field, IconButton, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, Toggle } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, Columns, Expandable, Field, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Toggle } from '@/components/ui';
 import { useStore, clearLocalData } from '@/store/AppStore';
 import { AccountCard } from '@/components/AccountCard';
 import { AiSettings } from '@/components/AiSettings';
@@ -18,11 +17,15 @@ import { emptyState } from '@/lib/state';
 import { buildSampleState } from '@/lib/sampleData';
 import { newId } from '@/lib/id';
 import { permissionStatus, requestPermission } from '@/lib/notifications/deliver';
+import { forgetPushToken } from '@/lib/notifications/push';
 import { MAX_COACH_NOTIFICATIONS_PER_DAY, remainingToday } from '@/lib/notifications/policy';
-import { supabase } from '@/lib/sync/supabase';
+import { signOut, supabase } from '@/lib/sync/supabase';
+import { functionErrorMessage } from '@/lib/ai/provider';
 import { deleteCloudData } from '@/lib/sync/sync';
+import { csvExports, jsonExport } from '@/lib/export';
+import { saveExportFile } from '@/lib/exportFile';
 import { clearIntegrationConfig } from '@/lib/integrations/config';
-import { removeApiKey, removeGeminiKey } from '@/lib/ai/apiKey';
+import { formatRest, REST_MAX_SEC, REST_MIN_SEC, REST_STEP_SEC, sanitizeRestPrefs } from '@/lib/workouts/restTimer';
 import type { BodyArea, GoalPriority, NutritionTargets, Profile } from '@/lib/types';
 
 const GOALS: { value: GoalPriority; label: string }[] = [
@@ -31,8 +34,8 @@ const GOALS: { value: GoalPriority; label: string }[] = [
 
 export default function Settings() {
   return (
-    <Screen maxWidth={1080}>
-      <PageHeader title="Settings" right={<IconButton icon="close" label="Close settings" onPress={() => router.back()} />} />
+    <Screen size="medium">
+      <PageHeader title="Settings" />
       <Columns>
         {[
           <Stack key="l" gap={Space.lg}>
@@ -40,12 +43,14 @@ export default function Settings() {
             <TargetsSection />
             <ProfileSection />
             <CoachSection />
+            <RestSection />
             <AiSettings />
           </Stack>,
           <Stack key="r" gap={Space.lg}>
             <NotificationsSection />
             <IntegrationSettings />
             <AccountCard />
+            <DeleteAccountSection />
             <PrivacySection />
             <AboutSection />
           </Stack>,
@@ -117,10 +122,10 @@ function TargetsSection() {
     <Card style={{ gap: Space.sm }}>
       <Text variant="h3">Nutrition targets</Text>
       <Row wrap gap={Space.xl}>
-        <Stack gap={0}><Text variant="h2">{t.calories.toLocaleString()}</Text><Muted variant="small">kcal</Muted></Stack>
-        <Stack gap={0}><Text variant="h2" color={C.protein}>{t.proteinG} g</Text><Muted variant="small">protein</Muted></Stack>
-        <Stack gap={0}><Text variant="h2" color={C.carbs}>{t.carbsG} g</Text><Muted variant="small">carbs</Muted></Stack>
-        <Stack gap={0}><Text variant="h2" color={C.fat}>{t.fatG} g</Text><Muted variant="small">fat</Muted></Stack>
+        <Stack gap={0}><Text variant="numberSm">{t.calories.toLocaleString()}</Text><Muted variant="small">kcal</Muted></Stack>
+        <Stack gap={0}><Text variant="numberSm" color={C.protein}>{t.proteinG} g</Text><Muted variant="small">protein</Muted></Stack>
+        <Stack gap={0}><Text variant="numberSm" color={C.carbs}>{t.carbsG} g</Text><Muted variant="small">carbs</Muted></Stack>
+        <Stack gap={0}><Text variant="numberSm" color={C.fat}>{t.fatG} g</Text><Muted variant="small">fat</Muted></Stack>
       </Row>
       <Expandable title="How this was set" icon="calculator-outline">
         <Muted variant="small">{t.method}</Muted>
@@ -207,6 +212,33 @@ function CoachSection() {
   );
 }
 
+function RestSection() {
+  const { state } = useStore();
+  const doAct = useAct();
+  const rest = sanitizeRestPrefs(state.settings.rest);
+  const set = (patch: Partial<typeof rest>) => doAct({ type: 'UPDATE_SETTINGS', patch: { rest: sanitizeRestPrefs({ ...rest, ...patch }) }, now: nowISO() });
+  return (
+    <Card style={{ gap: Space.sm }}>
+      <Text variant="h3">Rest timer</Text>
+      <Muted variant="small">Starts after every logged set. Plan days with their own rest times use those instead.</Muted>
+      <Row>
+        <Stack gap={0} style={{ flex: 1 }}>
+          <Text variant="bodyStrong">Compound lifts</Text>
+          <Muted variant="small">Squat, bench, rows, presses</Muted>
+        </Stack>
+        <Stepper value={rest.compoundSec} onChange={(compoundSec) => set({ compoundSec })} step={REST_STEP_SEC} min={REST_MIN_SEC} max={REST_MAX_SEC} format={formatRest} />
+      </Row>
+      <Row>
+        <Stack gap={0} style={{ flex: 1 }}>
+          <Text variant="bodyStrong">Accessories</Text>
+          <Muted variant="small">Curls, raises, isolation work</Muted>
+        </Stack>
+        <Stepper value={rest.accessorySec} onChange={(accessorySec) => set({ accessorySec })} step={REST_STEP_SEC} min={REST_MIN_SEC} max={REST_MAX_SEC} format={formatRest} />
+      </Row>
+    </Card>
+  );
+}
+
 function NotificationsSection() {
   const { state, today } = useStore();
   const doAct = useAct();
@@ -276,18 +308,12 @@ function PrivacySection() {
   const toast = useToast();
   const [confirm, setConfirm] = useState<'local' | 'cloud' | null>(null);
 
-  const exportData = async () => {
-    const json = JSON.stringify({ exportedAt: nowISO(), app: 'FitCoach', data: state }, null, 2);
-    if (Platform.OS === 'web') {
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `fitcoach-export-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } else {
-      await Share.share({ message: json, title: 'FitCoach data export' });
+  const exportData = async (format: 'json' | 'csv') => {
+    try {
+      const files = format === 'json' ? [jsonExport(state, nowISO())] : csvExports(state, nowISO());
+      for (const f of files) await saveExportFile(f);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Export failed', 'error');
     }
   };
 
@@ -295,12 +321,10 @@ function PrivacySection() {
     try {
       if (confirm === 'cloud' && sync.session) await deleteCloudData(sync.session.user.id);
       // sign out before clearing, so background sync can't re-upload or re-download meanwhile
-      if (sync.session) await supabase()?.auth.signOut();
+      if (sync.session) await signOut();
       await clearLocalData(sync.session?.user.id);
       if (!sync.configured) {
         await clearIntegrationConfig();
-        await removeApiKey();
-        await removeGeminiKey();
       }
       doAct({ type: 'REPLACE_STATE', state: emptyState(newId(), nowISO()) });
       setConfirm(null);
@@ -315,7 +339,8 @@ function PrivacySection() {
       <Text variant="h3">Privacy &amp; your data</Text>
       <Muted variant="small">Your food log, photos, body weight, workouts and chat are private to you. With an account, cloud data is protected so only your signed-in account can read it. AI requests send a short context summary or reduced photo to the selected provider.</Muted>
       <Row wrap gap={Space.sm}>
-        <Button title="Export my data" kind="secondary" size="sm" icon="download-outline" onPress={exportData} />
+        <Button title="Export my data" kind="secondary" size="sm" icon="download-outline" onPress={() => exportData('json')} />
+        <Button title="Export food & weights (CSV)" kind="secondary" size="sm" icon="document-text-outline" onPress={() => exportData('csv')} />
         <Button title="Delete data on this device" kind="danger" size="sm" onPress={() => setConfirm('local')} />
         {sync.session ? <Button title="Delete my cloud data" kind="danger" size="sm" onPress={() => setConfirm('cloud')} /> : null}
       </Row>
@@ -341,6 +366,63 @@ function PrivacySection() {
   );
 }
 
+/** Permanently deletes the signed-in account (photos, synced rows, login) on the server. */
+function DeleteAccountSection() {
+  const { sync } = useStore();
+  const doAct = useAct();
+  const toast = useToast();
+  const [confirm, setConfirm] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!sync.session) return null;
+  const userId = sync.session.user.id;
+
+  const deleteAccount = async () => {
+    const sb = supabase();
+    if (!sb) return;
+    setBusy(true);
+    try {
+      const { error } = await sb.functions.invoke('delete-account', { body: {} });
+      if (error) throw new Error(await functionErrorMessage(error, 'Account deletion failed.'));
+      // The server session is gone; sign out locally, then clear this account's cache.
+      forgetPushToken(); // the server rows went with the account
+      await sb.auth.signOut({ scope: 'local' }).catch(() => {});
+      await clearLocalData(userId);
+      doAct({ type: 'REPLACE_STATE', state: emptyState(newId(), nowISO()) });
+      setConfirm(false);
+      toast('Your account was deleted.');
+      router.replace('/onboarding');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Account deletion failed.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card style={{ gap: Space.sm }}>
+      <Text variant="h3">Delete account</Text>
+      <Muted variant="small">Permanently deletes your account, your synced records and your food photos from the server. This cannot be undone. Export your data first if you want a copy.</Muted>
+      <Row>
+        <Button title="Delete account" kind="danger" size="sm" icon="trash-outline" onPress={() => { setTyped(''); setConfirm(true); }} />
+      </Row>
+      <Sheet
+        visible={confirm}
+        onClose={() => setConfirm(false)}
+        title="Delete your account?"
+        footer={
+          <Row gap={Space.sm}>
+            <Button title="Cancel" kind="secondary" style={{ flex: 1 }} onPress={() => setConfirm(false)} />
+            <Button title="Delete forever" kind="danger" style={{ flex: 1 }} loading={busy} disabled={typed.trim().toUpperCase() !== 'DELETE'} onPress={deleteAccount} />
+          </Row>
+        }>
+        <Muted>Your login, synced data and photos for {sync.session.user.email} are removed for good, and you are signed out on this device. Type DELETE to confirm.</Muted>
+        <Field value={typed} onChangeText={setTyped} autoCapitalize="characters" placeholder="DELETE" accessibilityLabel="Type DELETE to confirm" />
+      </Sheet>
+    </Card>
+  );
+}
+
 function AboutSection() {
   const { state, today } = useStore();
   const imageEngine = useAiEngine('food');
@@ -351,13 +433,13 @@ function AboutSection() {
     <Card style={{ gap: Space.sm }}>
       <Text variant="h3">Prototype &amp; design review</Text>
       <Row wrap gap={6}>
-        <Badge kind={imageEngine === 'simulated' ? 'simulated' : 'info'} label={imageEngine === 'nvidia' ? 'NVIDIA images' : imageEngine === 'server' ? 'Server images' : 'Built-in image estimates'} />
-        <Badge kind={chatEngine === 'simulated' ? 'simulated' : 'info'} label={chatEngine === 'gemini' ? 'Gemini chat' : chatEngine === 'server' ? 'Server chat' : 'Built-in chat'} />
+        <Badge kind={imageEngine === 'simulated' ? 'simulated' : 'info'} label={imageEngine === 'server' ? 'Server images' : 'Built-in image estimates'} />
+        <Badge kind={chatEngine === 'simulated' ? 'simulated' : 'info'} label={chatEngine === 'server' ? 'Server chat' : 'Built-in chat'} />
         <Badge kind="simulated" label="Simulated health sync" />
         <Badge kind="info" label="USDA lookup is live" />
       </Row>
       <Row wrap gap={Space.sm}>
-        <Button title="UI states gallery" kind="secondary" size="sm" icon="color-palette-outline" onPress={() => router.push('/states')} />
+        {__DEV__ ? <Button title="UI states gallery" kind="secondary" size="sm" icon="color-palette-outline" onPress={() => router.push('/states')} /> : null}
         <Button title="Load sample data" kind="ghost" size="sm" icon="flask-outline" onPress={() => setConfirm(true)} />
       </Row>
       <Muted variant="small">FitCoach v1.0.0 (prototype) · Not medical advice. Consult a professional for injuries, medical conditions, or eating-disorder concerns.</Muted>
