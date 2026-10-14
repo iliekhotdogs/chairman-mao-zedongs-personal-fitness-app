@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, Columns, Expandable, Field, IconButton, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, Toggle } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, Columns, Expandable, Field, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, Toggle } from '@/components/ui';
 import { useStore, clearLocalData } from '@/store/AppStore';
 import { AccountCard } from '@/components/AccountCard';
 import { AiSettings } from '@/components/AiSettings';
@@ -33,7 +33,7 @@ const GOALS: { value: GoalPriority; label: string }[] = [
 export default function Settings() {
   return (
     <Screen size="medium">
-      <PageHeader title="Settings" right={<IconButton icon="close" label="Close settings" onPress={() => router.back()} />} />
+      <PageHeader title="Settings" />
       <Columns>
         {[
           <Stack key="l" gap={Space.lg}>
