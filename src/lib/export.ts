@@ -1,5 +1,6 @@
 import type { AppState } from './state';
 import type { UnitSystem } from './types';
+import { toISODate } from './dates';
 import { live } from './selectors';
 import { round, weightValue, weightUnit } from './units';
 
@@ -11,7 +12,8 @@ export interface ExportFile {
   content: string;
 }
 
-const day = (nowIso: string) => nowIso.slice(0, 10);
+/** The user's local calendar day (not the UTC one, which is tomorrow on a US evening). */
+const day = (nowIso: string) => toISODate(new Date(nowIso));
 
 /** Quote a CSV field when needed (RFC 4180). Also defuses spreadsheet formula injection. */
 export function csvField(v: unknown): string {

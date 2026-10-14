@@ -38,6 +38,68 @@ export async function discardLocalPhoto(uri: string | undefined): Promise<void> 
   }
 }
 
+/** A photo read from this device, ready to upload. */
+export interface LocalPhoto {
+  /** Blob on web; raw bytes on Android/iOS, where Blob uploads arrive empty. */
+  body: Blob | Uint8Array;
+  size: number;
+}
+
+/**
+ * Read a photo stored on THIS device for upload, or undefined when it is not here: records
+ * synced from another device carry that device's paths (a phone's file:// uri on the web,
+ * or a file the OS has since removed). Those are skipped quietly; their own device uploads them.
+ *  - Web: data: (thumbnails) and blob: URLs, read as a Blob.
+ *  - Native: data: URLs are decoded; file:// and content:// files are read with
+ *    expo-file-system as bytes (Supabase Storage cannot upload React Native Blobs).
+ */
+export async function readLocalPhoto(uri: string): Promise<LocalPhoto | undefined> {
+  if (Platform.OS === 'web') {
+    if (!uri.startsWith('data:') && !uri.startsWith('blob:')) return undefined;
+    try {
+      const blob = await (await fetch(uri)).blob();
+      return { body: blob, size: blob.size };
+    } catch {
+      return undefined; // a blob: URL from an earlier page load is gone
+    }
+  }
+  if (uri.startsWith('data:')) {
+    const bytes = dataUrlBytes(uri);
+    return bytes ? { body: bytes, size: bytes.byteLength } : undefined;
+  }
+  if (!uri.startsWith('file:') && !uri.startsWith('content:')) return undefined;
+  const { File } = await import('expo-file-system');
+  const file = new File(uri);
+  if (!file.exists) return undefined;
+  const bytes = await file.bytes();
+  return { body: bytes, size: bytes.byteLength };
+}
+
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+/** Bytes of a base64 `data:` URL, or undefined if it is not one. */
+export function dataUrlBytes(uri: string): Uint8Array | undefined {
+  const m = /^data:[^,]*;base64,(.*)$/s.exec(uri);
+  if (!m) return undefined;
+  const text = m[1].replace(/[\s=]/g, '');
+  const out = new Uint8Array(Math.floor((text.length * 3) / 4));
+  let bits = 0;
+  let value = 0;
+  let n = 0;
+  for (const ch of text) {
+    const v = B64.indexOf(ch === '-' ? '+' : ch === '_' ? '/' : ch);
+    if (v < 0) return undefined;
+    value = (value << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out[n++] = (value >> bits) & 0xff;
+      value &= (1 << bits) - 1;
+    }
+  }
+  return out.subarray(0, n);
+}
+
 function webThumbnail(uri: string, maxSize: number, quality: number): Promise<string> {
   return new Promise((resolve, reject) => {
     const img = new window.Image();

@@ -2,7 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 import type { AppState } from '../state';
 import { log } from '../log';
-import { localChanges, type RemoteRecord } from './merge';
+import { readLocalPhoto } from '../photo';
+import { reducer, type Action } from '../reducer';
+import { localChanges, PHOTO_BUCKET, PHOTO_FIELD, pendingStorageRemovals, type PhotoUpload, type RemoteRecord } from './merge';
 import { supabase } from './supabase';
 
 export interface SyncCursor {
@@ -89,94 +91,244 @@ export function keysetFilter(at: string, collection: string, id: string): string
 
 type PulledRow = RemoteRecord & { synced_at: string };
 
-const isLocalPhoto = (uri?: string) => Boolean(uri && !uri.startsWith('storage:'));
-
-/** Synced progress photo (the `progressPhotos` collection; typed loosely so this file
- * does not depend on its exact type). */
-type ProgressPhotoLike = { id: string; uri?: string; updatedAt: string; deleted?: boolean };
-type WithProgress = AppState & { progressPhotos?: ProgressPhotoLike[] };
+/** Bucket API used for photos (narrowed so tests can fake it). */
+type PhotoBucket = Pick<ReturnType<SupabaseClient['storage']['from']>, 'upload' | 'info' | 'remove'>;
 
 /**
- * Upload every local photo in `items` (field `field`) to the user's private folder and
- * point the entry at `storage:food-photos/<path>`. Failures keep the local photo for a retry.
+ * Local state access for a sync. Uploads take a while, so sync re-reads state after them
+ * and records their results with targeted actions instead of returning a stale copy.
  */
-async function uploadList<T extends { id: string; updatedAt: string; deleted?: boolean }>(
-  sb: SupabaseClient, items: T[], field: 'photoUri' | 'uri', pathFor: (item: T) => string,
-): Promise<{ items: T[]; changed: boolean }> {
-  let changed = false;
-  const next = await Promise.all(
-    items.map(async (e) => {
-      const uri = (e as Record<string, unknown>)[field] as string | undefined;
-      if (e.deleted || !isLocalPhoto(uri)) return e;
-      try {
-        const blob = await (await fetch(uri!)).blob();
-        const path = pathFor(e);
-        const { error } = await sb.storage.from('food-photos').upload(path, blob, { contentType: 'image/jpeg', upsert: true });
-        if (error) {
-          log.warn('sync', `Photo upload failed for ${e.id}; will retry.`, error);
-          return e;
-        }
-        changed = true;
-        return { ...e, [field]: `storage:food-photos/${path}`, updatedAt: new Date().toISOString() };
-      } catch (err) {
-        log.warn('sync', `Photo upload failed for ${e.id}; will retry.`, err);
-        return e; // keep the local photo; retry next sync
-      }
-    }),
-  );
-  return { items: next, changed };
+export interface SyncStore {
+  /** The current local state. */
+  get(): AppState;
+  dispatch(action: Action): void;
 }
 
-/** Upload local food and progress photos to the user's private folder, returning the updated state. */
-async function uploadPhotos(state: AppState, userId: string): Promise<AppState> {
-  const sb = supabase();
-  if (!sb) return state;
-  const food = await uploadList(sb, state.foodLog, 'photoUri', (e) => `${userId}/${e.id}.jpg`);
-  const progressList = (state as WithProgress).progressPhotos;
-  const progress = Array.isArray(progressList)
-    ? await uploadList(sb, progressList, 'uri', (p) => `${userId}/progress/${p.id}.jpg`)
-    : { items: progressList, changed: false };
-  if (!food.changed && !progress.changed) return state;
-  return { ...state, foodLog: food.items, ...(progress.changed ? { progressPhotos: progress.items } : {}) } as AppState;
+/** A store over a plain state object (tests, and callers without a live store). */
+export function memoryStore(initial: AppState): SyncStore & { state: AppState } {
+  const store = {
+    state: initial,
+    get: () => store.state,
+    dispatch: (action: Action) => {
+      store.state = reducer(store.state, action);
+    },
+  };
+  return store;
 }
 
-/** Entries of `after` that differ (by identity) from the same index in `before`. */
-const changedEntries = <T,>(after: T[] | undefined, before: T[] | undefined): T[] =>
-  Array.isArray(after) ? after.filter((e, i) => e !== before?.[i]) : [];
-
-/** Collections whose photo uploads are merged back as rows. */
-const PHOTO_COLLECTIONS = new Set<string>(['foodLog', 'progressPhotos']);
+/** Zero-byte photos are reported once per session, not on every sync. */
+const reportedEmpty = new Set<string>();
 
 /**
- * Two-way sync: push local changes, then pull everything newer than the cursor.
- * Conflicts resolve by last write (updatedAt). Deletions sync as tombstones.
+ * Upload one local photo. Returns false when it is not on this device (skipped quietly:
+ * another device's path), is empty, or the upload failed (kept local, retried next sync).
  */
-export async function syncNow(state: AppState, userId: string, cursor: SyncCursor): Promise<{ rows: RemoteRecord[]; cursor: SyncCursor; pushed: number; pulled: number }> {
-  const sb = supabase();
-  if (!sb) throw new Error('Cloud sync is not configured.');
-  const startedAt = new Date().toISOString();
+async function uploadOne(bucket: PhotoBucket, path: string, uri: string, id: string): Promise<boolean> {
+  const photo = await readLocalPhoto(uri);
+  if (!photo) return false;
+  if (!photo.size) {
+    if (!reportedEmpty.has(id)) log.warn('sync', `Photo for ${id} is empty on this device; not uploading it.`);
+    reportedEmpty.add(id);
+    return false;
+  }
+  const { data, error } = await bucket.upload(path, photo.body, { contentType: 'image/jpeg', upsert: true });
+  if (error || !data?.path) {
+    log.warn('sync', `Photo upload failed for ${id}; will retry.`, error);
+    return false;
+  }
+  // A stored object of 0 bytes means the body did not make it (React Native Blob bodies
+  // upload empty). If the check itself fails, trust the successful upload.
+  try {
+    const info = await bucket.info(path);
+    if (!info.error && info.data?.size === 0) {
+      log.warn('sync', `Photo upload for ${id} arrived empty; will retry.`);
+      return false;
+    }
+  } catch (e) {
+    log.warn('sync', `Could not check the uploaded photo for ${id}.`, e);
+  }
+  return true;
+}
 
-  const withPhotos = await uploadPhotos(state, userId);
-  const rows = localChanges(withPhotos, cursor.lastPushedAt);
-  if (rows.length) {
-    const { error } = await sb.from('records').upsert(
-      rows.map((r) => ({ user_id: userId, collection: r.collection, id: r.id, data: r.data, updated_at: r.updated_at, deleted: r.deleted })),
+/**
+ * Upload the local photos of live records in `state` to the user's private folder. Only
+ * successful uploads are returned; the caller applies them to the CURRENT state.
+ */
+async function uploadPhotos(bucket: PhotoBucket, state: AppState, userId: string): Promise<PhotoUpload[]> {
+  const jobs: Promise<PhotoUpload | undefined>[] = [];
+  for (const c of ['foodLog', 'progressPhotos'] as const) {
+    const list = state[c] as unknown as ({ id: string; deleted?: boolean } & Record<string, unknown>)[] | undefined;
+    if (!Array.isArray(list)) continue;
+    for (const e of list) {
+      const uri = e[PHOTO_FIELD[c]];
+      if (e.deleted || typeof uri !== 'string' || !uri || uri.startsWith('storage:')) continue;
+      const path = c === 'foodLog' ? `${userId}/${e.id}.jpg` : `${userId}/progress/${e.id}.jpg`;
+      jobs.push(
+        uploadOne(bucket, path, uri, e.id).then(
+          (ok): PhotoUpload | undefined => (ok ? { collection: c, id: e.id, from: uri, to: `storage:${PHOTO_BUCKET}/${path}` } : undefined),
+          (err) => {
+            log.warn('sync', `Photo upload failed for ${e.id}; will retry.`, err);
+            return undefined;
+          },
+        ),
+      );
+    }
+  }
+  return (await Promise.all(jobs)).filter((u): u is PhotoUpload => u !== undefined);
+}
+
+/**
+ * Remove the cloud copies of deleted photos. Failures are logged and retried next sync.
+ * Paths outside the user's folder can't be theirs (RLS refuses them), so they are dropped.
+ */
+async function removeDeletedPhotos(bucket: PhotoBucket, store: SyncStore, userId: string): Promise<void> {
+  const pending = pendingStorageRemovals(store.get());
+  if (!pending.length) return;
+  const own = pending.filter((p) => p.path.startsWith(`${userId}/`));
+  let done = pending.filter((p) => !p.path.startsWith(`${userId}/`));
+  if (own.length) {
+    try {
+      const { error } = await bucket.remove([...new Set(own.map((p) => p.path))]);
+      if (error) log.warn('sync', `Could not remove ${own.length} deleted photo(s) from the cloud; will retry.`, error);
+      else done = [...done, ...own];
+    } catch (e) {
+      log.warn('sync', `Could not remove ${own.length} deleted photo(s) from the cloud; will retry.`, e);
+    }
+  }
+  if (done.length) store.dispatch({ type: 'STORAGE_REMOVED', removed: done });
+}
+
+/** Rows per upsert request. */
+export const PUSH_CHUNK_SIZE = 200;
+
+/**
+ * Postgres errors that reject a row for what it IS, so sending it again can't succeed:
+ * check violations (`records_size_check`, `records_collection_check`), the per-account row
+ * cap (`raise exception`, P0001), malformed or over-long values, and HTTP 413 (request too
+ * large). Anything else (network, timeouts, 5xx, auth) is treated as transient.
+ */
+const PERMANENT_CODES = new Set(['23514', 'P0001', '22P02', '23502', '22001', '54000']);
+type UpsertError = { message: string; code?: string };
+const isPermanent = (error: UpsertError, status?: number) => PERMANENT_CODES.has(error.code ?? '') || status === 413;
+
+export interface PushResult {
+  pushed: number;
+  /** Rows the server refused for good; logged and skipped until they are edited again. */
+  rejected: RemoteRecord[];
+  /** Rows not stored because of a transient error; sent again next sync. */
+  failed: RemoteRecord[];
+  error?: string;
+}
+
+/**
+ * Upsert `rows` in chunks. A chunk refused for a permanent reason is retried row by row, so
+ * one bad row can't hold back the rest. A transient error stops the push (the network is
+ * probably down) and every row not yet stored is reported as `failed`.
+ */
+export async function pushRows(sb: SupabaseClient, userId: string, rows: RemoteRecord[], chunkSize = PUSH_CHUNK_SIZE): Promise<PushResult> {
+  const out: PushResult = { pushed: 0, rejected: [], failed: [] };
+  const send = async (batch: RemoteRecord[]) => {
+    const res = await sb.from('records').upsert(
+      batch.map((r) => ({ user_id: userId, collection: r.collection, id: r.id, data: r.data, updated_at: r.updated_at, deleted: r.deleted })),
       { onConflict: 'user_id,collection,id' },
     );
-    if (error) throw new Error(`Upload failed: ${error.message}`);
+    return { error: res.error as UpsertError | null, status: res.status as number | undefined };
+  };
+  for (let i = 0; i < rows.length; i += chunkSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    const res = await send(chunk);
+    if (!res.error) {
+      out.pushed += chunk.length;
+      continue;
+    }
+    if (!isPermanent(res.error, res.status)) {
+      out.failed.push(...rows.slice(i));
+      out.error = res.error.message;
+      return out;
+    }
+    for (let j = 0; j < chunk.length; j++) {
+      const row = chunk[j];
+      const one = await send([row]);
+      if (!one.error) {
+        out.pushed += 1;
+      } else if (isPermanent(one.error, one.status)) {
+        out.rejected.push(row);
+        log.error('sync', `The server rejected ${row.collection}/${row.id} (${one.error.code ?? one.status ?? 'error'}); skipping it.`, one.error.message);
+      } else {
+        out.failed.push(...chunk.slice(j), ...rows.slice(i + chunkSize));
+        out.error = one.error.message;
+        return out;
+      }
+    }
   }
+  return out;
+}
 
-  const pulled = await pullSince(sb, userId, cursor);
-  // Local photo uploads are returned as rows too, so the caller merges everything into the
-  // CURRENT state (edits made during the network call are not lost).
-  // (progressPhotos is included once it is a synced collection; see SYNCED_COLLECTIONS.)
-  const photoState = {
-    ...withPhotos,
-    foodLog: changedEntries(withPhotos.foodLog, state.foodLog),
-    progressPhotos: changedEntries((withPhotos as WithProgress).progressPhotos, (state as WithProgress).progressPhotos),
-  } as AppState;
-  const photoRows = localChanges(photoState, cursor.lastPushedAt).filter((r) => PHOTO_COLLECTIONS.has(r.collection));
-  return { rows: [...photoRows, ...pulled.rows], cursor: { ...pulled.cursor, lastPushedAt: startedAt }, pushed: rows.length, pulled: pulled.rows.length };
+export interface SyncResult {
+  /** Pulled rows, to merge into the current state. */
+  rows: RemoteRecord[];
+  cursor: SyncCursor;
+  pushed: number;
+  pulled: number;
+  /** Rows the server refused for good (logged, skipped). */
+  rejected: number;
+  /** Set when some local changes could not be uploaded; the pull still ran. */
+  pushError?: string;
+}
+
+/**
+ * Two-way sync: upload local photos, push local changes, then pull everything newer than
+ * the cursor. Conflicts resolve by last write (updatedAt). Deletions sync as tombstones.
+ *
+ * Photo uploads are applied to the CURRENT state through `store` (PHOTOS_UPLOADED), and the
+ * rows to push are read only after that, so an edit or delete made while photos uploaded is
+ * neither overwritten locally nor pushed over with an older copy.
+ *
+ * The pull runs even when the push fails; the push error is returned as `pushError`.
+ *
+ * Push cursor: `lastPushedAt` becomes the time the rows were read (minus 1 ms, so an edit
+ * stamped in that same millisecond is still sent next time). If rows failed transiently it
+ * stays just below the oldest of them, so they are sent again next sync; re-sending rows
+ * that did arrive is harmless (same id and updatedAt). Rows the server rejects for good do
+ * not hold it back, since they would fail on every sync and block everything after them;
+ * they are logged and sent again only once edited.
+ */
+export async function syncNow(store: SyncStore, userId: string, cursor: SyncCursor): Promise<SyncResult> {
+  const sb = supabase();
+  if (!sb) throw new Error('Cloud sync is not configured.');
+  const bucket: PhotoBucket = sb.storage.from(PHOTO_BUCKET);
+
+  const uploads = await uploadPhotos(bucket, store.get(), userId);
+  if (uploads.length) store.dispatch({ type: 'PHOTOS_UPLOADED', uploads, now: new Date().toISOString() });
+  await removeDeletedPhotos(bucket, store, userId);
+
+  const readAt = new Date(Date.now() - 1).toISOString();
+  const rows = localChanges(store.get(), cursor.lastPushedAt);
+  const push: PushResult = rows.length ? await pushRows(sb, userId, rows) : { pushed: 0, rejected: [], failed: [] };
+  let lastPushedAt = readAt;
+  if (push.failed.length) {
+    const oldest = Math.min(...push.failed.map((r) => timestampMs(r.updated_at)));
+    const before = Number.isFinite(oldest) ? new Date(oldest - 1).toISOString() : cursor.lastPushedAt;
+    lastPushedAt = before > cursor.lastPushedAt ? before : cursor.lastPushedAt;
+  }
+  const pushError = push.error !== undefined ? `Upload failed: ${push.error}` : undefined;
+  if (pushError) log.warn('sync', `${push.failed.length} change(s) were not uploaded; will retry.`, push.error);
+
+  let pulled: { rows: RemoteRecord[]; cursor: SyncCursor };
+  try {
+    pulled = await pullSince(sb, userId, cursor);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    throw new Error(pushError ? `${pushError}. ${message}` : message);
+  }
+  return {
+    rows: pulled.rows,
+    cursor: { ...pulled.cursor, lastPushedAt },
+    pushed: push.pushed,
+    pulled: pulled.rows.length,
+    rejected: push.rejected.length,
+    ...(pushError ? { pushError } : {}),
+  };
 }
 
 /**
