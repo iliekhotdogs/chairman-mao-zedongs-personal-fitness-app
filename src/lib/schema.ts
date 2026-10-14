@@ -9,6 +9,11 @@ import type { SyncedCollection, SyncedSingleton } from './state';
  * versions can round-trip data they don't fully understand.
  */
 
+// Zod probes `new Function('')` when an object schema is built, to decide whether to compile
+// parsers. The web Content-Security-Policy forbids eval, so the probe would log a CSP
+// violation; jitless skips it (and eval) and parses the same way.
+z.config({ jitless: true });
+
 const str = z.string();
 const num = z.number();
 const stamp = z.string().min(1);
