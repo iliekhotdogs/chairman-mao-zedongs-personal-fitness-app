@@ -35,7 +35,7 @@ src/lib/              business logic, no UI:
   log.ts              logger; use it instead of empty catch blocks
 src/store/AppStore.tsx  React provider: hydration, persistence, coaching engine scheduler, sync loop
 supabase/migrations/  SQL schema with RLS
-supabase/functions/   Edge Functions (Deno): ai, admin-stats, notify
+supabase/functions/   Edge Functions (Deno): ai, admin-stats, notify, redeem-invite, delete-account; shared code in _shared/
 docs/                 SETUP, AI_PROVIDER, WEARABLES, TESTING, RELEASE
 ```
 
@@ -48,9 +48,13 @@ docs/                 SETUP, AI_PROVIDER, WEARABLES, TESTING, RELEASE
 - The store syncs on sign-in, every 2 minutes, on app foreground, and 5 s after any change to synced data (detected with `contentSignature`).
 - Business rules live in `checkAction` (reducer.ts). Screens dispatch through `act()`, which checks once and throws `RuleViolation` with a user-facing message.
 
+## Accounts
+
+Signup is invite-only: the admin creates invite codes and the `redeem-invite` Edge Function creates the account. Roles live in the `profiles` table (`admin` / `user`), never in user metadata. `delete-account` removes the auth user, and the schema cascades to their rows. Setup is in `docs/SETUP.md`.
+
 ## How AI works
 
-The client never holds a provider key. Signed-in users call the Supabase `ai` Edge Function (the server AI gateway), which picks the provider and model, holds the secret key, and meters per-user quotas. Without Supabase, the app uses built-in simulated answers. AI output is always a *proposal*: nothing changes plans, targets or the food log until the user accepts. Provider details are in `docs/AI_PROVIDER.md`.
+The client never holds a provider key. Signed-in users call the Supabase `ai` Edge Function (the server AI gateway). The admin picks the provider and model globally (`app_config`); the function holds the secret keys and meters per-user quotas. Without Supabase, the app uses built-in simulated answers. AI output is always a *proposal*: nothing changes plans, targets or the food log until the user accepts. Provider details are in `docs/AI_PROVIDER.md`.
 
 ## Conventions
 
