@@ -1,4 +1,4 @@
-import { DEFAULT_CONFIG, describeRegistry, PROVIDER_IDS, PROVIDERS, resolveConfig, validateConfigUpdate } from '../../../supabase/functions/_shared/providers';
+import { DEFAULT_CONFIG, describeRegistry, effectiveConfig, PROVIDER_IDS, PROVIDERS, resolveConfig, validateConfigUpdate, validPreference } from '../../../supabase/functions/_shared/providers';
 
 describe('AI provider registry', () => {
   it('has groq, gemini and nvidia with chat and vision models', () => {
@@ -12,6 +12,11 @@ describe('AI provider registry', () => {
     }
     expect(PROVIDERS.gemini.url).toBe('https://generativelanguage.googleapis.com/v1beta/openai/chat/completions');
     expect(PROVIDERS.nvidia.chatModels.some((model) => /kimi/i.test(model.id))).toBe(true);
+    expect(PROVIDERS.groq.chatModels).toHaveLength(3);
+    expect(PROVIDERS.gemini.chatModels).toHaveLength(3);
+    expect(PROVIDERS.groq.userSelectable).toBe(true);
+    expect(PROVIDERS.gemini.userSelectable).toBe(true);
+    expect(PROVIDERS.nvidia.userSelectable).toBe(false);
   });
 
   // Ids verified against the providers' model catalogs in 2026-10 (see docs/AI_PROVIDER.md).
@@ -86,5 +91,21 @@ describe('AI provider registry', () => {
     expect(described.find((p) => p.id === 'groq')?.keySet).toBe(true);
     expect(described.find((p) => p.id === 'gemini')?.keySet).toBe(false);
     expect(JSON.stringify(described)).not.toMatch(/extra|chat_template_kwargs/);
+  });
+
+  it('derives photo models from the chosen chat model', () => {
+    const keySet = () => true;
+    expect(effectiveConfig(DEFAULT_CONFIG, { provider: 'groq', chat_model: 'openai/gpt-oss-20b' }, keySet).config.vision_model).toBe('qwen/qwen3.8-27b');
+    expect(effectiveConfig(DEFAULT_CONFIG, { provider: 'groq', chat_model: 'qwen/qwen3.8-27b' }, keySet).config.vision_model).toBe('qwen/qwen3.8-27b');
+    expect(effectiveConfig(DEFAULT_CONFIG, { provider: 'gemini', chat_model: 'gemini-3.8-flash' }, keySet).config.vision_model).toBe('gemini-3.8-flash');
+  });
+
+  it('ignores stale and unavailable user choices', () => {
+    const preference = { provider: 'gemini', chat_model: 'gemini-3.8-flash' };
+    expect(effectiveConfig(DEFAULT_CONFIG, preference, () => false)).toEqual({ config: DEFAULT_CONFIG, isDefault: true });
+    expect(effectiveConfig(DEFAULT_CONFIG, { provider: 'nvidia', chat_model: PROVIDERS.nvidia.chatModels[0].id }, () => true).isDefault).toBe(true);
+    expect(effectiveConfig(DEFAULT_CONFIG, { provider: 'gemini', chat_model: 'retired' }, () => true).isDefault).toBe(true);
+    expect(validPreference({ provider: 'groq', chat_model: 'gemini-3.8-flash' })).toBeNull();
+    expect(effectiveConfig({ ...DEFAULT_CONFIG, allow_user_choice: false }, preference, () => true).isDefault).toBe(true);
   });
 });

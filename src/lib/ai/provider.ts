@@ -10,7 +10,7 @@ import { exerciseName, formatPrescription } from '../workouts/exercises';
 import { prepareImageForAI, type ImageSetting } from './image';
 
 /** Signed-in accounts use the server-side AI gateway (supabase/functions/ai). The
- * admin picks the provider and models there; the client never sends a model.
+ * gateway resolves each user's saved choice; model ids never accompany coach calls.
  * Without Supabase, the app offers built-in answers. AI only proposes changes. */
 
 export class AIUnavailableError extends Error {}
@@ -43,6 +43,9 @@ export interface AiInfo {
   visionModelLabel: string;
   perUserDailyLimit: number;
   usedToday: number;
+  allowUserChoice: boolean;
+  isDefault: boolean;
+  options: { id: string; label: string; keyConfigured: boolean; models: { id: string; label: string; vision: boolean }[] }[];
 }
 
 export async function fetchAiInfo(): Promise<AiInfo> {
@@ -52,6 +55,15 @@ export async function fetchAiInfo(): Promise<AiInfo> {
   if (error) throw new Error(await functionErrorMessage(error, 'AI info is unavailable.'));
   if (!data || typeof data.providerLabel !== 'string') throw new Error('AI info is unavailable.');
   return data as AiInfo;
+}
+
+export async function saveAiPreference(provider: string, chat_model: string): Promise<AiInfo> {
+  const sb = supabase();
+  if (!sb) throw new AIUnavailableError('Server AI is not configured.');
+  const { data, error } = await sb.functions.invoke('ai', { body: { action: 'set_preference', provider, chat_model } });
+  if (error) throw new Error(await functionErrorMessage(error, 'Could not save AI choice.'));
+  if (!data?.info || typeof data.info.provider !== 'string') throw new Error('Could not confirm AI choice.');
+  return data.info as AiInfo;
 }
 
 type FoodInput = { hint?: string; photoUri?: string; photoSize?: { width?: number; height?: number }; followUpAnswered?: boolean; imageSetting?: ImageSetting };

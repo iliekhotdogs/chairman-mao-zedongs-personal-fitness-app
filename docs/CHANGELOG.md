@@ -1,5 +1,12 @@
 # Change log
 
+## 2026-10-14 15:39 PDT — Codex
+
+- Added server-held per-user Groq and Gemini model choices, derived photo models, admin provider controls, confirmed-email admin bootstrap, audited role changes, and RLS checks.
+- Updated the AI and setup documentation for the new preference and admin flows.
+
+Signed off: Codex
+
 ## 2026-10-14 15:33 PDT — Codex
 
 - Fixed coach safety word matching and fail-closed profile checks; added regression tests.

@@ -3,7 +3,7 @@
 // Actions: check, stats, list_users, create_invite, list_invites, revoke_invite,
 // set_disabled, reset_quota, get_config, set_config.
 // No health data, records or chat content leave this function.
-import { admin, isAdmin, isOwner, profileOf, requestUser } from '../_shared/auth.ts';
+import { admin, isAdmin, isOwner, ownerId, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
 import { describeRegistry, resolveConfig, validateConfigUpdate } from '../_shared/providers.ts';
 import { generateInviteCode, inviteExpiry, normalizeInviteCode } from '../_shared/invite.ts';
@@ -107,6 +107,19 @@ Deno.serve(async (request) => {
       if (!isUuid(input.userId)) return json({ error: 'userId is required.' }, 400);
       const { error } = await admin.rpc('admin_reset_ai_quota', { p_user: input.userId, p_day: utcDay() });
       if (error) return json({ error: 'Could not reset the quota.' }, 502);
+      return json({ ok: true });
+    }
+
+    case 'set_role': {
+      if (!isUuid(input.userId) || !['admin', 'user'].includes(String(input.role))) return json({ error: 'userId and role are required.' }, 400);
+      const { data, error } = await admin.rpc('admin_set_role', {
+        p_actor: user.id, p_target: input.userId, p_role: input.role,
+        p_owner: isUuid(ownerId()) ? ownerId() : null,
+      });
+      if (error) return json({ error: 'Could not change the role.' }, 503);
+      if (data === 'missing') return json({ error: 'Account profile is missing.' }, 404);
+      if (data === 'protected' || data === 'last_admin') return json({ error: 'That admin role is protected.' }, 403);
+      if (data !== 'ok') return json({ error: 'Could not change the role.' }, 400);
       return json({ ok: true });
     }
 

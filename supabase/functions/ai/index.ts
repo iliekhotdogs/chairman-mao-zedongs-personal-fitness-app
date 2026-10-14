@@ -5,7 +5,7 @@
 import type { User } from 'npm:@supabase/supabase-js@2.117.2';
 import { admin, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, clientIpHash, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
-import { findModel, modelLabel, PROVIDERS, resolveConfig, type AiConfig } from '../_shared/providers.ts';
+import { effectiveConfig, findModel, modelLabel, PROVIDERS, resolveConfig, validPreference, type AiConfig } from '../_shared/providers.ts';
 import { matchingFood, validateVisionItem, type VisionItem } from './foodValidation.ts';
 import { hasInjuryRedFlag, isUrgentSymptom } from '../_shared/coachSafety.ts';
 
@@ -39,6 +39,13 @@ async function loadConfig(): Promise<AiConfig> {
   return resolveConfig(data);
 }
 
+async function resolvedForUser(userId: string, config: AiConfig) {
+  if (!config.allow_user_choice) return { config, isDefault: true };
+  const { data, error } = await admin.from('user_ai_prefs').select('provider, chat_model').eq('user_id', userId).maybeSingle();
+  if (error) throw new AiError('AI preferences are unavailable right now.', 503);
+  return effectiveConfig(config, data, (keyEnv) => Boolean(Deno.env.get(keyEnv)));
+}
+
 type Completion = { text: string; input: number; output: number };
 async function complete(config: AiConfig, meter: Meter, kind: 'chat' | 'vision', messages: unknown[], maxTokens: number): Promise<Completion> {
   const info = PROVIDERS[config.provider];
@@ -70,10 +77,10 @@ async function complete(config: AiConfig, meter: Meter, kind: 'chat' | 'vision',
     // the provider without limit.
     const ourFault = response.status === 429 || response.status >= 500 || [401, 403, 404, 408].includes(response.status);
     if (!ourFault) meter.counted = true;
-    const detail = (await response.text().catch(() => '')).slice(0, 300);
+    await response.text().catch(() => '');
     const hint = response.status === 401 || response.status === 403 ? ` (check the ${info.keyEnv} secret)`
       : response.status === 404 ? ` (model "${model}" not offered to this key)` : '';
-    console.error(`${info.label} ${response.status} for ${model}${hint}: ${detail}`);
+    console.error(`${info.label} ${response.status} for ${model}${hint}`);
     throw new AiError(response.status === 429 ? AI_BUSY : AI_UNAVAILABLE, response.status === 429 ? 429 : 502);
   }
   // From here on the provider has done (and billed) the work.
@@ -245,15 +252,23 @@ async function estimateFood(config: AiConfig, meter: Meter, body: Record<string,
 
 async function aiInfo(user: User) {
   const config = await loadConfig();
+  const effective = await resolvedForUser(user.id, config);
+  const selected = effective.config;
   const { data } = await admin.from('ai_usage').select('requests').eq('user_id', user.id).eq('day', utcDay()).maybeSingle();
   return {
-    enabled: config.ai_enabled && config.per_user_daily_limit > 0 && config.global_daily_limit > 0 && Boolean(Deno.env.get(PROVIDERS[config.provider].keyEnv)),
-    provider: config.provider,
-    providerLabel: PROVIDERS[config.provider].label,
-    chatModel: config.chat_model,
-    chatModelLabel: modelLabel(config.provider, config.chat_model),
-    visionModel: config.vision_model,
-    visionModelLabel: modelLabel(config.provider, config.vision_model),
+    enabled: config.ai_enabled && config.per_user_daily_limit > 0 && config.global_daily_limit > 0 && Boolean(Deno.env.get(PROVIDERS[selected.provider].keyEnv)),
+    allowUserChoice: config.allow_user_choice,
+    isDefault: effective.isDefault,
+    options: config.allowed_providers.filter((id) => PROVIDERS[id].userSelectable).map((id) => ({
+      id, label: PROVIDERS[id].label, keyConfigured: Boolean(Deno.env.get(PROVIDERS[id].keyEnv)),
+      models: PROVIDERS[id].chatModels.map((model) => ({ id: model.id, label: model.label, vision: Boolean(findModel(PROVIDERS[id].visionModels, model.id)) })),
+    })),
+    provider: selected.provider,
+    providerLabel: PROVIDERS[selected.provider].label,
+    chatModel: selected.chat_model,
+    chatModelLabel: modelLabel(selected.provider, selected.chat_model),
+    visionModel: selected.vision_model,
+    visionModelLabel: modelLabel(selected.provider, selected.vision_model),
     perUserDailyLimit: config.per_user_daily_limit,
     usedToday: data?.requests ?? 0,
   };
@@ -279,6 +294,17 @@ Deno.serve(async (request) => {
   }
   if (body.action === 'info') {
     try { return json(await aiInfo(user)); } catch (error) { return json({ error: error instanceof Error ? error.message : 'AI info unavailable.' }, 503); }
+  }
+  if (body.action === 'set_preference') {
+    let config: AiConfig;
+    try { config = await loadConfig(); } catch { return json({ error: 'AI preferences are unavailable right now.' }, 503); }
+    if (!config.allow_user_choice) return json({ error: 'AI choice is disabled.' }, 403);
+    const preference = validPreference(body);
+    if (!preference || !config.allowed_providers.includes(preference.provider)) return json({ error: 'Choose an available provider and model.' }, 400);
+    if (!Deno.env.get(PROVIDERS[preference.provider].keyEnv)) return json({ error: 'That provider is not available.' }, 400);
+    const { error } = await admin.from('user_ai_prefs').upsert({ user_id: user.id, ...preference, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+    if (error) return json({ error: 'Could not save AI preference.' }, 503);
+    return json({ ok: true, info: await aiInfo(user) });
   }
   if (body.action === 'search_food') {
     const query = text(body.query, 100).trim();
@@ -307,7 +333,7 @@ Deno.serve(async (request) => {
   if (body.action !== 'coach' && body.action !== 'estimate_food') return json({ error: 'Unknown action.' }, 400);
 
   let config: AiConfig;
-  try { config = await loadConfig(); } catch (error) { return json({ error: error instanceof AiError ? error.message : 'AI is not ready.' }, 503); }
+  try { config = (await resolvedForUser(user.id, await loadConfig())).config; } catch (error) { return json({ error: error instanceof AiError ? error.message : 'AI is not ready.' }, 503); }
   if (!config.ai_enabled) return json({ error: AI_OFF }, 503);
   const info = PROVIDERS[config.provider];
   if (!Deno.env.get(info.keyEnv)) {

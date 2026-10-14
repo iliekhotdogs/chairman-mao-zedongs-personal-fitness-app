@@ -4,9 +4,9 @@ Signed-in accounts reach AI only through the Supabase Edge Function `supabase/fu
 
 ## Who picks the model
 
-The **admin** picks one provider and its models for everyone, in **Settings → Account & sync → Admin → AI configuration**. Users do not choose. Settings → Coach AI shows them a read-only line such as "Groq · GPT-OSS 120B" (from the function's `info` action).
+The **admin** sets the default provider and models in **Settings → Account & sync → Admin → AI configuration**, chooses whether users may choose, and controls which providers are allowed. Signed-in users can choose Groq or Gemini and one of three chat models in **Settings → Coach AI**. NVIDIA is admin-only. A choice is saved in the server-only `user_ai_prefs` table and applies on every device. With no valid choice, the admin default is used. The photo model is the chosen chat model when it reads images; otherwise it is the provider's default photo model (Qwen3.8 27B on Groq).
 
-The choice is stored in the single-row `app_config` table (service role only): `provider`, `chat_model`, `vision_model`, `per_user_daily_limit`, `global_daily_limit`, `per_ip_daily_limit`, `ai_enabled`.
+The defaults and controls are stored in single-row `app_config` (service role only): `provider`, `chat_model`, `vision_model`, `allowed_providers`, `allow_user_choice`, `per_user_daily_limit`, `global_daily_limit`, `per_ip_daily_limit`, `ai_enabled`. User choices never enter synced app state or exports.
 
 ## Provider registry
 
@@ -18,7 +18,7 @@ The choice is stored in the single-row `app_config` table (service role only): `
 | Gemini | `GEMINI_API_KEY` | `generativelanguage.googleapis.com/v1beta/openai/chat/completions` | `gemini-3.5-flash-lite` (default), `gemini-3.8-flash`, `gemini-3.1-flash-lite` | same as chat |
 | NVIDIA | `NVIDIA_API_KEY` | `integrate.api.nvidia.com/v1/chat/completions` | `moonshotai/kimi-k2.6` (default), `deepseek-ai/deepseek-v4.1-flash`, `nvidia/nemotron-3-super-120b-a12b` | `meta/llama-3.2-90b-vision-instruct` (default), `meta/llama-3.2-11b-vision-instruct`, `moonshotai/kimi-k2.6` |
 
-### Model verification (2026-10-13)
+### Model verification (2026-10-14)
 
 Every id above was checked against the provider's own catalog:
 
@@ -26,9 +26,9 @@ Every id above was checked against the provider's own catalog:
 - **Gemini** ([models](https://ai.google.dev/gemini-api/docs/models), [pricing](https://ai.google.dev/gemini-api/docs/pricing), [OpenAI compatibility](https://ai.google.dev/gemini-api/docs/openai)): `gemini-3.8-flash`, `gemini-3.5-flash-lite` and `gemini-3.1-flash-lite` are stable, have a free tier and read images. `gemini-2.5-pro` was removed from the list because Google now limits the 2.5 family to existing users. The OpenAI-compatible endpoint accepts `image_url` parts with `data:image/...;base64,` URIs and `reasoning_effort` (`minimal`/`low`/`medium`/`high`, mapped to `thinking_level` on 3.x models); thinking cannot be switched off on 3.x, so the registry sends `reasoning_effort: "low"` to keep it short. Default is 3.5 Flash-Lite as the cheapest current model with image input ($0.30 / $2.50 per million tokens); 3.8 Flash is better but costs more (from 2027-01-01 its price doubles).
 - **NVIDIA** ([LLM API reference](https://docs.api.nvidia.com/nim/reference/llm-apis), [multimodal API reference](https://docs.api.nvidia.com/nim/reference/multimodal-apis), and the live catalog `GET https://integrate.api.nvidia.com/v1/models`): `moonshotai/kimi-k2-instruct` and `meta/llama-3.3-70b-instruct` are no longer in the live catalog, so they were replaced with `moonshotai/kimi-k2.6` (text, image and video input) and `nvidia/nemotron-3-super-120b-a12b`. `deepseek-ai/deepseek-v4.1-flash` and both Llama 3.2 Vision models are listed. Thinking is turned off with `chat_template_kwargs` where the model's chat template supports it, and `<think>` blocks are stripped from replies anyway. NVIDIA's forum has reports of Kimi K2.6 returning 404 for some keys; switch to another model in the admin screen if that happens.
 
-To re-check: `curl https://integrate.api.nvidia.com/v1/models` (no key needed), and the Groq/Gemini pages above. The admin screen surfaces a 404 from a provider as "<provider> doesn't offer <model> to this key".
+To re-check for a particular account, query each provider's `GET /v1/models` using its server-held key before deployment, and consult the Groq/Gemini pages above. The published catalogs confirm the IDs; availability to a particular key can still differ. Provider errors remain generic in the app.
 
-`set_config` rejects a model that is not in the chosen provider's list. If a stored model later disappears from the list, the function falls back to that provider's first model. To add a model, edit the registry, run `npm test` (see `src/lib/__tests__/aiRegistry.test.ts`) and redeploy `ai` and `admin-stats`.
+`set_config` and `set_preference` reject models outside their provider's list. A stale user preference falls back to the admin default. To add a model, edit the registry, run `npm test` (see `src/lib/__tests__/aiRegistry.test.ts`) and redeploy `ai` and `admin-stats`.
 
 The admin screen shows "(no key)" next to a provider whose secret is not set. The key itself is never returned.
 
@@ -44,8 +44,8 @@ The admin screen shows "(no key)" next to a provider whose secret is not set. Th
 
 ## Features
 
-- **Coach chat:** the configured chat model. The reply is JSON with suggested intents; proposals still need the user to accept them.
-- **Meal photos:** the configured photo model. Photos are reduced before upload; the server checks MIME type and size (bodies over about 7 MB are refused before they are read). Estimates are checked against USDA FoodData Central when possible. Groq's free tier allows about 1000 output tokens per minute for its photo model, so Groq photo replies are capped at 900 tokens.
+- **Coach chat:** the user's selected chat model, or the admin default. The reply is JSON with suggested intents; proposals still need the user to accept them.
+- **Meal photos:** the derived photo model for the user's provider, or the admin default. Photos are reduced before upload; the server checks MIME type and size (bodies over about 7 MB are refused before they are read). Estimates are checked against USDA FoodData Central when possible. Groq's free tier allows about 1000 output tokens per minute for its photo model, so Groq photo replies are capped at 900 tokens.
 - **Without Supabase:** built-in rule-based replies and hint-based meal estimates. Photos are not analyzed.
 
 Chat messages, a short fitness summary and reduced meal photos are sent to the chosen provider. See [SETUP.md](SETUP.md) for deployment and secrets.

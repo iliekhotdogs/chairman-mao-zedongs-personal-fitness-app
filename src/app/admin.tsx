@@ -16,9 +16,9 @@ type Stats = {
 };
 type Model = { id: string; label: string };
 type ProviderEntry = { id: string; label: string; keyEnv: string; keySet: boolean; chatModels: Model[]; visionModels: Model[] };
-type AiConfig = { provider: string; chat_model: string; vision_model: string; per_user_daily_limit: number; global_daily_limit: number; per_ip_daily_limit?: number; ai_enabled: boolean };
+type AiConfig = { provider: string; chat_model: string; vision_model: string; per_user_daily_limit: number; global_daily_limit: number; per_ip_daily_limit?: number; ai_enabled: boolean; allowed_providers: string[]; allow_user_choice: boolean };
 type Invite = { code: string; created_at: string; expires_at: string | null; used_at: string | null; used_email: string | null; note: string | null; status: 'open' | 'used' | 'expired' | 'burned' };
-type AdminUser = { user_id: string; email: string; created_at: string; last_sign_in_at: string | null; email_confirmed_at: string | null; role: 'admin' | 'user'; disabled: boolean; ai_requests_today: number };
+type AdminUser = { user_id: string; email: string; created_at: string; last_sign_in_at: string | null; email_confirmed_at: string | null; role: 'admin' | 'user'; disabled: boolean; ai_requests_today: number; ai_provider: string | null; ai_chat_model: string | null };
 
 /** Calls one action of the admin Edge Function and returns its JSON, or throws the server's reason. */
 async function adminCall<T>(action: string, extra: Record<string, unknown> = {}): Promise<T> {
@@ -165,11 +165,14 @@ function AiConfigSection() {
   return (
     <Card style={{ gap: Space.md }}>
       <Text variant="h3">AI configuration</Text>
-      <Muted variant="small">Applies to every account. Keys are Supabase secrets and never leave the server.</Muted>
+      <Muted variant="small">Default AI applies until a user chooses an allowed provider. Keys are Supabase secrets.</Muted>
       {error ? <Banner kind="warning">{error}</Banner> : null}
       {draft ? (
         <>
           <Toggle label="AI enabled" description="Off is a kill switch: chat and meal photos fall back to built-in answers." value={draft.ai_enabled} onChange={(ai_enabled) => setDraft({ ...draft, ai_enabled })} />
+          <Toggle label="Let users choose AI" value={draft.allow_user_choice} onChange={(allow_user_choice) => setDraft({ ...draft, allow_user_choice })} />
+          <Text variant="smallStrong">Providers users may choose</Text>
+          <Row wrap gap={6}>{providers.filter((p) => p.id !== 'nvidia').map((p) => <Chip key={p.id} label={`${p.label}${p.keySet ? '' : ' · key unset'}`} selected={draft.allowed_providers?.includes(p.id)} onPress={() => setDraft({ ...draft, allowed_providers: draft.allowed_providers.includes(p.id) ? draft.allowed_providers.filter((id) => id !== p.id) : [...draft.allowed_providers, p.id] })} />)}</Row>
           <Text variant="smallStrong">Provider</Text>
           <Row wrap gap={6}>
             {providers.map((p) => (
@@ -280,7 +283,7 @@ function UsersSection() {
   }, [users]);
   useEffect(() => { void adminCall<{ users: AdminUser[] }>('list_users').then((data) => { setUsers(data.users ?? []); setHasMore((data.users ?? []).length === 200); }).catch((e) => setError(e instanceof Error ? e.message : 'Could not load users.')); }, []);
 
-  const act = async (userId: string, action: 'set_disabled' | 'reset_quota', extra: Record<string, unknown>, message: string) => {
+  const act = async (userId: string, action: 'set_disabled' | 'reset_quota' | 'set_role', extra: Record<string, unknown>, message: string) => {
     setBusy(userId + action);
     setError('');
     try {
@@ -307,12 +310,14 @@ function UsersSection() {
             {user.disabled ? <Badge kind="danger" label="disabled" /> : null}
             {!user.email_confirmed_at ? <Badge kind="pending" label="unconfirmed" /> : null}
           </Row>
-          <Muted variant="small">{`Joined ${date(user.created_at)} · last sign-in ${date(user.last_sign_in_at)} · AI today ${user.ai_requests_today}`}</Muted>
+          <Muted variant="small">{`Joined ${date(user.created_at)} · last sign-in ${date(user.last_sign_in_at)} · AI today ${user.ai_requests_today} · ${user.ai_provider ? `${user.ai_provider} / ${user.ai_chat_model}` : 'Admin default AI'}`}</Muted>
           <Row wrap gap={Space.sm}>
             <Button title={user.disabled ? 'Enable' : 'Disable'} kind={user.disabled ? 'secondary' : 'danger'} size="sm" loading={busy === user.user_id + 'set_disabled'}
               onPress={() => act(user.user_id, 'set_disabled', { disabled: !user.disabled }, user.disabled ? 'Account enabled' : 'Account disabled')} />
             <Button title="Reset AI quota" kind="ghost" size="sm" loading={busy === user.user_id + 'reset_quota'} disabled={!user.ai_requests_today}
               onPress={() => act(user.user_id, 'reset_quota', {}, 'Quota reset for today')} />
+            <Button title={user.role === 'admin' ? 'Remove admin' : 'Make admin'} kind="ghost" size="sm" loading={busy === user.user_id + 'set_role'}
+              onPress={() => act(user.user_id, 'set_role', { role: user.role === 'admin' ? 'user' : 'admin' }, 'Role updated')} />
           </Row>
         </Stack>
       ))}

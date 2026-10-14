@@ -14,6 +14,7 @@ export interface ModelInfo {
 export interface ProviderInfo {
   id: ProviderId;
   label: string;
+  userSelectable: boolean;
   url: string;
   /** Name of the Supabase Edge Function secret holding the key. */
   keyEnv: string;
@@ -29,6 +30,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   groq: {
     id: 'groq',
     label: 'Groq',
+    userSelectable: true,
     url: 'https://api.groq.com/openai/v1/chat/completions',
     keyEnv: 'GROQ_API_KEY',
     // Verified 2026-10 against console.groq.com/docs/models and /docs/vision.
@@ -44,6 +46,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   gemini: {
     id: 'gemini',
     label: 'Gemini',
+    userSelectable: true,
     // Google's OpenAI-compatible endpoint; same request shape as Groq.
     url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
     keyEnv: 'GEMINI_API_KEY',
@@ -68,6 +71,7 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
   nvidia: {
     id: 'nvidia',
     label: 'NVIDIA',
+    userSelectable: false,
     url: 'https://integrate.api.nvidia.com/v1/chat/completions',
     keyEnv: 'NVIDIA_API_KEY',
     // Verified 2026-10 against the live catalog (GET integrate.api.nvidia.com/v1/models) and
@@ -98,6 +102,8 @@ export interface AiConfig {
   /** AI requests per client IP per UTC day across all accounts. 0 = no per-IP cap. */
   per_ip_daily_limit: number;
   ai_enabled: boolean;
+  allowed_providers: ProviderId[];
+  allow_user_choice: boolean;
 }
 
 export const DEFAULT_CONFIG: AiConfig = {
@@ -108,6 +114,8 @@ export const DEFAULT_CONFIG: AiConfig = {
   global_daily_limit: 40,
   per_ip_daily_limit: 100,
   ai_enabled: true,
+  allowed_providers: ['groq', 'gemini'],
+  allow_user_choice: true,
 };
 
 export function isProviderId(value: unknown): value is ProviderId {
@@ -134,6 +142,8 @@ export function resolveConfig(row: Partial<Record<keyof AiConfig, unknown>> | nu
     global_daily_limit: limit(row?.global_daily_limit, DEFAULT_CONFIG.global_daily_limit),
     per_ip_daily_limit: limit(row?.per_ip_daily_limit, DEFAULT_CONFIG.per_ip_daily_limit),
     ai_enabled: typeof row?.ai_enabled === 'boolean' ? row.ai_enabled : DEFAULT_CONFIG.ai_enabled,
+    allowed_providers: Array.isArray(row?.allowed_providers) ? row.allowed_providers.filter((id): id is ProviderId => isProviderId(id) && PROVIDERS[id].userSelectable) : DEFAULT_CONFIG.allowed_providers,
+    allow_user_choice: typeof row?.allow_user_choice === 'boolean' ? row.allow_user_choice : DEFAULT_CONFIG.allow_user_choice,
   };
 }
 
@@ -184,7 +194,32 @@ export function validateConfigUpdate(current: AiConfig, patch: Record<string, un
     if (typeof patch.ai_enabled !== 'boolean') return { ok: false, error: 'ai_enabled must be true or false.' };
     next.ai_enabled = patch.ai_enabled;
   }
+  if (patch.allowed_providers !== undefined) {
+    if (!Array.isArray(patch.allowed_providers) || patch.allowed_providers.some((id) => !isProviderId(id) || !PROVIDERS[id].userSelectable)) return { ok: false, error: 'Allowed providers must be Groq and/or Gemini.' };
+    next.allowed_providers = [...new Set(patch.allowed_providers)];
+  }
+  if (patch.allow_user_choice !== undefined) {
+    if (typeof patch.allow_user_choice !== 'boolean') return { ok: false, error: 'allow_user_choice must be true or false.' };
+    next.allow_user_choice = patch.allow_user_choice;
+  }
   return { ok: true, config: next };
+}
+
+export type AiPreference = { provider: ProviderId; chat_model: string };
+
+export function validPreference(value: unknown): AiPreference | null {
+  if (!value || typeof value !== 'object') return null;
+  const row = value as Record<string, unknown>;
+  if (!isProviderId(row.provider) || !PROVIDERS[row.provider].userSelectable || typeof row.chat_model !== 'string' || !findModel(PROVIDERS[row.provider].chatModels, row.chat_model)) return null;
+  return { provider: row.provider, chat_model: row.chat_model };
+}
+
+export function effectiveConfig(config: AiConfig, preference: unknown, hasKey: (keyEnv: string) => boolean): { config: AiConfig; isDefault: boolean } {
+  const choice = validPreference(preference);
+  if (!config.allow_user_choice || !choice || !config.allowed_providers.includes(choice.provider) || !hasKey(PROVIDERS[choice.provider].keyEnv)) return { config, isDefault: true };
+  const provider = PROVIDERS[choice.provider];
+  const vision_model = findModel(provider.visionModels, choice.chat_model)?.id ?? provider.visionModels[0].id;
+  return { config: { ...config, provider: choice.provider, chat_model: choice.chat_model, vision_model }, isDefault: false };
 }
 
 /** Public description of the registry for the admin screen. Never includes keys. */
