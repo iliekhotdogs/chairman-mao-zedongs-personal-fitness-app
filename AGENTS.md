@@ -66,6 +66,8 @@ The client never holds a provider key. Signed-in users call the Supabase `ai` Ed
 
 ## Conventions
 
+- For every repository change, add a new entry at the top of `docs/CHANGELOG.md` in the same commit. Include the local date, time and time zone, point-form notes of what changed, and a sign-off naming the person or agent (for example, `Signed off: Codex`).
+
 - Weights are stored in kg, heights in cm; convert only for display (`src/lib/units.ts`). Dates are local `YYYY-MM-DD` strings (`src/lib/dates.ts`); timestamps are ISO UTC.
 - Keep logic in `src/lib` as pure functions with tests; keep screens thin.
 - Don't swallow errors: use `log.warn` / `log.error` from `src/lib/log.ts`.
