@@ -49,7 +49,7 @@ docs/                 SETUP, AI_PROVIDER, WEARABLES, TESTING, RELEASE
 - To change the stored shape: bump `STATE_VERSION` in `state.ts` and add a migration step from the previous version.
 - Every synced record has `id`, `updatedAt` and an optional `deleted` flag. Deletes are tombstones. Lists live in `SYNCED_COLLECTIONS`; whole documents (profile, targets, plan, settings) in `SYNCED_SINGLETONS`. Add new synced data there, and in the `records_collection_check` constraint if it is a new collection.
 - Sync (`src/lib/sync/sync.ts`) pushes rows edited since the last push, then pulls rows from the `records` table with a keyset cursor on `(synced_at, collection, id)`. `synced_at` is stamped by the server (`clock_timestamp()`). Because a row becomes visible only when its transaction commits, each pull first reads the database clock (`server_time()` RPC) and the next pull re-reads rows stamped within 15 s of it (`settledAt` in the cursor), so late commits are never skipped. Conflicts resolve by last write on `updatedAt`, so re-reads are harmless. Edit times more than 5 minutes in the future are clamped (clock skew).
-- The store syncs on sign-in, every 2 minutes, on app foreground, and 5 s after any change to synced data (detected with `contentSignature`).
+- The app renders from local storage first and syncs in the background (a signed-in device with no local profile waits up to 4 s for the first pull). After that it syncs every 2 minutes, on app foreground, and 5 s after any change to synced data (detected with `contentSignature`).
 - Business rules live in `checkAction` (reducer.ts). Screens dispatch through `act()`, which checks once and throws `RuleViolation` with a user-facing message.
 
 ## Notifications

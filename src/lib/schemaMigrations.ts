@@ -94,8 +94,9 @@ export function pruneState(state: AppState, { now, syncedBefore, tombstoneDays =
   let changed = false;
   const next: Raw = { ...state };
   for (const c of SYNCED_COLLECTIONS) {
-    const list = state[c] as { deleted?: boolean; updatedAt: string }[];
-    const kept = list.filter((x) => !(x.deleted && x.updatedAt < cutoff && synced(x.updatedAt)));
+    const list = (state[c] ?? []) as { deleted?: boolean; updatedAt: string; storagePath?: string }[];
+    // A tombstone with a storagePath still has a cloud photo to remove, so keep it until sync clears it.
+    const kept = list.filter((x) => !(x.deleted && !x.storagePath && x.updatedAt < cutoff && synced(x.updatedAt)));
     if (kept.length !== list.length) {
       next[c] = kept;
       changed = true;
