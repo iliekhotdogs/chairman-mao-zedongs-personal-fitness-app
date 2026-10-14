@@ -12,6 +12,7 @@ import { nowISO, toISODate } from '@/lib/dates';
 import { runEngine } from '@/lib/coaching/adaptive';
 import { decide, type Candidate } from '@/lib/notifications/policy';
 import { showSystemNotification } from '@/lib/notifications/deliver';
+import { currentPushToken, onNotificationPermissionGranted, onPushTokenChange, registerPushToken } from '@/lib/notifications/push';
 import { isSupabaseConfigured, supabase } from '@/lib/sync/supabase';
 import { parseCursor, syncNow, type SyncCursor } from '@/lib/sync/sync';
 import { mergeRemote } from '@/lib/sync/merge';
@@ -209,7 +210,12 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       const sb = supabase();
       if (sb && sessionRef.current) {
         try {
-          const { data, error } = await sb.functions.invoke('notify', { body: { title: c.title, body: c.body, dedupe_key: c.dedupeKey, local_date: date, push: false } });
+          // push: the server also sends it to the user's OTHER registered phones; this device
+          // shows it locally below, so its own token is excluded.
+          const ownToken = currentPushToken(sessionRef.current.user.id);
+          const { data, error } = await sb.functions.invoke('notify', {
+            body: { title: c.title, body: c.body, dedupe_key: c.dedupeKey, local_date: date, push: true, ...(ownToken ? { exclude_token: ownToken } : {}) },
+          });
           if (!error && data && data.allowed === false) continue;
         } catch (e) {
           // offline: fall back to the synced local cap
@@ -307,6 +313,26 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       sub.remove();
     };
   }, [configured, session, scopeReady, doSync]);
+
+  // ---- remote push: register this device's Expo push token (native builds only) ----
+  useEffect(() => {
+    const sb = supabase();
+    const userId = session?.user.id;
+    if (!sb || !userId) return;
+    let active = true;
+    const register = () => { if (active) void registerPushToken(sb, userId); };
+    register();
+    const offPermission = onNotificationPermissionGranted(register);
+    const appState = RNAppState.addEventListener('change', (s) => s === 'active' && register());
+    let offTokenChange: () => void = () => {};
+    void onPushTokenChange(register).then((off) => { if (active) offTokenChange = off; else off(); });
+    return () => {
+      active = false;
+      offPermission();
+      appState.remove();
+      offTokenChange();
+    };
+  }, [session?.user.id, supabaseIdentity]);
 
   // push soon after local edits to ANY synced collection or singleton (see SYNCED_* in state.ts)
   useEffect(() => {

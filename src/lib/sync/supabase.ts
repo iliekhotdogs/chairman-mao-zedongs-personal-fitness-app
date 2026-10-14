@@ -2,6 +2,8 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseConfig } from '@/lib/integrations/config';
+import { log } from '@/lib/log';
+import { unregisterPushToken } from '@/lib/notifications/push';
 
 /**
  * Supabase is optional. Without these public settings the app runs in
@@ -32,4 +34,16 @@ export function supabase(): SupabaseClient | null {
     clientConfig = config;
   }
   return client;
+}
+
+/**
+ * Sign out, first removing this device's push token (the delete needs the session for RLS),
+ * so a signed-out phone stops receiving the account's coaching notifications.
+ */
+export async function signOut(options?: { scope?: 'global' | 'local' | 'others' }): Promise<void> {
+  const sb = supabase();
+  if (!sb) return;
+  await unregisterPushToken(sb).catch(() => {});
+  const { error } = await sb.auth.signOut(options);
+  if (error) log.warn('auth', 'Sign-out reported an error.', error);
 }

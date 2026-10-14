@@ -17,8 +17,9 @@ import { emptyState } from '@/lib/state';
 import { buildSampleState } from '@/lib/sampleData';
 import { newId } from '@/lib/id';
 import { permissionStatus, requestPermission } from '@/lib/notifications/deliver';
+import { forgetPushToken } from '@/lib/notifications/push';
 import { MAX_COACH_NOTIFICATIONS_PER_DAY, remainingToday } from '@/lib/notifications/policy';
-import { supabase } from '@/lib/sync/supabase';
+import { signOut, supabase } from '@/lib/sync/supabase';
 import { functionErrorMessage } from '@/lib/ai/provider';
 import { deleteCloudData } from '@/lib/sync/sync';
 import { csvExports, jsonExport } from '@/lib/export';
@@ -291,7 +292,7 @@ function PrivacySection() {
     try {
       if (confirm === 'cloud' && sync.session) await deleteCloudData(sync.session.user.id);
       // sign out before clearing, so background sync can't re-upload or re-download meanwhile
-      if (sync.session) await supabase()?.auth.signOut();
+      if (sync.session) await signOut();
       await clearLocalData(sync.session?.user.id);
       if (!sync.configured) {
         await clearIntegrationConfig();
@@ -355,6 +356,7 @@ function DeleteAccountSection() {
       const { error } = await sb.functions.invoke('delete-account', { body: {} });
       if (error) throw new Error(await functionErrorMessage(error, 'Account deletion failed.'));
       // The server session is gone; sign out locally, then clear this account's cache.
+      forgetPushToken(); // the server rows went with the account
       await sb.auth.signOut({ scope: 'local' }).catch(() => {});
       await clearLocalData(userId);
       doAct({ type: 'REPLACE_STATE', state: emptyState(newId(), nowISO()) });
