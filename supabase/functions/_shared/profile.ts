@@ -6,3 +6,13 @@ export function parseProfileResult(result: { data: { role?: unknown; disabled?: 
   if (!result.data) return null;
   return { role: result.data.role === 'admin' ? 'admin' : 'user', disabled: result.data.disabled === true };
 }
+
+/** Shared request gate: a failed or missing profile read never becomes an enabled account. */
+export async function profileGate(lookup: () => Promise<Profile | null>): Promise<{ ok: true; profile: Profile } | { ok: false; status: 503; missing: boolean }> {
+  try {
+    const profile = await lookup();
+    return profile ? { ok: true, profile } : { ok: false, status: 503, missing: true };
+  } catch {
+    return { ok: false, status: 503, missing: false };
+  }
+}

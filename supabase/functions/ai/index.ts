@@ -8,6 +8,7 @@ import { BodyError, clientIpHash, json as jsonFor, preflight, readJsonBody, utcD
 import { effectiveConfig, findModel, modelLabel, PROVIDERS, resolveConfig, validPreference, type AiConfig } from '../_shared/providers.ts';
 import { matchingFood, validateVisionItem, type VisionItem } from './foodValidation.ts';
 import { hasInjuryRedFlag, isUrgentSymptom } from '../_shared/coachSafety.ts';
+import { profileGate } from '../_shared/profile.ts';
 
 const safeNumber = (value: unknown, max: number) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max ? value : 0;
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.slice(0, max) : '';
@@ -284,10 +285,9 @@ Deno.serve(async (request) => {
   if (!user) return json({ error: 'Sign in first.' }, 401);
   // Invite-created accounts are confirmed at creation; older self-signups must confirm by email.
   if (!user.email_confirmed_at) return json({ error: 'Confirm your email address first, then sign in again.' }, 403);
-  let profile;
-  try { profile = await profileOf(user.id); } catch { return json({ error: 'Account status is unavailable. Try again later.' }, 503); }
-  if (!profile) return json({ error: 'Account profile is missing.' }, 503);
-  if (profile.disabled) return json({ error: 'This account is disabled. Contact the app owner.' }, 403);
+  const gate = await profileGate(() => profileOf(user.id));
+  if (!gate.ok) return json({ error: gate.missing ? 'Account profile is missing.' : 'Account status is unavailable. Try again later.' }, gate.status);
+  if (gate.profile.disabled) return json({ error: 'This account is disabled. Contact the app owner.' }, 403);
   let body: Record<string, unknown>;
   try { body = await readJsonBody(request, MAX_BODY_BYTES); } catch (error) {
     return error instanceof BodyError ? json({ error: error.message }, error.status) : json({ error: 'Invalid request.' }, 400);

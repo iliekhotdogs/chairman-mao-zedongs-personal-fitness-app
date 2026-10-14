@@ -1,5 +1,5 @@
 import { hasInjuryRedFlag, isUrgentSymptom } from '../../../supabase/functions/_shared/coachSafety';
-import { parseProfileResult } from '../../../supabase/functions/_shared/profile';
+import { parseProfileResult, profileGate } from '../../../supabase/functions/_shared/profile';
 
 describe('shared coach safety gates', () => {
   it.each(['number of reps', 'popcorn macros', 'fallback plan', 'snapshot'])('allows ordinary question %s through', (message) => {
@@ -18,5 +18,8 @@ describe('profile lookup', () => {
   });
   it('keeps a missing profile distinct', () => {
     expect(parseProfileResult({ data: null, error: null })).toBeNull();
+  });
+  it('maps a database failure to 503 at the request gate', async () => {
+    await expect(profileGate(async () => parseProfileResult({ data: null, error: { message: 'database unavailable' } }))).resolves.toEqual({ ok: false, status: 503, missing: false });
   });
 });

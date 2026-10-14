@@ -17,6 +17,7 @@
 // Optional secret EXPO_ACCESS_TOKEN: needed only if "enhanced push security" is on in EAS.
 
 import { admin, profileOf, requestUser } from '../_shared/auth.ts';
+import { profileGate } from '../_shared/profile.ts';
 import { json as jsonFor, preflight, readJsonBody } from '../_shared/http.ts';
 import { isPlausibleLocalDate, pushCopy } from '../_shared/notifyCopy.ts';
 
@@ -74,10 +75,9 @@ Deno.serve(async (req) => {
   const json = (b: unknown, status = 200) => jsonFor(req, b, status);
   const user = await requestUser(req);
   if (!user) return json({ error: 'Not signed in' }, 401);
-  let profile;
-  try { profile = await profileOf(user.id); } catch { return json({ error: 'Account status is unavailable.' }, 503); }
-  if (!profile) return json({ error: 'Account profile is missing.' }, 503);
-  if (profile.disabled) return json({ error: 'This account is disabled.' }, 403);
+  const gate = await profileGate(() => profileOf(user.id));
+  if (!gate.ok) return json({ error: gate.missing ? 'Account profile is missing.' : 'Account status is unavailable.' }, gate.status);
+  if (gate.profile.disabled) return json({ error: 'This account is disabled.' }, 403);
 
   const b = await readJsonBody(req, 8_000).catch(() => null);
   if (!b || typeof b.dedupe_key !== 'string' || !b.dedupe_key.trim()) return json({ error: 'Bad request' }, 400);

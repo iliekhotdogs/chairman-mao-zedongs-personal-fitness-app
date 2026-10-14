@@ -1,5 +1,11 @@
 # Change log
 
+## 2026-10-14 15:43 PDT — Codex
+
+- Added a direct regression test for profile database failures returning the fail-closed 503 gate result, shared by AI and notifications.
+
+Signed off: Codex
+
 ## 2026-10-14 15:42 PDT — Codex
 
 - Added empty onboarding body fields and a visible plan basis; expanded profile editing with a target preview and plan update prompt.
