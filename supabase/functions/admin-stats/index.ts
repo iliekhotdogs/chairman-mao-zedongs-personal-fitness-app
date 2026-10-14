@@ -3,7 +3,7 @@
 // Actions: check, stats, list_users, create_invite, list_invites, revoke_invite,
 // set_disabled, reset_quota, get_config, set_config.
 // No health data, records or chat content leave this function.
-import { admin, isAdmin, requestUser } from '../_shared/auth.ts';
+import { admin, isAdmin, isOwner, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
 import { describeRegistry, resolveConfig, validateConfigUpdate } from '../_shared/providers.ts';
 import { generateInviteCode, inviteExpiry, normalizeInviteCode } from '../_shared/invite.ts';
@@ -74,11 +74,28 @@ Deno.serve(async (request) => {
     case 'set_disabled': {
       if (!isUuid(input.userId) || typeof input.disabled !== 'boolean') return json({ error: 'userId and disabled are required.' }, 400);
       if (input.userId === user.id) return json({ error: 'You cannot disable your own account.' }, 400);
+      // The bootstrap owner (ADMIN_USER_ID) can never be disabled from the app, and only
+      // the owner may disable or re-enable another admin. Otherwise one admin could lock
+      // out every other admin, or a compromised admin account could lock out the owner.
+      if (isOwner(input.userId)) return json({ error: 'The app owner account cannot be disabled.' }, 403);
+      const target = await profileOf(input.userId);
+      if (target.role === 'admin' && !isOwner(user.id)) return json({ error: 'Only the app owner can disable or enable an admin.' }, 403);
       const { error } = await admin.from('profiles').upsert({ user_id: input.userId, disabled: input.disabled }, { onConflict: 'user_id' });
       if (error) return json({ error: 'Could not update the account.' }, 502);
-      // A ban also blocks sign-in and token refresh, so sync stops too.
+      // A ban blocks new sign-ins and token refresh.
       const { error: banError } = await admin.auth.admin.updateUserById(input.userId, { ban_duration: input.disabled ? '876000h' : 'none' });
       if (banError) return json({ error: 'Saved, but the sign-in ban could not be updated.' }, 502);
+      if (input.disabled) {
+        // End existing sessions too, so the user's current access tokens stop working
+        // (GoTrue rejects tokens whose session is gone). auth.admin.signOut() needs the
+        // user's own JWT, so this uses a service-role RPC that deletes auth.sessions.
+        // Functions also refuse disabled profiles, which covers any token still in flight.
+        const { error: revokeError } = await admin.rpc('admin_revoke_sessions', { p_user: input.userId });
+        if (revokeError) {
+          console.error(`admin_revoke_sessions ${input.userId}: ${revokeError.message}`);
+          return json({ error: 'Disabled and banned, but active sessions could not be ended. They expire within an hour.' }, 502);
+        }
+      }
       return json({ ok: true });
     }
 

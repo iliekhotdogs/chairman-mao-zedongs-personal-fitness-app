@@ -1,5 +1,7 @@
 // Service-role client, user lookup and the admin check shared by every function.
-import { createClient, type User } from 'npm:@supabase/supabase-js@2';
+// The version is pinned to package.json's @supabase/supabase-js so every deploy bundles
+// the same, reviewed client; bump both together.
+import { createClient, type User } from 'npm:@supabase/supabase-js@2.117.2';
 
 export const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!, {
   auth: { persistSession: false, autoRefreshToken: false },
@@ -21,11 +23,17 @@ export async function profileOf(userId: string): Promise<Profile> {
   return { role: data?.role === 'admin' ? 'admin' : 'user', disabled: data?.disabled === true };
 }
 
+/** The bootstrap owner's user id (ADMIN_USER_ID secret), or null when unset. */
+export function ownerId(): string | null {
+  return Deno.env.get('ADMIN_USER_ID')?.trim().toLowerCase() || null;
+}
+
+export const isOwner = (userId: string) => ownerId() === userId.toLowerCase();
+
 /** Admin = role 'admin' in profiles, or the bootstrap owner in the ADMIN_USER_ID secret.
  * Roles never come from user_metadata, which users can edit themselves. */
 export async function isAdmin(user: User, profile?: Profile): Promise<boolean> {
-  const owner = Deno.env.get('ADMIN_USER_ID')?.trim();
-  if (owner && user.id === owner) return true;
+  if (isOwner(user.id)) return true;
   const resolved = profile ?? await profileOf(user.id);
   return resolved.role === 'admin' && !resolved.disabled;
 }

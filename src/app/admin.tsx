@@ -14,7 +14,7 @@ type Stats = {
 type Model = { id: string; label: string };
 type ProviderEntry = { id: string; label: string; keyEnv: string; keySet: boolean; chatModels: Model[]; visionModels: Model[] };
 type AiConfig = { provider: string; chat_model: string; vision_model: string; per_user_daily_limit: number; global_daily_limit: number; per_ip_daily_limit?: number; ai_enabled: boolean };
-type Invite = { code: string; created_at: string; expires_at: string | null; used_at: string | null; used_email: string | null; note: string | null; status: 'open' | 'used' | 'expired' };
+type Invite = { code: string; created_at: string; expires_at: string | null; used_at: string | null; used_email: string | null; note: string | null; status: 'open' | 'used' | 'expired' | 'burned' };
 type AdminUser = { user_id: string; email: string; created_at: string; last_sign_in_at: string | null; email_confirmed_at: string | null; role: 'admin' | 'user'; disabled: boolean; ai_requests_today: number };
 
 /** Calls one action of the admin Edge Function and returns its JSON, or throws the server's reason. */

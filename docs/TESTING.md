@@ -13,6 +13,7 @@ Unit tests (`src/lib/__tests__`) cover:
 - helpers: selectors, dates across DST, units, notification quiet hours and daily cap;
 - the client side of the server AI gateway and the USDA request format;
 - the AI provider registry: verified model ids, config repair and validation, including the per-IP limit;
+- Edge Function helpers (`src/lib/__tests__/edgeShared.test.ts`): client-IP selection (never the spoofable leftmost `x-forwarded-for`), the fixed push-notification copy (client text is ignored) and the `local_date` window for `notify`;
 - error reporting: Sentry stays off without a DSN, and events/breadcrumbs are scrubbed of personal data.
 
 Tests run in the `America/New_York` time zone (`jest.global-setup.js`) so date logic is exercised across DST.
@@ -25,6 +26,12 @@ Tests run in the `America/New_York` time zone (`jest.global-setup.js`) so date l
 - cannot download, sign, list, overwrite or delete A's photo, or upload into A's folder;
 - gets 403 from the `admin-stats` function (`stats` action) and cannot call `admin_stats` or `claim_ai_request` directly;
 - cannot read `app_config`, `invites`, `ai_global_usage`, `signup_attempts`, `ai_ip_usage`, `food_search_global_usage`, or A's rows in `profiles`, `push_tokens`, `notification_log`, `ai_usage`, `food_search_usage`; cannot make itself admin or change `app_config`;
+- cannot call the service-role RPCs `user_storage_objects` (list A's photos) or `admin_revoke_sessions`;
+
+It also checks, as user A, that:
+
+- uploads follow the app's path pattern: `<uid>/<id>.jpg` and `<uid>/progress/<id>.jpg` work, while a nested folder, a folder below `progress/` and a non-image extension are refused;
+- push tokens are written only through `register_push_token`: a direct `insert` or `update` on `push_tokens` is refused, while reading and deleting A's own token (sign-out) still work;
 
 and that a signed-out client reads no records or photos. Both users and the photo are deleted at the end, also on failure.
 
@@ -35,7 +42,7 @@ SUPABASE_SECRET_KEY=sb_secret_... \
 npm run check:rls -- --yes
 ```
 
-Run it against a **staging** project with all migrations applied and `admin-stats` deployed. It needs the secret (service-role) key, so it is not part of CI; never commit the key. Exit code 0 means every check passed, 1 that one failed, 2 a setup problem.
+Run it against a **staging** project with all migrations applied (including `20261015000000_security_hardening.sql`) and `admin-stats` deployed. It needs the secret (service-role) key, so it is not part of CI; never commit the key. Exit code 0 means every check passed, 1 that one failed, 2 a setup problem.
 
 ## Manual checks (before a release)
 

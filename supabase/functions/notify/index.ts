@@ -1,6 +1,11 @@
 // Supabase Edge Function: claim a coaching-notification slot and (optionally) push it.
-//   POST { title, body, dedupe_key, local_date: 'YYYY-MM-DD', push?: boolean, exclude_token?: string }
+//   POST { dedupe_key, local_date: 'YYYY-MM-DD', category?: 'nutrition'|'workouts'|'checkins',
+//          push?: boolean, exclude_token?: string }
 //   → { allowed: boolean, pushed: number }
+// Older app builds also send `title` and `body`; they are accepted and IGNORED. Pushed
+// text comes from fixed server templates (_shared/notifyCopy.ts), so a client cannot
+// push arbitrary text, and no health data goes through Expo/FCM. `local_date` must be
+// within a day of the server's date. Disabled accounts are refused.
 //
 // The hard limit of 3 coaching notifications per user per day is enforced here, in the
 // database function `claim_notification_slot`, so it holds across every device the user
@@ -11,8 +16,9 @@
 // (FCM V1 key in EAS) and builds with an EAS project id; see docs/RELEASE.md.
 // Optional secret EXPO_ACCESS_TOKEN: needed only if "enhanced push security" is on in EAS.
 
-import { admin, requestUser } from '../_shared/auth.ts';
+import { admin, profileOf, requestUser } from '../_shared/auth.ts';
 import { json as jsonFor, preflight, readJsonBody } from '../_shared/http.ts';
+import { isPlausibleLocalDate, pushCopy } from '../_shared/notifyCopy.ts';
 
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
 /** Expo accepts at most 100 messages per request. */
@@ -68,11 +74,13 @@ Deno.serve(async (req) => {
   const json = (b: unknown, status = 200) => jsonFor(req, b, status);
   const user = await requestUser(req);
   if (!user) return json({ error: 'Not signed in' }, 401);
+  if ((await profileOf(user.id)).disabled) return json({ error: 'This account is disabled.' }, 403);
 
   const b = await readJsonBody(req, 8_000).catch(() => null);
-  if (!b?.title || !b?.dedupe_key || !/^\d{4}-\d{2}-\d{2}$/.test(String(b.local_date ?? ''))) return json({ error: 'Bad request' }, 400);
-  const title = String(b.title).slice(0, 120);
-  const body = String(b.body ?? '').slice(0, 400);
+  if (!b || typeof b.dedupe_key !== 'string' || !b.dedupe_key.trim()) return json({ error: 'Bad request' }, 400);
+  if (!isPlausibleLocalDate(b.local_date, new Date())) return json({ error: 'local_date must be today\'s date.' }, 400);
+  // Fixed copy keyed by category; client free text is never stored or pushed.
+  const { title, body } = pushCopy(b);
 
   const { data: allowed, error } = await admin.rpc('claim_notification_slot', {
     p_user: user.id,

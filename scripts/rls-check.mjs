@@ -63,6 +63,8 @@ async function createUser(tag) {
 
 const users = [];
 let photoPath = null;
+/** Other objects the run may have created (removed in cleanup if they exist). */
+const extraPaths = [];
 
 async function main() {
   console.log(`RLS check against ${PROJECT_URL} (run ${run})`);
@@ -84,6 +86,34 @@ async function main() {
   check(!upload.error, 'A can upload a photo to its folder', upload.error?.message);
   const ownPhoto = await a.client.storage.from(BUCKET).download(photoPath);
   check(!ownPhoto.error, 'A can download its own photo', ownPhoto.error?.message);
+  const progressPath = `${a.id}/progress/rls-check-${run}.jpg`;
+  extraPaths.push(progressPath);
+  const progress = await a.client.storage.from(BUCKET).upload(progressPath, jpeg, { contentType: 'image/jpeg', upsert: true });
+  check(!progress.error, 'A can upload a progress photo (<uid>/progress/<id>.jpg)', progress.error?.message);
+
+  console.log('\nUploads must follow the app\'s path pattern');
+  for (const [path, label] of [
+    [`${a.id}/deep/nested/rls-check-${run}.jpg`, 'a nested folder'],
+    [`${a.id}/rls-check-${run}.html`, 'a non-image extension'],
+    [`${a.id}/progress/x/rls-check-${run}.jpg`, 'a folder below progress/'],
+  ]) {
+    extraPaths.push(path);
+    const odd = await a.client.storage.from(BUCKET).upload(path, jpeg, { contentType: 'image/jpeg' });
+    check(Boolean(odd.error), `A cannot upload to ${label}`, odd.error ? '' : `upload to ${path} succeeded`);
+  }
+
+  console.log('\nPush tokens are written only through register_push_token');
+  const token = `ExponentPushToken[rls-check-${run}]`;
+  const directInsert = await a.client.from('push_tokens').insert({ user_id: a.id, token, platform: 'android' });
+  check(Boolean(directInsert.error), 'A cannot insert a push token directly', directInsert.error ? '' : 'insert succeeded');
+  const directUpdate = await a.client.from('push_tokens').update({ token: `${token}x` }).eq('user_id', a.id).select('token');
+  check(denied(directUpdate), 'A cannot update push tokens directly', describe(directUpdate));
+  const registered = await a.client.rpc('register_push_token', { p_token: token, p_platform: 'android', p_timezone: 'UTC' });
+  check(!registered.error, 'A can register a push token through the RPC', registered.error?.message);
+  const ownTokens = await a.client.from('push_tokens').select('token').eq('user_id', a.id);
+  check(ownTokens.data?.length === 1, 'A can read its own push token', describe(ownTokens));
+  const removedToken = await a.client.from('push_tokens').delete().eq('user_id', a.id).eq('token', token).select('token');
+  check(removedToken.data?.length === 1, 'A can delete its own push token (sign-out)', describe(removedToken));
 
   console.log('\nUser B cannot see or touch A\'s records');
   const readA = await b.client.from('records').select('id').eq('user_id', a.id);
@@ -124,6 +154,10 @@ async function main() {
   check(Boolean(rpcStats.error), 'B cannot call the admin_stats RPC directly', rpcStats.error ? '' : 'RPC returned data');
   const claim = await b.client.rpc('claim_ai_request', { p_user: b.id, p_day: '2026-01-01', p_user_limit: 1000, p_global_limit: 1000 });
   check(Boolean(claim.error), 'B cannot call the claim_ai_request RPC', claim.error ? '' : 'RPC ran');
+  const listA = await b.client.rpc('user_storage_objects', { p_user: a.id, p_limit: 10 });
+  check(Boolean(listA.error), 'B cannot call user_storage_objects for A', listA.error ? '' : describe(listA));
+  const revoke = await b.client.rpc('admin_revoke_sessions', { p_user: a.id });
+  check(Boolean(revoke.error), 'B cannot call admin_revoke_sessions', revoke.error ? '' : 'RPC ran');
 
   console.log('\nServer-only tables are closed to B');
   for (const table of ['app_config', 'invites', 'ai_global_usage', 'signup_attempts', 'ai_ip_usage', 'food_search_global_usage']) {
@@ -153,6 +187,10 @@ async function cleanup() {
   if (photoPath) {
     const { error } = await admin.storage.from(BUCKET).remove([photoPath]);
     if (error) console.log(`  could not delete ${photoPath}: ${error.message}`);
+  }
+  if (extraPaths.length) {
+    const { error } = await admin.storage.from(BUCKET).remove(extraPaths);
+    if (error) console.log(`  could not delete extra test objects: ${error.message}`);
   }
   for (const user of users) {
     await user.client.auth.signOut().catch(() => {});

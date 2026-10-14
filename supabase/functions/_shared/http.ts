@@ -1,6 +1,7 @@
 // CORS, JSON responses and size-limited body reading shared by every function.
 // ALLOWED_ORIGINS (comma separated, e.g. "https://fitcoach.vercel.app,http://localhost:8081")
 // pins CORS to the app's origins. Unset means "*" (development).
+import { clientIpFrom } from './ip.ts';
 
 const ALLOWED = (Deno.env.get('ALLOWED_ORIGINS') ?? '')
   .split(',').map((origin) => origin.trim().replace(/\/$/, '')).filter(Boolean);
@@ -65,10 +66,21 @@ export async function readJsonBody(request: Request, maxBytes: number, allowEmpt
   return body as Record<string, unknown>;
 }
 
-/** Best-effort client IP behind Supabase's proxy. */
+/** Client IP behind Supabase's proxies; see ip.ts for which header is trusted and why. */
 export function clientIp(request: Request): string {
-  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
-  return (forwarded || request.headers.get('cf-connecting-ip') || request.headers.get('x-real-ip') || 'unknown').slice(0, 64);
+  return clientIpFrom((name) => request.headers.get(name));
+}
+
+/** Keyed SHA-256 (HMAC) of the client IP, so rate-limit tables never store raw
+ * addresses. Key: the IP_HASH_SECRET secret, or the service-role key when unset
+ * (both server-only). Null when the IP is unknown. */
+export async function clientIpHash(request: Request): Promise<string | null> {
+  const ip = clientIp(request);
+  if (ip === 'unknown') return null;
+  const secret = Deno.env.get('IP_HASH_SECRET')?.trim() || Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || 'fitcoach';
+  const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(ip)));
+  return Array.from(mac, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
 export const utcDay = () => new Date().toISOString().slice(0, 10);
