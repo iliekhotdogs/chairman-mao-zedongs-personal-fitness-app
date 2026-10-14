@@ -27,6 +27,8 @@ jobs:
       - run: npm run lint
       - run: npm test -- --ci
       - run: npm run build:web
+      # The RLS check needs a live project and a secret key; CI only syntax-checks it.
+      - run: node --check scripts/rls-check.mjs
 
   edge-functions:
     name: Deno type-check (supabase/functions)
