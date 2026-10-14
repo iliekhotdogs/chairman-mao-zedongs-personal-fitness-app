@@ -88,7 +88,7 @@ export function localChanges(state: AppState, since: string, nowMs = Date.now())
     return updatedAt === item.updatedAt ? item : { ...item, updatedAt };
   };
   for (const c of SYNCED_COLLECTIONS) {
-    for (const raw of state[c] as Stamped[]) {
+    for (const raw of (state[c] ?? []) as Stamped[]) {
       if (!(raw.updatedAt > since)) continue;
       const item = stamp(raw);
       rows.push({ collection: c, id: item.id, data: item, updated_at: item.updatedAt, deleted: Boolean(item.deleted) });
