@@ -27,8 +27,14 @@ Back up important data before applying a migration.
 ## 2. Authentication (Supabase dashboard)
 
 1. **Authentication → Sign In / Providers → Email**: turn **Allow new users to sign up** OFF. The `redeem-invite` function still creates accounts, because it uses the service role. Turn **Confirm email** ON (invite-created accounts are confirmed at creation; the AI gateway refuses unconfirmed accounts).
-2. **Authentication → URL Configuration**: set **Site URL** to the Vercel domain (for example `https://fitcoach.vercel.app`) and add these **Redirect URLs**: `https://<your-vercel-domain>/**`, `https://*-<your-vercel-team>.vercel.app/**` (previews, optional) and `http://localhost:8081/**` (local web). Password-reset links return to `<origin>/settings`, so the domain must be listed.
-3. Password reset uses Supabase's built-in email. For real users, configure a custom SMTP sender under **Authentication → Emails → SMTP Settings**; the default sender is heavily rate limited.
+2. **Authentication → URL Configuration**: set **Site URL** to the production domain (for example `https://fitcoach.vercel.app`) and list only these exact **Redirect URLs**:
+   - `https://<your-production-domain>/**`
+   - `http://localhost:8081/**` (local web development)
+   - `fitcoach://**` (the Android app; reset links requested in the app return to it)
+
+   Don't add a wildcard for preview deployments (such as `https://*-<team>.vercel.app/**`): anyone can create a Vercel preview URL that matches it, and a matching redirect would receive a user's sign-in code. Test auth flows on production or localhost instead. Password-reset links return to `<origin>/reset-password` (web) or `fitcoach://reset-password` (app). Sign-in uses the PKCE flow, so a reset link only works in the browser or app that asked for it.
+3. **Authentication → Providers → Email** (or **Sign In / Providers → Email**): turn **Secure password change** ON, so changing the password of a signed-in session needs a recent sign-in. Also keep **Secure email change** ON.
+4. Password reset uses Supabase's built-in email. For real users, configure a custom SMTP sender under **Authentication → Emails → SMTP Settings**; the default sender is heavily rate limited.
 
 ## 3. Public app configuration
 
@@ -90,7 +96,7 @@ The admin signs in with the normal form. **Settings → Account & sync → Admin
 4. A non-admin account has no Admin button, and direct requests to `admin-stats` return 403.
 5. Switch the provider in the admin screen; the next coach chat and meal photo use it (Settings → Coach AI shows the new model). Switch AI off and confirm chat falls back to a built-in answer with the notice.
 6. Optional, against a **staging** project only: `npm run check:rls -- --yes` with `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY` set runs the automated isolation checks (see [TESTING.md](TESTING.md#rls-isolation-check)).
-7. **Forgot password?** sends a link that returns to `/settings`, where the new password is set.
+7. **Forgot password?** sends a link that returns to `/reset-password`, where the new password is set. Open it in the same browser you requested it from.
 8. **Settings → Delete account** removes the login, synced rows and photos.
 
 If you used FitCoach before accounts existed, sign in to a new empty account and use **Import earlier data from this device**.

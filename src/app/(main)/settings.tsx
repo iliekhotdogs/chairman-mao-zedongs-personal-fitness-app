@@ -439,7 +439,7 @@ function AboutSection() {
         <Badge kind="info" label="USDA lookup is live" />
       </Row>
       <Row wrap gap={Space.sm}>
-        <Button title="UI states gallery" kind="secondary" size="sm" icon="color-palette-outline" onPress={() => router.push('/states')} />
+        {__DEV__ ? <Button title="UI states gallery" kind="secondary" size="sm" icon="color-palette-outline" onPress={() => router.push('/states')} /> : null}
         <Button title="Load sample data" kind="ghost" size="sm" icon="flask-outline" onPress={() => setConfirm(true)} />
       </Row>
       <Muted variant="small">FitCoach v1.0.0 (prototype) · Not medical advice. Consult a professional for injuries, medical conditions, or eating-disorder concerns.</Muted>

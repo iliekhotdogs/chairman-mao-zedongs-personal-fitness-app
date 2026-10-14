@@ -18,6 +18,28 @@ export function isSupabaseConfigured(): boolean {
 let client: SupabaseClient | null = null;
 let clientConfig = '';
 
+// ---- password recovery ----
+// A reset link signs the user in and Supabase emits PASSWORD_RECOVERY, often during client
+// start-up before any screen is listening. The flag remembers it so the root layout can send
+// the user to /reset-password wherever the link landed.
+let recoveryPending = false;
+const recoveryListeners = new Set<() => void>();
+
+/** True after a password-reset link signed this browser in, until the new password is saved. */
+export function isPasswordRecoveryPending(): boolean {
+  return recoveryPending;
+}
+
+export function clearPasswordRecovery(): void {
+  recoveryPending = false;
+}
+
+/** Called when a PASSWORD_RECOVERY event arrives. Returns an unsubscribe function. */
+export function onPasswordRecovery(listener: () => void): () => void {
+  recoveryListeners.add(listener);
+  return () => { recoveryListeners.delete(listener); };
+}
+
 export function supabase(): SupabaseClient | null {
   const { url, key } = getSupabaseConfig();
   if (!url || !key) return null;
@@ -25,6 +47,10 @@ export function supabase(): SupabaseClient | null {
   if (!client || clientConfig !== config) {
     client = createClient(url, key, {
       auth: {
+        // PKCE: email links (password reset) come back with a one-time ?code= that only the
+        // browser which asked for the link can exchange (the verifier is in its storage), so
+        // tokens never appear in the URL. detectSessionInUrl exchanges the code on start-up.
+        flowType: 'pkce',
         storage: Platform.OS === 'web' ? undefined : AsyncStorage,
         autoRefreshToken: true,
         persistSession: true,
@@ -32,6 +58,15 @@ export function supabase(): SupabaseClient | null {
       },
     });
     clientConfig = config;
+    // Subscribed synchronously after creation, so the event fired by the start-up code exchange is seen.
+    client.auth.onAuthStateChange((event) => {
+      if (event === 'PASSWORD_RECOVERY') {
+        recoveryPending = true;
+        recoveryListeners.forEach((listener) => listener());
+      } else if (event === 'SIGNED_OUT') {
+        recoveryPending = false;
+      }
+    });
   }
   return client;
 }

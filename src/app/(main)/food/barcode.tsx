@@ -1,6 +1,7 @@
 import React, { useRef, useState } from 'react';
-import { Platform, StyleSheet, View } from 'react-native';
+import { Linking, Platform, StyleSheet, View, type ScrollView, type TextInput } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/lib/nav';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 
 import { C, Radius, Space } from '@/constants/theme';
@@ -13,6 +14,7 @@ import { defaultMealForTime, manualEntry } from '@/lib/nutrition/estimate';
 import { sumItems } from '@/lib/nutrition/lookup';
 import { formatDateLabel } from '@/lib/dates';
 import { log } from '@/lib/log';
+import { useLayout } from '@/hooks/useLayout';
 import type { FoodItem, MealType } from '@/lib/types';
 
 const MEALS: { value: MealType; label: string }[] = [
@@ -42,8 +44,30 @@ export default function BarcodeScreen() {
   const [missing, setMissing] = useState<Missing>();
   const [items, setItems] = useState<FoodItem[]>([]);
   const [meal, setMeal] = useState<MealType>(defaultMealForTime());
+  const [blocked, setBlocked] = useState(false);
   const handled = useRef(false);
+  const codeInput = useRef<TextInput>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const reviewRef = useRef<View>(null);
+  const { isPhone } = useLayout();
   const total = sumItems(items);
+
+  /** On phones the result column sits below the scanner: bring it into view after a scan. */
+  const revealResult = () => {
+    if (!isPhone) return;
+    requestAnimationFrame(() => {
+      const target = reviewRef.current;
+      if (!target) return;
+      if (Platform.OS === 'web') {
+        (target as unknown as { scrollIntoView?: (o: ScrollIntoViewOptions) => void }).scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+      const scroll = scrollRef.current;
+      const inner = scroll?.getNativeScrollRef();
+      if (!scroll || !inner) return;
+      target.measureLayout(inner, (_x, y) => scroll.scrollTo({ y: Math.max(0, y - Space.md), animated: true }), () => {});
+    });
+  };
 
   const lookup = async (raw: string, fromScan: boolean) => {
     const clean = normalizeBarcode(raw);
@@ -72,6 +96,7 @@ export default function BarcodeScreen() {
       setError({ code: clean, message: e instanceof BarcodeError ? e.message : 'Lookup failed. Try again, or enter the food by hand.' });
     } finally {
       setLooking(undefined);
+      if (fromScan) revealResult();
     }
   };
 
@@ -80,12 +105,27 @@ export default function BarcodeScreen() {
     handled.current = true;
     setCameraOn(false);
     setCode(r.data);
-    lookup(r.data, true);
+    revealResult();
+    void lookup(r.data, true);
   };
 
   const startCamera = async () => {
-    const p = permission?.granted ? permission : await requestPermission();
-    if (!p.granted) return;
+    let granted = Boolean(permission?.granted);
+    if (!granted) {
+      try {
+        granted = (await requestPermission()).granted;
+      } catch (e) {
+        log.warn('barcode', 'Camera permission request failed', e);
+      }
+    }
+    if (!granted) {
+      // Blocked (browser site setting or a denied prompt): say so and move to the number field.
+      setBlocked(true);
+      setCameraOn(false);
+      setTimeout(() => codeInput.current?.focus(), 50);
+      return;
+    }
+    setBlocked(false);
     handled.current = false;
     setError(undefined);
     setMissing(undefined);
@@ -102,7 +142,8 @@ export default function BarcodeScreen() {
   };
 
   const canUseCamera = webCameraAvailable();
-  const denied = permission && !permission.granted && !permission.canAskAgain;
+  const denied = Boolean(permission && !permission.granted && !permission.canAskAgain);
+  const showBlocked = blocked || denied;
 
   const scanner = (
     <Stack key="scan" gap={Space.md}>
@@ -135,16 +176,26 @@ export default function BarcodeScreen() {
             <Muted variant="small" style={{ textAlign: 'center', maxWidth: 260 }}>
               {canUseCamera ? 'Point your camera at the barcode on the package.' : 'Camera scanning is not available in this browser. Type the number under the barcode below.'}
             </Muted>
-            {canUseCamera ? <Button title={items.length ? 'Scan another item' : 'Start camera'} icon="scan-outline" size="lg" onPress={startCamera} disabled={!!looking || !!denied} /> : null}
+            {canUseCamera ? <Button title={items.length ? 'Scan another item' : 'Start camera'} icon="scan-outline" size="lg" onPress={startCamera} disabled={!!looking} style={{ alignSelf: 'center' }} /> : null}
           </View>
         )}
         {cameraOn ? <Button title="Stop camera" kind="secondary" icon="close" onPress={() => setCameraOn(false)} full /> : null}
-        {denied ? <Banner kind="warning" title="Camera access is off">Allow camera access for FitCoach in your device settings, or type the number below.</Banner> : null}
+        {showBlocked ? (
+          <View accessibilityRole="alert" accessibilityLiveRegion="polite">
+            <Banner kind="warning" title="Camera access is blocked"
+              action={Platform.OS !== 'web' ? <Button title="Open settings" kind="secondary" size="sm" onPress={() => void Linking.openSettings()} /> : undefined}>
+              {Platform.OS === 'web'
+                ? 'Your browser is blocking the camera for this site. Allow it in the site settings (the icon next to the address), then tap Start camera again. Or type the number below.'
+                : 'Allow camera access for FitCoach in your device settings, or type the number below.'}
+            </Banner>
+          </View>
+        ) : null}
       </Card>
 
       <Card style={{ gap: Space.sm }}>
         <Text variant="h3">Type the number</Text>
         <Field
+          ref={codeInput}
           value={code}
           onChangeText={(t) => {
             setCode(t.replace(/[^\d\s-]/g, ''));
@@ -165,7 +216,7 @@ export default function BarcodeScreen() {
   );
 
   const review = (
-    <Stack key="review" gap={Space.md}>
+    <Stack key="review" gap={Space.md} ref={reviewRef}>
       {looking ? <LoadingState label={`Looking up ${looking}…`} lines={2} /> : null}
       {error ? (
         <Banner kind="danger" title={error.code ? 'Lookup failed' : 'Camera problem'} action={error.code ? <Button title="Enter manually" kind="secondary" size="sm" onPress={() => { setMissing({ code: error.code!, reason: 'not_found' }); setError(undefined); }} /> : undefined}>
@@ -198,8 +249,8 @@ export default function BarcodeScreen() {
   );
 
   return (
-    <Screen size="medium">
-      <PageHeader eyebrow="Food" title="Scan barcode" subtitle={formatDateLabel(date, today)} right={<Button title="Cancel" kind="ghost" onPress={() => router.back()} />} />
+    <Screen size="medium" scrollRef={scrollRef}>
+      <PageHeader eyebrow="Food" title="Scan barcode" subtitle={formatDateLabel(date, today)} right={<Button title="Cancel" kind="ghost" onPress={() => goBack('/food')} />} />
       <Columns ratio={[1, 1]}>{[scanner, review]}</Columns>
     </Screen>
   );

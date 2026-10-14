@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/lib/nav';
 
 import { C, Space } from '@/constants/theme';
 import { Button, Card, Chip, Field, IconButton, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Text } from '@/components/ui';
@@ -46,7 +47,7 @@ export default function RoutineEditor() {
 
   return (
     <Screen size="medium">
-      <PageHeader title={existing ? 'Edit routine' : 'New routine'} right={<Button title="Cancel" kind="ghost" onPress={() => router.back()} />} />
+      <PageHeader title={existing ? 'Edit routine' : 'New routine'} right={<Button title="Cancel" kind="ghost" onPress={() => goBack('/workouts')} />} />
       <Field label="Routine name" value={name} onChangeText={setName} />
       {days.map((d, di) => (
         <Card key={d.id} style={{ gap: Space.sm }}>

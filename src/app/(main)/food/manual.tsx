@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/lib/nav';
 
 import { Space } from '@/constants/theme';
 import { Button, Card, Columns, EmptyState, Muted, PageHeader, Row, Screen, Segmented, Stack, Text } from '@/components/ui';
@@ -37,7 +38,7 @@ export default function ManualEntry() {
   const save = () => {
     if (existing) {
       const ok = doAct({ type: 'UPDATE_FOOD', entry: { ...existing, items, meal, confirmedAt: nowISO(), updatedAt: nowISO() } }, 'Meal updated');
-      if (ok) router.back();
+      if (ok) goBack('/food');
       return;
     }
     try {
@@ -50,7 +51,7 @@ export default function ManualEntry() {
 
   return (
     <Screen size="medium">
-      <PageHeader title={existing ? 'Edit meal' : 'Add food'} subtitle={formatDateLabel(date, today)} right={<Button title="Cancel" kind="ghost" onPress={() => router.back()} />} />
+      <PageHeader title={existing ? 'Edit meal' : 'Add food'} subtitle={formatDateLabel(date, today)} right={<Button title="Cancel" kind="ghost" onPress={() => goBack('/food')} />} />
       <Columns ratio={[1, 1]}>
         {[
           <Stack key="search" gap={Space.md}>
