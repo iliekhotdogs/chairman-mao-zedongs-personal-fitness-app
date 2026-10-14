@@ -6,13 +6,15 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "fitcoach",
-    "userInterfaceStyle": "light",
+    "description": "FitCoach: photo food logging, adaptive training plans and a coach that asks before it changes anything.",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0A0B0D",
     "ios": {
       "icon": "./assets/expo.icon"
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4EF",
+        "backgroundColor": "#0A0B0D",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
@@ -27,14 +29,20 @@
     "web": {
       "output": "single",
       "favicon": "./assets/images/favicon.png",
-      "bundler": "metro"
+      "bundler": "metro",
+      "name": "FitCoach: train, eat, get better",
+      "shortName": "FitCoach",
+      "description": "FitCoach: photo food logging, adaptive training plans and a coach that asks before it changes anything.",
+      "lang": "en",
+      "themeColor": "#0A0B0D",
+      "backgroundColor": "#0A0B0D"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#F6F7F9",
+          "backgroundColor": "#0A0B0D",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
@@ -49,7 +57,7 @@
       [
         "expo-notifications",
         {
-          "color": "#0B7A5E"
+          "color": "#D4FF3A"
         }
       ],
       "expo-secure-store"

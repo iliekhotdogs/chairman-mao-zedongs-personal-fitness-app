@@ -110,7 +110,7 @@ export default function CaptureScreen() {
 
   // ---------- render ----------
   return (
-    <Screen maxWidth={980}>
+    <Screen size="medium">
       <PageHeader title="Log a meal" subtitle={phase === 'review' ? 'Review the estimate. Nothing is saved until you accept.' : 'Take or upload a photo and add a short hint.'} right={<Button title="Cancel" kind="ghost" onPress={() => router.back()} />} />
 
       {!realAI ? (

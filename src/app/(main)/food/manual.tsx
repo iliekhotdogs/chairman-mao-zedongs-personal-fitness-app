@@ -28,7 +28,7 @@ export default function ManualEntry() {
 
   if (id && !existing) {
     return (
-      <Screen maxWidth={720}>
+      <Screen size="narrow">
         <EmptyState icon="search-outline" title="Entry not found" body="It may have been deleted on another device." action={<Button title="Back to food log" onPress={() => router.replace('/food')} />} />
       </Screen>
     );
@@ -49,7 +49,7 @@ export default function ManualEntry() {
   };
 
   return (
-    <Screen maxWidth={980}>
+    <Screen size="medium">
       <PageHeader title={existing ? 'Edit meal' : 'Add food'} subtitle={formatDateLabel(date, today)} right={<Button title="Cancel" kind="ghost" onPress={() => router.back()} />} />
       <Columns ratio={[1, 1]}>
         {[
