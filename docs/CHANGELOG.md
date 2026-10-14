@@ -2,6 +2,12 @@
 
 Record each repository change here in the same commit as the change. Use the local date and time with a time zone, short point-form notes, and the name of the person or agent who made it. Newest entries go first. This log starts on October 14, 2026; earlier changes remain in Git history.
 
+## 2026-10-14 15:28 PDT — Codex
+
+- Expanded the benchmark CSV and report to record visible and detected food names, calculate actual food detection, list missed foods, and reject inconsistent paired measurements. Added deterministic selection from the official test split and kept private source images out of Git.
+
+Signed off: Codex
+
 ## 2026-10-14 15:25 PDT — Codex
 
 - Fixed the blocking Edge Function CI job by installing the repository's npm dependencies before Deno resolves `@supabase/supabase-js`.
