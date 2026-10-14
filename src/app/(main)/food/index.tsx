@@ -10,6 +10,7 @@ import { useAct } from '@/components/Toast';
 import { addDays, formatDateLabel, formatTime, nowISO } from '@/lib/dates';
 import { foodForDay, remainingForDay } from '@/lib/selectors';
 import { sumItems } from '@/lib/nutrition/lookup';
+import { discardLocalPhoto } from '@/lib/photo';
 import type { FoodEntry, MealType } from '@/lib/types';
 
 const ORDER: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
@@ -98,7 +99,7 @@ export default function FoodLog() {
               icon="trash-outline"
               style={{ flex: 1 }}
               onPress={() => {
-                if (toDelete) doAct({ type: 'DELETE_FOOD', id: toDelete.id, now: nowISO() }, 'Meal deleted');
+                if (toDelete && doAct({ type: 'DELETE_FOOD', id: toDelete.id, now: nowISO() }, 'Meal deleted')) void discardLocalPhoto(toDelete.photoUri);
                 setToDelete(null);
               }}
             />

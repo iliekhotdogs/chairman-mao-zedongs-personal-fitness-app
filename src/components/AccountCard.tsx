@@ -1,6 +1,7 @@
-import React, { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { Platform, type TextInput } from 'react-native';
 import { router } from 'expo-router';
+import * as Linking from 'expo-linking';
 
 import { C, Space } from '@/constants/theme';
 import { Badge, Button, Card, Field, Muted, Row, Text } from './ui';
@@ -11,10 +12,15 @@ import { functionErrorMessage } from '@/lib/ai/provider';
 
 const MIN_PASSWORD = 8;
 
-/** A password-reset link signs the user in with type=recovery in the URL hash.
- * Supabase consumes the hash on start-up, often before this card mounts, so it
- * is read once at module load as well as from the PASSWORD_RECOVERY event. */
-let recoveryFromUrl = Platform.OS === 'web' && typeof window !== 'undefined' && /type=recovery/.test(window.location.hash);
+/** Invite codes are 8 letters/digits, usually shown as ABCD-2345. */
+const INVITE_CODE_LENGTH = 8;
+const inviteCodeLength = (code: string) => code.replace(/[^a-z0-9]/gi, '').length;
+
+/** Where a reset link returns: the web page on this site, or the app's deep link. */
+function resetRedirectUrl(): string | undefined {
+  if (Platform.OS === 'web') return typeof window !== 'undefined' ? `${window.location.origin}/reset-password` : undefined;
+  return Linking.createURL('/reset-password');
+}
 
 type Mode = 'in' | 'up' | 'forgot';
 
@@ -29,15 +35,8 @@ export function AccountCard({ intro }: { intro?: string }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
   const [isAdmin, setIsAdmin] = useState(false);
-  const [recovery, setRecovery] = useState(recoveryFromUrl);
-  const [newPassword, setNewPassword] = useState('');
-
-  useEffect(() => {
-    const sb = supabase();
-    if (!sb) return;
-    const { data } = sb.auth.onAuthStateChange((event) => { if (event === 'PASSWORD_RECOVERY') setRecovery(true); });
-    return () => data.subscription.unsubscribe();
-  }, [sync.configured]);
+  const passwordRef = useRef<TextInput>(null);
+  const codeRef = useRef<TextInput>(null);
 
   useEffect(() => {
     let active = true;
@@ -90,26 +89,22 @@ export function AccountCard({ intro }: { intro?: string }) {
   const sendReset = () => run(async () => {
     const sb = supabase();
     if (!sb) return;
-    // On web the link returns to this site's Settings, where the new password is set.
-    const redirectTo = Platform.OS === 'web' && typeof window !== 'undefined' ? `${window.location.origin}/settings` : undefined;
+    // The link returns to /reset-password (web) or the app, where the new password is set.
+    const redirectTo = resetRedirectUrl();
     const { error } = await sb.auth.resetPasswordForEmail(email.trim(), { redirectTo });
     if (error) throw error;
     setMode('in');
     return 'If that email has an account, a reset link is on its way.';
   });
 
-  const saveNewPassword = () => run(async () => {
-    const sb = supabase();
-    if (!sb) return;
-    const { error } = await sb.auth.updateUser({ password: newPassword });
-    if (error) throw error;
-    recoveryFromUrl = false;
-    setRecovery(false);
-    setNewPassword('');
-    return 'Password updated.';
-  });
-
   const passwordError = password && password.length < MIN_PASSWORD ? `At least ${MIN_PASSWORD} characters.` : undefined;
+  const canSignIn = Boolean(email.trim() && password) && !busy;
+  const canReset = email.includes('@') && !busy;
+  const signUpBlocker = !email.trim().includes('@') ? 'Enter your email address.'
+    : password.length < MIN_PASSWORD ? `Choose a password of at least ${MIN_PASSWORD} characters.`
+    : inviteCodeLength(code) < INVITE_CODE_LENGTH ? 'Enter your invite code. Invite codes look like ABCD-2345.'
+    : undefined;
+  const errorText = err ? <Text variant="small" color={C.danger} accessibilityRole="alert" accessibilityLiveRegion="assertive">{err}</Text> : null;
 
   return (
     <Card style={{ gap: Space.sm }}>
@@ -125,19 +120,8 @@ export function AccountCard({ intro }: { intro?: string }) {
             <Badge kind={sync.status === 'error' ? 'danger' : 'saved'} label={sync.status === 'syncing' ? 'Syncing…' : sync.status === 'error' ? 'Sync error' : 'Synced'} />
             <Muted variant="small">{sync.session.user.email}</Muted>
           </Row>
-          {recovery ? (
-            <>
-              <Text variant="smallStrong">Set a new password</Text>
-              <Field label="New password" value={newPassword} onChangeText={setNewPassword} secureTextEntry autoComplete="new-password"
-                error={newPassword && newPassword.length < MIN_PASSWORD ? `At least ${MIN_PASSWORD} characters.` : undefined} />
-              {err ? <Text variant="small" color={C.danger}>{err}</Text> : null}
-              <Row gap={Space.sm}>
-                <Button title="Save password" size="sm" loading={busy} disabled={newPassword.length < MIN_PASSWORD} onPress={saveNewPassword} />
-                <Button title="Not now" kind="ghost" size="sm" onPress={() => { recoveryFromUrl = false; setRecovery(false); }} />
-              </Row>
-            </>
-          ) : null}
-          {sync.error ? <Text variant="small" color={C.danger}>{sync.error}</Text> : null}
+          {errorText}
+          {sync.error ? <Text variant="small" color={C.danger} accessibilityRole="alert">{sync.error}</Text> : null}
           {sync.lastSyncAt ? <Muted variant="small">Last sync {new Date(sync.lastSyncAt).toLocaleTimeString()}</Muted> : null}
           {sync.legacyAvailable && !state.profile ? (
             <Button title="Import earlier data from this device" kind="secondary" size="sm" onPress={() => {
@@ -146,6 +130,7 @@ export function AccountCard({ intro }: { intro?: string }) {
           ) : null}
           <Row wrap gap={Space.sm}>
             <Button title="Sync now" kind="secondary" size="sm" icon="refresh" onPress={() => sync.syncNow()} />
+            <Button title="Change password" kind="secondary" size="sm" icon="key-outline" onPress={() => router.push('/reset-password')} />
             {isAdmin ? <Button title="Admin" kind="secondary" size="sm" onPress={() => router.push('/admin')} /> : null}
             <Button title="Sign out" kind="ghost" size="sm" onPress={() => void signOut()} />
           </Row>
@@ -153,8 +138,9 @@ export function AccountCard({ intro }: { intro?: string }) {
       ) : mode === 'forgot' ? (
         <>
           <Muted variant="small">Enter your account email and we&apos;ll send a link to set a new password.</Muted>
-          <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
-          {err ? <Text variant="small" color={C.danger}>{err}</Text> : null}
+          <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email"
+            returnKeyType="send" onSubmitEditing={() => { if (canReset) void sendReset(); }} />
+          {errorText}
           <Row gap={Space.sm}>
             <Button title="Send reset link" loading={busy} onPress={sendReset} disabled={!email.includes('@')} />
             <Button title="Back to sign in" kind="ghost" onPress={() => { setErr(undefined); setMode('in'); }} />
@@ -165,13 +151,20 @@ export function AccountCard({ intro }: { intro?: string }) {
           <Muted variant="small">{mode === 'up'
             ? 'FitCoach is invite-only. Enter the invite code you were given to create your account.'
             : intro ?? 'Sign in to sync your data between your phone and computer.'}</Muted>
-          <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
-          <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry autoComplete={mode === 'up' ? 'new-password' : 'password'}
-            hint={mode === 'up' ? `At least ${MIN_PASSWORD} characters.` : undefined} error={mode === 'up' ? passwordError : undefined} />
+          <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email"
+            returnKeyType="next" onSubmitEditing={() => passwordRef.current?.focus()} />
+          <Field ref={passwordRef} label="Password" value={password} onChangeText={setPassword} secureTextEntry autoComplete={mode === 'up' ? 'new-password' : 'password'}
+            hint={mode === 'up' ? `At least ${MIN_PASSWORD} characters.` : undefined} error={mode === 'up' ? passwordError : undefined}
+            returnKeyType={mode === 'up' ? 'next' : 'go'}
+            onSubmitEditing={() => {
+              if (mode === 'up') codeRef.current?.focus();
+              else if (canSignIn) void signIn();
+            }} />
           {mode === 'up' ? (
-            <Field label="Invite code" value={code} onChangeText={setCode} autoCapitalize="characters" autoCorrect={false} placeholder="ABCD-2345" />
+            <Field ref={codeRef} label="Invite code" value={code} onChangeText={setCode} autoCapitalize="characters" autoCorrect={false} placeholder="ABCD-2345"
+              returnKeyType="go" onSubmitEditing={() => { if (!signUpBlocker && !busy) void signUp(); }} />
           ) : null}
-          {err ? <Text variant="small" color={C.danger}>{err}</Text> : null}
+          {errorText}
           {mode === 'in' ? (
             <>
               <Row wrap gap={Space.sm}>
@@ -181,10 +174,13 @@ export function AccountCard({ intro }: { intro?: string }) {
               <Button title="Forgot password?" kind="ghost" size="sm" onPress={() => { setErr(undefined); setMode('forgot'); }} />
             </>
           ) : (
-            <Row wrap gap={Space.sm}>
-              <Button title="Create account" loading={busy} onPress={signUp} disabled={!email || password.length < MIN_PASSWORD || code.trim().length < 8} />
-              <Button title="Back to sign in" kind="ghost" onPress={() => { setErr(undefined); setMode('in'); }} disabled={busy} />
-            </Row>
+            <>
+              <Row wrap gap={Space.sm}>
+                <Button title="Create account" loading={busy} onPress={signUp} disabled={!!signUpBlocker} />
+                <Button title="Back to sign in" kind="ghost" onPress={() => { setErr(undefined); setMode('in'); }} disabled={busy} />
+              </Row>
+              {signUpBlocker && (email || password || code) ? <Muted variant="small" accessibilityLiveRegion="polite">{signUpBlocker}</Muted> : null}
+            </>
           )}
         </>
       )}

@@ -79,7 +79,7 @@ export function CountUp({ value, format = (v) => Math.round(v).toLocaleString(),
 
 export type ScreenSize = keyof typeof MaxWidths;
 
-export function Screen({ children, scroll = true, size = 'wide', maxWidth, padded = true, contentStyle }: { children: React.ReactNode; scroll?: boolean; size?: ScreenSize; maxWidth?: number; padded?: boolean; contentStyle?: StyleProp<ViewStyle> }) {
+export function Screen({ children, scroll = true, size = 'wide', maxWidth, padded = true, contentStyle, scrollRef }: { children: React.ReactNode; scroll?: boolean; size?: ScreenSize; maxWidth?: number; padded?: boolean; contentStyle?: StyleProp<ViewStyle>; scrollRef?: React.Ref<ScrollView> }) {
   const insets = useSafeAreaInsets();
   const { isPhone } = useLayout();
   const inner = (
@@ -91,7 +91,7 @@ export function Screen({ children, scroll = true, size = 'wide', maxWidth, padde
   );
   if (!scroll) return <View style={{ flex: 1, backgroundColor: C.bg }}>{inner}</View>;
   return (
-    <ScrollView style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scrollRef} style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
       {inner}
     </ScrollView>
   );
@@ -101,7 +101,7 @@ export function Row({ style, gap = Space.sm, align = 'center', wrap, ...rest }: 
   return <View {...rest} style={[{ flexDirection: 'row', alignItems: align, gap, flexWrap: wrap ? 'wrap' : 'nowrap' }, style]} />;
 }
 
-export function Stack({ style, gap = Space.sm, ...rest }: ViewProps & { gap?: number }) {
+export function Stack({ style, gap = Space.sm, ...rest }: ViewProps & { gap?: number; ref?: React.Ref<View> }) {
   return <View {...rest} style={[{ gap }, style]} />;
 }
 
@@ -363,7 +363,7 @@ export function LoadingState({ label, lines = 3 }: { label: string; lines?: numb
 
 // ---------- Inputs ----------
 
-export function Field({ label, hint, error, suffix, style, inputStyle, ...rest }: TextInputProps & { label?: string; hint?: string; error?: string; suffix?: string; style?: StyleProp<ViewStyle>; inputStyle?: StyleProp<TextStyle> }) {
+export function Field({ label, hint, error, suffix, style, inputStyle, ...rest }: TextInputProps & { label?: string; hint?: string; error?: string; suffix?: string; style?: StyleProp<ViewStyle>; inputStyle?: StyleProp<TextStyle>; ref?: React.Ref<TextInput> }) {
   const [focused, setFocused] = React.useState(false);
   return (
     <Stack gap={6} style={style}>

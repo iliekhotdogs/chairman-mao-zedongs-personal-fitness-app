@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { router } from 'expo-router';
-import { Badge, Banner, Button, Card, Chip, Columns, Divider, Field, KeyValue, Muted, NumberField, PageHeader, Row, Screen, Stack, Text, Toggle } from '@/components/ui';
+import { Redirect } from 'expo-router';
+import { goBack } from '@/lib/nav';
+import { Badge, Banner, Button, Card, Chip, Columns, Divider, Field, KeyValue, LoadingState, Muted, NumberField, PageHeader, Row, Screen, Stack, Text, Toggle } from '@/components/ui';
+import { useStore } from '@/store/AppStore';
+import { log } from '@/lib/log';
 import { Space } from '@/constants/theme';
 import { supabase } from '@/lib/sync/supabase';
 import { functionErrorMessage } from '@/lib/ai/provider';
@@ -28,10 +31,45 @@ async function adminCall<T>(action: string, extra: Record<string, unknown> = {})
 
 const date = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString() : '—');
 
+/**
+ * The console renders only after the server confirms this account is an admin (the
+ * `check` action of admin-stats). Everyone else is sent home; every admin action is
+ * also authorised server-side, so this only keeps the page itself private.
+ */
 export default function Admin() {
+  const { sync } = useStore();
+  const userId = sync.session?.user.id;
+  const [checked, setChecked] = useState<{ userId: string; admin: boolean }>();
+
+  useEffect(() => {
+    const sb = supabase();
+    if (!sb || !userId) return;
+    let active = true;
+    sb.functions.invoke('admin-stats', { body: { action: 'check' } })
+      .then(({ data, error }) => { if (active) setChecked({ userId, admin: !error && data?.admin === true }); })
+      .catch((e) => {
+        log.warn('admin', 'Admin check failed.', e);
+        if (active) setChecked({ userId, admin: false });
+      });
+    return () => { active = false; };
+  }, [userId]);
+
+  if (!sync.configured || !userId) return <Redirect href="/" />;
+  if (checked?.userId !== userId) {
+    return (
+      <Screen maxWidth={1080}>
+        <LoadingState label="Checking access…" lines={2} />
+      </Screen>
+    );
+  }
+  if (!checked.admin) return <Redirect href="/" />;
+  return <AdminConsole />;
+}
+
+function AdminConsole() {
   return (
     <Screen maxWidth={1080}>
-      <PageHeader title="Admin" right={<Button title="Back" kind="ghost" onPress={() => router.back()} />} />
+      <PageHeader title="Admin" right={<Button title="Back" kind="ghost" onPress={() => goBack('/settings')} />} />
       <Columns>
         {[
           <Stack key="l" gap={Space.lg}>

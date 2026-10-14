@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Platform, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/lib/nav';
 
 import { C, Space } from '@/constants/theme';
 import { Badge, Banner, Button, Card, Chip, EmptyState, Field, IconButton, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Stepper, Text, Ionicons, Columns } from '@/components/ui';
@@ -71,7 +72,7 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
 
   return (
     <Screen size="narrow">
-      <PageHeader title="Start a workout" subtitle={formatDateLabel(today, today)} right={<Button title="Back" kind="ghost" onPress={() => router.back()} />} />
+      <PageHeader title="Start a workout" subtitle={formatDateLabel(today, today)} right={<Button title="Back" kind="ghost" onPress={() => goBack('/workouts')} />} />
       {first ? (
         <Card tone={overridden && !preferred ? 'saved' : 'default'} style={{ gap: Space.sm }}>
           <Row wrap gap={6}>

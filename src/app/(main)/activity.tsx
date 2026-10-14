@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { router } from 'expo-router';
+import { goBack } from '@/lib/nav';
 
 import { C, Space } from '@/constants/theme';
 import { Badge, Banner, Button, Card, Expandable, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Text, Columns } from '@/components/ui';
@@ -48,7 +48,7 @@ export default function Activity() {
 
   return (
     <Screen>
-      <PageHeader title="Activity" subtitle="Steps and activity from connected apps and devices" right={<Button title="Back" kind="ghost" onPress={() => router.back()} />} />
+      <PageHeader title="Activity" subtitle="Steps and activity from connected apps and devices" right={<Button title="Back" kind="ghost" onPress={() => goBack('/')} />} />
       <Columns ratio={[2, 3]}>
         {[
           <Stack key="l" gap={Space.lg}>
