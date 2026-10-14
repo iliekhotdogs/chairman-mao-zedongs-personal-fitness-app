@@ -56,9 +56,9 @@ export default function Onboarding() {
   const [name, setName] = useState('');
   const [goal, setGoal] = useState<GoalPriority>('fat_loss');
   const [sex, setSex] = useState<Sex>('unspecified');
-  const [age, setAge] = useState<number | undefined>(30);
-  const [heightCm, setHeightCm] = useState<number | undefined>(175);
-  const [weightKg, setWeightKg] = useState<number | undefined>(80);
+  const [age, setAge] = useState<number | undefined>();
+  const [heightCm, setHeightCm] = useState<number | undefined>();
+  const [weightKg, setWeightKg] = useState<number | undefined>();
   const [experience, setExperience] = useState<Experience>('beginner');
   const [equipment, setEquipment] = useState<Equipment>('full_gym');
   const [days, setDays] = useState<number[]>([1, 3, 5]);
@@ -171,8 +171,8 @@ export default function Onboarding() {
               {sync.session && !state.profile ? <Muted variant="small">Signed in. Downloading your data… If you are new, tap Get started.</Muted> : null}
             </Expandable>
           ) : null}
-          <Banner kind={sync.configured ? 'info' : 'simulated'} title={sync.configured ? 'Private pilot' : 'Prototype'}>
-            {sync.configured ? 'Food photos and chat use the configured AI service when enabled. Estimates need your review. USDA lookups are live; device health syncing is not available yet.' : 'Built-in AI estimates and chat are labelled as simulated. USDA lookups are live; health syncing is simulated in this local prototype.'}
+          <Banner kind="info" title="How estimates work">
+            {sync.configured ? 'Food photos and chat can use the shared AI service. Check every meal estimate before saving. Activity can also be entered manually.' : 'Food estimates use your written hint; photos are not analysed until you connect an account. Check every estimate before saving.'}
           </Banner>
         </Stack>
       )}
@@ -276,6 +276,10 @@ export default function Onboarding() {
         <Stack gap={Space.md}>
           <Text variant="h1">Here&apos;s your starting plan</Text>
           <Muted>These are starting estimates. Your coach will suggest adjustments as your real weight trend comes in, and you approve each one.</Muted>
+          <Card tone="muted" style={{ gap: Space.sm }}>
+            <Muted variant="small">Based on age {age}, {Math.round(heightCm ?? 0)} cm, {Math.round(weightKg ?? 0)} kg, {sex.replace('_', ' ')}, and {activity.replace('_', ' ')}.</Muted>
+            <Button title="Edit body stats" kind="ghost" size="sm" onPress={() => setStep(2)} />
+          </Card>
           <Card tone="pending" style={{ gap: Space.md }}>
             <Row wrap gap={6}>
               <Badge kind="suggestion" label="Proposed" />
@@ -306,8 +310,7 @@ export default function Onboarding() {
 
           <Card tone={wantPlan ? 'pending' : 'muted'} style={{ gap: Space.md }}>
             <Row wrap gap={6}>
-              <Badge kind="suggestion" label="AI-generated plan" />
-              <Badge kind="simulated" label="Rule-based in prototype" />
+              <Badge kind="suggestion" label="Suggested plan" />
             </Row>
             {plan ? (
               <>

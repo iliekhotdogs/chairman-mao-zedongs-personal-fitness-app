@@ -1,5 +1,13 @@
 # Change log
 
+## 2026-10-14 15:42 PDT — Codex
+
+- Added empty onboarding body fields and a visible plan basis; expanded profile editing with a target preview and plan update prompt.
+- Improved phone sync errors, food review confirmation and manual handoff, date labels, workout feedback controls, touch targets, tab labels, and coach composer accessibility.
+- Removed prototype wording from the main screens and kept developer status labels in development builds.
+
+Signed off: Codex
+
 ## 2026-10-14 15:39 PDT — Codex
 
 - Added server-held per-user Groq and Gemini model choices, derived photo models, admin provider controls, confirmed-email admin bootstrap, audited role changes, and RLS checks.

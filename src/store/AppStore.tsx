@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState as RNAppState } from 'react-native';
+import { AppState as RNAppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
 
@@ -305,12 +305,22 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       log.warn('sync', 'Sync failed.', e);
       if (stillSignedIn()) {
         setSyncError(e instanceof Error ? e.message : String(e));
-        setSyncStatus('error');
+        setSyncStatus(Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
       }
     } finally {
       if (syncing.current === userId) syncing.current = null;
     }
   }, [userId, scopeReady, dispatch]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const offline = () => setSyncStatus('offline');
+    const online = () => void doSync();
+    window.addEventListener('offline', offline);
+    window.addEventListener('online', online);
+    if (!navigator.onLine) offline();
+    return () => { window.removeEventListener('offline', offline); window.removeEventListener('online', online); };
+  }, [doSync]);
 
   const importLocalData = useCallback(async () => {
     if (!userId || !scopeReady || stateRef.current.profile) throw new Error('This account already has data.');
@@ -325,14 +335,14 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     if (!configured || !userId || !scopeReady) return;
     // First sync for this account, in the background right after hydration (or sign-in).
     const first = setTimeout(() => void doSync(), 0);
-    const i = setInterval(() => void doSync(), 120_000);
+    const i = setInterval(() => void doSync(), firstSyncSettled === userId ? 120_000 : 10_000);
     const sub = RNAppState.addEventListener('change', (s) => s === 'active' && void doSync());
     return () => {
       clearTimeout(first);
       clearInterval(i);
       sub.remove();
     };
-  }, [configured, userId, scopeReady, doSync]);
+  }, [configured, userId, scopeReady, firstSyncSettled, doSync]);
 
   // ---- remote push: register this device's Expo push token (native builds only) ----
   useEffect(() => {

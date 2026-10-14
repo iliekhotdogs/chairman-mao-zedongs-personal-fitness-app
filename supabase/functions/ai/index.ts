@@ -1,6 +1,6 @@
 // Shared AI gateway. Deploy with JWT verification enabled.
-// The admin picks the provider, models, limits and kill switch in app_config
-// (see the admin screen). Keys are Edge Function secrets only: GROQ_API_KEY,
+// The admin sets defaults, allowed providers, limits and kill switch in app_config.
+// User choices are resolved server-side. Keys are Edge Function secrets only: GROQ_API_KEY,
 // GEMINI_API_KEY, NVIDIA_API_KEY; optional FDC_API_KEY. Never place them in Expo env vars.
 import type { User } from 'npm:@supabase/supabase-js@2.117.2';
 import { admin, profileOf, requestUser } from '../_shared/auth.ts';
@@ -23,7 +23,7 @@ const AI_UNUSABLE = 'Coach AI sent an answer that could not be used. Try again, 
 
 /** A failure with a safe message for the client. `status` is the HTTP status to return. */
 class AiError extends Error {
-  constructor(message: string, readonly status = 502) { super(message); }
+  constructor(message: string, readonly status = 502, readonly refundable = false) { super(message); }
 }
 
 /** `counted`: the request reached the provider in a way that keeps the quota claim.
@@ -134,7 +134,7 @@ function validatedIntents(value: unknown): unknown[] {
   });
 }
 
-// Older app builds still send a "model" field; it is ignored. The admin picks the model.
+// Older app builds still send a "model" field; it is ignored. The server resolves the model.
 async function coach(config: AiConfig, meter: Meter, body: Record<string, unknown>) {
   const message = text(body.message, 2000);
   if (!message.trim()) throw new AiError('Enter a message first.', 400);
@@ -182,7 +182,7 @@ async function searchUsda(query: string, pageSize: number) {
   });
   if (!response.ok) {
     console.error(`USDA search ${response.status}: ${(await response.text().catch(() => '')).slice(0, 200)}`);
-    throw new AiError('Food search is not available right now. Try again later.', 502);
+    throw new AiError('Food search is not available right now. Try again later.', 502, response.status === 429 || response.status >= 500);
   }
   return (await response.json()).foods ?? [];
 }
@@ -309,8 +309,9 @@ Deno.serve(async (request) => {
   if (body.action === 'search_food') {
     const query = text(body.query, 100).trim();
     if (query.length < 2) return json({ foods: [] });
+    const searchDay = utcDay();
     const { data: searchClaim, error: searchClaimError } = await admin.rpc('claim_food_search', {
-      p_user: user.id, p_day: utcDay(),
+      p_user: user.id, p_day: searchDay,
       p_user_limit: 30, p_global_limit: 500,
     });
     if (searchClaimError) return json({ error: 'Food search metering is not ready. Apply the account SQL setup first.' }, 503);
@@ -325,8 +326,10 @@ Deno.serve(async (request) => {
       return json({ foods: result });
     } catch (error) {
       if (!(error instanceof AiError)) console.error(`USDA search failed: ${error}`);
-      const { error: refundError } = await admin.rpc('release_food_search', { p_user: user.id, p_day: utcDay() });
-      if (refundError) console.error(`Food search refund failed: ${refundError.message}`);
+      if (!(error instanceof AiError) || error.refundable) {
+        const { error: refundError } = await admin.rpc('release_food_search', { p_user: user.id, p_day: searchDay });
+        if (refundError) console.error(`Food search refund failed: ${refundError.message}`);
+      }
       return json({ error: error instanceof AiError ? error.message : 'Food search is not available right now. Try again later.' }, 502);
     }
   }

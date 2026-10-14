@@ -23,6 +23,7 @@ export default function Coach() {
   const { isDesktop, isPhone } = useLayout();
   const insets = useSafeAreaInsets();
   const [text, setText] = useState('');
+  const [inputFocused, setInputFocused] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<{ msg: string; retry: string } | null>(null);
   const [tab, setTab] = useState<'chat' | 'suggestions'>('chat');
@@ -51,7 +52,7 @@ export default function Coach() {
     setThinking(true);
     try {
       const reply = await coachReply({ ...state, chat: [...state.chat, userMsg] }, body, today);
-      if (reply.aiNotice) toast(`The AI coach didn't answer (${reply.aiNotice}) Showing a built-in reply.`, 'error');
+      if (reply.aiNotice) toast(`The AI coach didn't answer. ${reply.aiNotice} Showing a built-in reply.`, 'error');
       if (reply.proposals.length) doAct({ type: 'ADD_PROPOSALS', proposals: reply.proposals });
       const t = nowISO();
       doAct({ type: 'ADD_CHAT', messages: [{ id: newId(), role: 'coach', text: reply.text, createdAt: t, updatedAt: t, proposalIds: reply.proposals.map((p) => p.id), simulated: reply.simulated, safety: reply.safety }] });
@@ -98,7 +99,7 @@ export default function Coach() {
   const chat = (
     <View style={{ flex: 1 }}>
       <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: isPhone ? Space.lg : Space.xl, gap: Space.md, paddingBottom: Space.xl }} keyboardShouldPersistTaps="handled">
-        {simulated ? (
+        {__DEV__ && simulated ? (
           <Banner kind="simulated" title="Simulated coach">
             Replies are built-in answers generated on this device from your data. Sign in to use the shared AI coach chat.
           </Banner>
@@ -124,14 +125,16 @@ export default function Coach() {
           <TextInput
             value={text}
             onChangeText={setText}
+            onFocus={() => setInputFocused(true)}
+            onBlur={() => setInputFocused(false)}
             placeholder="Message your coach"
             placeholderTextColor={C.textMuted}
             onSubmitEditing={() => send(text)}
             returnKeyType="send"
             accessibilityLabel="Message your coach"
-            style={[styles.input, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
+            style={[styles.input, inputFocused ? { borderColor: C.primary, borderWidth: 2 } : null]}
           />
-          <IconButton icon="send" label="Send" color={text.trim() ? C.primary : C.borderStrong} onPress={() => send(text)} />
+          <IconButton icon="send" label="Send" color={text.trim() ? C.primary : C.borderStrong} onPress={() => send(text)} disabled={!text.trim() || thinking} />
         </Row>
       </View>
     </View>
@@ -199,7 +202,7 @@ function Bubble({ m }: { m: ChatMessage }) {
         {!mine && (m.simulated || m.safety) ? (
           <Row wrap gap={4}>
             {m.safety ? <Badge kind="danger" label="Safety guidance, not medical advice" icon="medkit-outline" /> : null}
-            {m.simulated ? <Badge kind="simulated" label="Simulated" /> : null}
+            {__DEV__ && m.simulated ? <Badge kind="simulated" label="Simulated" /> : null}
           </Row>
         ) : null}
         <Text color={mine ? C.onPrimary : C.text}>{m.text}</Text>

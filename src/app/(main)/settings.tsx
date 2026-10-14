@@ -9,7 +9,7 @@ import { AiSettings } from '@/components/AiSettings';
 import { IntegrationSettings } from '@/components/IntegrationSettings';
 import { useAiEngine } from '@/hooks/useAiEngine';
 import { useAct, useToast } from '@/components/Toast';
-import { computeTargets, macrosFor } from '@/lib/nutrition/targets';
+import { ageFromBirthYear, computeTargets, macrosFor } from '@/lib/nutrition/targets';
 import { latestWeight } from '@/lib/selectors';
 import { nowISO, WEEKDAY_SHORT } from '@/lib/dates';
 import { displayWeight } from '@/lib/units';
@@ -26,7 +26,7 @@ import { csvExports, jsonExport } from '@/lib/export';
 import { saveExportFile } from '@/lib/exportFile';
 import { clearIntegrationConfig } from '@/lib/integrations/config';
 import { formatRest, REST_MAX_SEC, REST_MIN_SEC, REST_STEP_SEC, sanitizeRestPrefs } from '@/lib/workouts/restTimer';
-import type { BodyArea, GoalPriority, NutritionTargets, Profile } from '@/lib/types';
+import type { BodyArea, DailyActivity, GoalPriority, NutritionTargets, Profile, Sex } from '@/lib/types';
 
 const GOALS: { value: GoalPriority; label: string }[] = [
   { value: 'fat_loss', label: 'Lose fat' }, { value: 'muscle_gain', label: 'Build muscle' }, { value: 'strength', label: 'Get stronger' }, { value: 'maintenance', label: 'Maintain' },
@@ -64,6 +64,7 @@ function GoalSection() {
   const { state } = useStore();
   const doAct = useAct();
   const [preview, setPreview] = useState<{ goal: GoalPriority; t: NutritionTargets } | null>(null);
+  const [offerPlan, setOfferPlan] = useState(false);
   const p = state.profile!;
   const w = latestWeight(state)?.weightKg ?? p.startWeightKg;
   return (
@@ -82,7 +83,7 @@ function GoalSection() {
         footer={
           <Row gap={Space.sm}>
             <Button title="Keep current" kind="reject" style={{ flex: 1 }} onPress={() => setPreview(null)} />
-            <Button title="Confirm change" kind="accept" icon="checkmark" style={{ flex: 1 }} onPress={() => { if (preview && doAct({ type: 'SET_GOAL', goal: preview.goal, targets: preview.t, now: nowISO(), confirmed: true }, 'Priority updated')) setPreview(null); }} />
+            <Button title="Confirm change" kind="accept" icon="checkmark" style={{ flex: 1 }} onPress={() => { if (preview && doAct({ type: 'SET_GOAL', goal: preview.goal, targets: preview.t, now: nowISO(), confirmed: true })) { setPreview(null); setOfferPlan(true); } }} />
           </Row>
         }>
         {preview ? (
@@ -96,6 +97,7 @@ function GoalSection() {
           </>
         ) : null}
       </Sheet>
+      {offerPlan ? <Banner kind="info" title="Priority updated"><Button title="Update your plan" kind="secondary" size="sm" onPress={() => { setOfferPlan(false); router.push('/workouts?preview=1'); }} /></Banner> : null}
     </Card>
   );
 }
@@ -170,11 +172,30 @@ function ProfileSection() {
   const { state } = useStore();
   const doAct = useAct();
   const p = state.profile!;
-  const upd = (patch: Partial<Omit<Profile, 'goal' | 'createdAt'>>) => doAct({ type: 'UPDATE_PROFILE', patch, now: nowISO() });
+  const [draft, setDraft] = useState<Profile | null>(null);
+  const [offerPlan, setOfferPlan] = useState(false);
+  const currentWeight = latestWeight(state)?.weightKg ?? p.startWeightKg;
+  const previewTargets = draft ? computeTargets(draft, currentWeight) : null;
+  const set = (patch: Partial<Profile>) => setDraft((value) => value ? { ...value, ...patch } : value);
+  const valid = draft && ageFromBirthYear(draft.birthYear) >= 16 && ageFromBirthYear(draft.birthYear) <= 90 && draft.heightCm > 120 && draft.heightCm < 230 && draft.sessionMinutes >= 15 && draft.sessionMinutes <= 180;
+  const saveBasics = () => {
+    if (!draft || !valid || !previewTargets) return;
+    const { birthYear, heightCm, sex, dailyActivity, dietPreferences, sessionMinutes } = draft;
+    if (!doAct({ type: 'UPDATE_PROFILE', patch: { birthYear, heightCm, sex, dailyActivity, dietPreferences, sessionMinutes }, now: nowISO() })) return;
+    doAct({ type: 'SET_TARGETS', targets: previewTargets, confirmed: true }, 'Profile and targets updated');
+    setDraft(null); setOfferPlan(true);
+  };
+  const upd = (patch: Partial<Omit<Profile, 'goal' | 'createdAt'>>) => {
+    const saved = doAct({ type: 'UPDATE_PROFILE', patch, now: nowISO() });
+    if (saved && !('name' in patch)) setOfferPlan(true);
+    return saved;
+  };
   return (
     <Card style={{ gap: Space.md }}>
       <Text variant="h3">Profile</Text>
       <Field label="Name" value={p.name === 'there' ? '' : p.name} onChangeText={(name) => upd({ name: name || 'there' })} />
+      <Button title="Edit body & lifestyle" kind="secondary" size="sm" onPress={() => setDraft({ ...p, dietPreferences: [...p.dietPreferences] })} />
+      <Muted variant="small">Age {ageFromBirthYear(p.birthYear)} · {p.heightCm} cm · {p.sessionMinutes} min sessions · {p.dailyActivity.replace('_', ' ')}</Muted>
       <Text variant="smallStrong">Units</Text>
       <Segmented label="Units" value={state.settings.units} onChange={(units) => doAct({ type: 'UPDATE_SETTINGS', patch: { units }, now: nowISO() })} options={[{ value: 'imperial', label: 'lb / ft' }, { value: 'metric', label: 'kg / cm' }]} />
       <Text variant="smallStrong">Training days</Text>
@@ -195,6 +216,20 @@ function ProfileSection() {
         })}
       </Row>
       <Muted variant="small">Changes to schedule, equipment, experience and limitations apply the next time you generate a plan. Your current plan isn&apos;t changed automatically.</Muted>
+      {offerPlan ? <Banner kind="info" title="Profile updated"><Button title="Update your plan" kind="secondary" size="sm" onPress={() => { setOfferPlan(false); router.push('/workouts?preview=1'); }} /></Banner> : null}
+      <Sheet visible={!!draft} onClose={() => setDraft(null)} title="Edit body & lifestyle" footer={<Row gap={Space.sm}><Button title="Cancel" kind="secondary" onPress={() => setDraft(null)} /><Button title="Save profile & targets" kind="accept" disabled={!valid} onPress={saveBasics} /></Row>}>
+        {draft ? <>
+          <NumberField label="Age" value={ageFromBirthYear(draft.birthYear)} onChange={(age) => age && set({ birthYear: new Date().getFullYear() - age })} suffix="years" />
+          <NumberField label="Height" value={draft.heightCm} onChange={(heightCm) => set({ heightCm: heightCm ?? 0 })} suffix="cm" />
+          <Segmented<Sex> label="Sex" value={draft.sex} onChange={(sex) => set({ sex })} options={[{ value: 'female', label: 'Female' }, { value: 'male', label: 'Male' }, { value: 'unspecified', label: 'Prefer not to say' }]} />
+          <Segmented<DailyActivity> label="Daily activity" value={draft.dailyActivity} onChange={(dailyActivity) => set({ dailyActivity })} options={[{ value: 'mostly_sitting', label: 'Sitting' }, { value: 'on_feet', label: 'On my feet' }, { value: 'physical_job', label: 'Physical work' }]} />
+          <NumberField label="Workout session length" value={draft.sessionMinutes} onChange={(sessionMinutes) => set({ sessionMinutes: sessionMinutes ?? 0 })} suffix="minutes" />
+          <Text variant="smallStrong">Food preferences</Text>
+          <Row wrap gap={6}>{[['vegetarian', 'Vegetarian'], ['vegan', 'Vegan'], ['pescatarian', 'Pescatarian'], ['dairy_free', 'Dairy-free'], ['gluten_free', 'Gluten-free'], ['halal', 'Halal'], ['no_pork', 'No pork'], ['low_carb', 'Lower carb']].map(([value, label]) => <Chip key={value} label={label} selected={draft.dietPreferences.includes(value)} onPress={() => set({ dietPreferences: draft.dietPreferences.includes(value) ? draft.dietPreferences.filter((item) => item !== value) : [...draft.dietPreferences, value] })} />)}</Row>
+          {previewTargets ? <Card tone="pending" style={{ gap: Space.sm }}><Text variant="smallStrong">New daily targets</Text><KeyValue k="Calories" v={`${state.targets?.calories ?? '—'} → ${previewTargets.calories} kcal`} /><KeyValue k="Protein" v={`${state.targets?.proteinG ?? '—'} → ${previewTargets.proteinG} g`} /><KeyValue k="Carbs" v={`${state.targets?.carbsG ?? '—'} → ${previewTargets.carbsG} g`} /><KeyValue k="Fat" v={`${state.targets?.fatG ?? '—'} → ${previewTargets.fatG} g`} /></Card> : null}
+          {!valid ? <Muted variant="small">Age must be 16–90, height 121–229 cm, and sessions 15–180 minutes.</Muted> : null}
+        </> : null}
+      </Sheet>
     </Card>
   );
 }
@@ -431,18 +466,18 @@ function AboutSection() {
   const [confirm, setConfirm] = useState(false);
   return (
     <Card style={{ gap: Space.sm }}>
-      <Text variant="h3">{sync.configured ? 'Private pilot' : 'Prototype & design review'}</Text>
+      <Text variant="h3">About FitCoach</Text>
       <Row wrap gap={6}>
-        <Badge kind={imageEngine === 'simulated' ? 'simulated' : 'info'} label={imageEngine === 'server' ? 'Server images' : 'Built-in image estimates'} />
-        <Badge kind={chatEngine === 'simulated' ? 'simulated' : 'info'} label={chatEngine === 'server' ? 'Server chat' : 'Built-in chat'} />
-        {!sync.configured ? <Badge kind="simulated" label="Simulated health sync" /> : null}
+        {__DEV__ ? <Badge kind={imageEngine === 'simulated' ? 'simulated' : 'info'} label={imageEngine === 'server' ? 'Server images' : 'Built-in image estimates'} /> : null}
+        {__DEV__ ? <Badge kind={chatEngine === 'simulated' ? 'simulated' : 'info'} label={chatEngine === 'server' ? 'Server chat' : 'Built-in chat'} /> : null}
+        {__DEV__ && !sync.configured ? <Badge kind="simulated" label="Simulated health sync" /> : null}
         <Badge kind="info" label="USDA lookup is live" />
       </Row>
       <Row wrap gap={Space.sm}>
         {__DEV__ ? <Button title="UI states gallery" kind="secondary" size="sm" icon="color-palette-outline" onPress={() => router.push('/states')} /> : null}
         {!sync.configured ? <Button title="Load sample data" kind="ghost" size="sm" icon="flask-outline" onPress={() => setConfirm(true)} /> : null}
       </Row>
-      <Muted variant="small">FitCoach v1.0.0 (prototype) · Not medical advice. Consult a professional for injuries, medical conditions, or eating-disorder concerns.</Muted>
+      <Muted variant="small">FitCoach v1.0.0 · Consult a professional for injuries, medical conditions, or eating-disorder concerns.</Muted>
       <Sheet
         visible={confirm}
         onClose={() => setConfirm(false)}

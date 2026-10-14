@@ -147,10 +147,10 @@ function stripEstimateFields(i: FoodItem): FoodItem {
   return { name, portionLabel, grams, calories, proteinG, carbsG, fatG, source, confidence, portionAssumption };
 }
 
-export function manualEntry(args: { items: FoodItem[]; meal: MealType; date: ISODate }): FoodEntry {
+export function manualEntry(args: { items: FoodItem[]; meal: MealType; date: ISODate; hint?: string; photoUri?: string }): FoodEntry {
   if (!args.items.length) throw new FoodConfirmationError('Add at least one food item.');
   const now = nowISO();
-  return { id: newId(), date: args.date, meal: args.meal, items: args.items, origin: 'manual', confirmedAt: now, createdAt: now, updatedAt: now };
+  return { id: newId(), date: args.date, meal: args.meal, items: args.items, origin: 'manual', hint: args.hint, photoUri: args.photoUri, confirmedAt: now, createdAt: now, updatedAt: now };
 }
 
 /** Mark an item as user-edited so it is no longer presented as sourced data. */

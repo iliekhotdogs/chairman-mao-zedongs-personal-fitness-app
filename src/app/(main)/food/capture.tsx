@@ -16,6 +16,7 @@ import type { Confidence, EstimateItem, FoodEstimate, FoodItem, MealType } from 
 import { useLayout } from '@/hooks/useLayout';
 import { persistPhoto } from '@/lib/photo';
 import { useAiEngine } from '@/hooks/useAiEngine';
+import { setManualDraft } from '@/lib/nutrition/manualDraft';
 
 type Phase = 'pick' | 'analyzing' | 'review' | 'error' | 'denied';
 
@@ -46,6 +47,8 @@ export default function CaptureScreen() {
   const [error, setError] = useState<string>();
   const [addOpen, setAddOpen] = useState(false);
   const [answered, setAnswered] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [leaveAfterDiscard, setLeaveAfterDiscard] = useState(false);
   const engine = useAiEngine('food');
   const realAI = engine !== 'simulated';
 
@@ -106,13 +109,17 @@ export default function CaptureScreen() {
     setItems([]);
     setPhase('pick');
   };
+  const goManual = () => {
+    setManualDraft({ hint, photoUri: photo?.uri, meal });
+    router.replace({ pathname: '/food/manual', params: { date } });
+  };
 
   const total = sumItems(items);
 
   // ---------- render ----------
   return (
     <Screen size="medium">
-      <PageHeader title="Log a meal" subtitle={phase === 'review' ? 'Review the estimate. Nothing is saved until you accept.' : 'Take or upload a photo and add a short hint.'} right={<Button title="Cancel" kind="ghost" onPress={() => goBack('/food')} />} />
+      <PageHeader title="Log a meal" subtitle={phase === 'review' ? 'Review the estimate. Nothing is saved until you accept.' : 'Take or upload a photo and add a short hint.'} right={<Button title="Cancel" kind="ghost" onPress={() => { if (phase === 'review') { setLeaveAfterDiscard(true); setConfirmDiscard(true); } else goBack('/food'); }} />} />
 
       {!realAI ? (
         <Banner kind="simulated" title="Built-in estimates">
@@ -172,7 +179,7 @@ export default function CaptureScreen() {
               <Text variant="smallStrong">Meal</Text>
               <Segmented label="Meal" value={meal} onChange={setMeal} options={MEALS} />
               <Button title="Estimate calories" size="lg" icon="sparkles" onPress={() => analyze()} disabled={!photo && !hint.trim()} full />
-              <Button title="Enter manually instead" kind="ghost" onPress={() => router.replace({ pathname: '/food/manual', params: { date } })} />
+              <Button title="Enter manually instead" kind="ghost" onPress={goManual} />
             </Stack>,
           ]}
         </Columns>
@@ -202,7 +209,7 @@ export default function CaptureScreen() {
               <Card tone="pending" style={{ gap: Space.sm }}>
                 <Row wrap gap={6}>
                   <Badge kind="suggestion" label="AI estimate" />
-                  {estimate.simulated ? <Badge kind="simulated" label="Simulated" /> : null}
+                  {__DEV__ && estimate.simulated ? <Badge kind="simulated" label="Simulated" /> : null}
                   <Badge kind={CONF[estimate.overallConfidence].kind} label={CONF[estimate.overallConfidence].label} />
                 </Row>
                 <Row align="flex-end" gap={6}>
@@ -262,7 +269,8 @@ export default function CaptureScreen() {
               {error ? <Text variant="small" color={C.danger}>{error}</Text> : null}
               <View style={{ gap: Space.sm, marginTop: Space.sm }}>
                 <Button title={`Accept estimate & log ${Math.round(total.calories)} kcal`} kind="accept" size="lg" icon="checkmark" onPress={accept} disabled={!items.length} full />
-                <Button title="Discard" kind="reject" onPress={discard} full={isPhone} />
+                <Button title="Enter manually" kind="secondary" onPress={goManual} full={isPhone} />
+                <Button title="Discard" kind="reject" onPress={() => { setLeaveAfterDiscard(false); setConfirmDiscard(true); }} full={isPhone} />
               </View>
               <Muted variant="small">The meal is only added to your log after you accept.</Muted>
             </Stack>,
@@ -277,6 +285,10 @@ export default function CaptureScreen() {
             setAddOpen(false);
           }}
         />
+      </Sheet>
+      <Sheet visible={confirmDiscard} onClose={() => setConfirmDiscard(false)} title="Discard this estimate?" footer={<Row gap={Space.sm}><Button title="Keep reviewing" kind="secondary" onPress={() => setConfirmDiscard(false)} /><Button title="Discard estimate" kind="danger" onPress={() => { if (leaveAfterDiscard) goBack('/food'); else discard(); setConfirmDiscard(false); }} /></Row>}>
+        <Muted>Your hint and photo will stay here if you want to try again.</Muted>
+        <Button title="Enter manually" kind="ghost" onPress={goManual} />
       </Sheet>
     </Screen>
   );

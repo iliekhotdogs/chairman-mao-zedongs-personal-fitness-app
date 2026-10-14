@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Space } from '@/constants/theme';
-import { Badge, Button, Card, Chip, KeyValue, Muted, Row, Stack, Text } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, KeyValue, Muted, Row, Stack, Text } from '@/components/ui';
 import { useStore } from '@/store/AppStore';
 import { fetchAiInfo, saveAiPreference, type AiInfo } from '@/lib/ai/provider';
 import { useToast } from '@/components/Toast';
@@ -30,6 +30,10 @@ export function AiSettings() {
       ? <Badge kind="neutral" label="AI switched off" />
       : <Badge kind="info" label="Shared AI via Supabase" />;
   const selected = info?.options?.find((option) => option.id === provider);
+  const modelHint = (id: string) => ({
+    'openai/gpt-oss-120b': 'Best quality', 'openai/gpt-oss-20b': 'Faster, lower cost', 'qwen/qwen3.8-27b': 'Vision preview',
+    'gemini-3.5-flash-lite': 'Fast, low cost', 'gemini-3.8-flash': 'Higher quality', 'gemini-3.1-flash-lite': 'Fast alternative',
+  } as Record<string, string>)[id] ?? '';
   const save = async () => {
     setSaving(true); setError('');
     try { const next = await saveAiPreference(provider, model); setInfo(next); toast('AI choice saved'); }
@@ -52,18 +56,18 @@ export function AiSettings() {
           <KeyValue k="Used today" v={`${info.usedToday} of ${info.perUserDailyLimit}`} />
           {info.allowUserChoice ? <>
             <Text variant="smallStrong">AI provider</Text>
-            <Row wrap gap={Space.sm}>{info.options.map((option) => <Chip key={option.id} label={option.keyConfigured ? option.label : `${option.label} · Not available`} selected={provider === option.id} onPress={() => {
-              if (!option.keyConfigured) return;
+            <Row wrap gap={Space.sm}>{info.options.map((option) => <Chip key={option.id} label={option.keyConfigured ? option.label : `${option.label} · Not available`} selected={provider === option.id} disabled={!option.keyConfigured} onPress={() => {
               setProvider(option.id); setModel(option.models[0]?.id ?? '');
             }} />)}</Row>
             {selected?.keyConfigured ? <>
               <Text variant="smallStrong">Chat model</Text>
-              <Stack gap={Space.sm}>{selected.models.map((choice, index) => <Chip key={choice.id} label={`${choice.label} · ${index === 0 ? 'Balanced' : index === 1 ? 'Higher quality' : 'Fast alternative'}`} selected={model === choice.id} onPress={() => setModel(choice.id)} />)}</Stack>
+              <Stack gap={Space.sm}>{selected.models.map((choice) => <Chip key={choice.id} label={`${choice.label} · ${modelHint(choice.id)}`} selected={model === choice.id} onPress={() => setModel(choice.id)} />)}</Stack>
               {provider === 'groq' ? <Muted variant="small">Meal photos use Qwen3.8 27B on Groq.</Muted> : null}
               <Button title="Save AI choice" loading={saving} disabled={provider === info.provider && model === info.chatModel} onPress={save} />
             </> : null}
           </> : null}
           {!info.enabled ? <Muted variant="small">The app owner has switched AI off for now. Coaching and meal estimates use built-in answers.</Muted> : null}
+          {error ? <Banner kind="warning">{error}</Banner> : null}
         </Stack>
       ) : error ? (
         <Muted variant="small">{error}</Muted>

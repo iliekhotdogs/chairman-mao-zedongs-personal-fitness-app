@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/lib/nav';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, EmptyState, Field, IconButton, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Stepper, Text, Ionicons, Columns } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, EmptyState, Field, IconButton, Muted, NumberField, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Ionicons, Columns } from '@/components/ui';
 import { ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
@@ -205,8 +205,9 @@ function SessionView({ session }: { session: WorkoutSession }) {
           </Row>
         }>
         <Muted>{totalSets === 0 ? 'Log at least one set before finishing, or discard this workout.' : `${totalSets} sets logged. The coach will suggest next-session targets, and you choose whether to apply them.`}</Muted>
-        <NumberField label="Effort (1–10, optional)" value={effort} onChange={(value) => setEffort(value && value >= 1 && value <= 10 ? value : undefined)} />
-        <Button title={pain ? 'Pain during workout: yes' : 'Pain during workout: no'} kind={pain ? 'danger' : 'secondary'} onPress={() => setPain(!pain)} />
+        <Text variant="smallStrong">Effort (1–10, optional)</Text>
+        <Row wrap gap={6}>{Array.from({ length: 10 }, (_, i) => i + 1).map((value) => <Chip key={value} label={String(value)} selected={effort === value} onPress={() => setEffort(effort === value ? undefined : value)} />)}</Row>
+        <Segmented label="Pain during workout" value={pain ? 'yes' : 'no'} onChange={(value) => setPain(value === 'yes')} options={[{ value: 'no', label: 'No pain' }, { value: 'yes', label: 'Pain' }]} />
         {pain ? <Field label="Where and what did you feel?" value={painNote} onChangeText={setPainNote} placeholder="Describe the pain" /> : null}
         {pain ? <Banner kind="warning">The coach will not suggest a heavier workout when pain is reported.</Banner> : null}
       </Sheet>
