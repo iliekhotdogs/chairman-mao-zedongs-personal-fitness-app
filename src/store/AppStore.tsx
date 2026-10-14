@@ -3,15 +3,17 @@ import { AppState as RNAppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
 
-import { emptyState, STATE_VERSION, type AppState } from '@/lib/state';
-import { checkAction, reducer, type Action } from '@/lib/reducer';
+import { contentSignature, emptyState, type AppState } from '@/lib/state';
+import { checkedAction, reducer, type Action } from '@/lib/reducer';
+import { pruneState, sanitizeState } from '@/lib/schemaMigrations';
+import { log } from '@/lib/log';
 import { newId } from '@/lib/id';
 import { nowISO, toISODate } from '@/lib/dates';
 import { runEngine } from '@/lib/coaching/adaptive';
 import { decide, type Candidate } from '@/lib/notifications/policy';
 import { showSystemNotification } from '@/lib/notifications/deliver';
 import { isSupabaseConfigured, supabase } from '@/lib/sync/supabase';
-import { EMPTY_CURSOR, syncNow, type SyncCursor } from '@/lib/sync/sync';
+import { parseCursor, syncNow, type SyncCursor } from '@/lib/sync/sync';
 import { mergeRemote } from '@/lib/sync/merge';
 import type { Proposal } from '@/lib/types';
 import { loadIntegrationConfig, useIntegrationConfig } from '@/lib/integrations/config';
@@ -43,13 +45,28 @@ interface StoreValue {
 
 const Ctx = createContext<StoreValue | null>(null);
 
+/** Read, migrate and validate saved state. Invalid records are dropped (and logged), never fatal. */
 async function loadState(owner: string): Promise<AppState | null> {
   const raw = await AsyncStorage.getItem(stateKey(owner));
   if (!raw) return null;
-  const parsed = JSON.parse(raw) as AppState;
-  if (parsed.version !== STATE_VERSION) return { ...emptyState(parsed.deviceId ?? newId(), nowISO()), ...parsed, version: STATE_VERSION };
-  return { ...emptyState(parsed.deviceId, nowISO()), ...parsed };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    log.error('store', 'Saved state is not valid JSON; starting fresh.', e);
+    throw e;
+  }
+  const { state, dropped } = sanitizeState(parsed, newId(), nowISO());
+  if (dropped) log.warn('store', `Dropped ${dropped} unreadable saved record(s) for ${owner === 'local' ? 'this device' : 'this account'}.`);
+  return state;
 }
+
+async function loadCursor(owner: string): Promise<SyncCursor> {
+  return parseCursor(await AsyncStorage.getItem(`${CURSOR_KEY}:${owner}`));
+}
+
+/** Collections whose changes should re-run the coaching engine. */
+const ENGINE_KEYS = ['foodLog', 'weights', 'activity', 'sessions', 'proposals', 'dayAdjustments', 'targets', 'profile', 'plan'] as const;
 
 function proposalCandidate(p: Proposal): Candidate {
   return {
@@ -79,8 +96,11 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   // ---- provider settings and account-scoped state ----
   useEffect(() => {
     loadIntegrationConfig()
-      .catch(() => setStorageError('Saved settings could not be read.'));
-    loadState('local').then((saved) => setLegacyAvailable(Boolean(saved?.profile))).catch(() => {});
+      .catch((e) => {
+        log.error('store', 'Saved settings could not be read.', e);
+        setStorageError('Saved settings could not be read.');
+      });
+    loadState('local').then((saved) => setLegacyAvailable(Boolean(saved?.profile))).catch((e) => log.warn('store', 'Could not check for earlier device data.', e));
   }, []);
 
   const [session, setSession] = useState<Session | null>(null);
@@ -107,24 +127,32 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     loadState(owner)
       .then(async (saved) => {
         let next = saved ?? emptyState(newId(), nowISO());
+        // Records edited at or before this are on the server; undefined = sync is off (local only).
+        let syncedBefore: string | undefined;
         if (configured && session?.user.id === owner) {
+          let cursor: SyncCursor = await loadCursor(owner);
           try {
-            const cursorKey = `${CURSOR_KEY}:${owner}`;
-            const raw = await AsyncStorage.getItem(cursorKey);
-            const result = await syncNow(next, owner, raw ? JSON.parse(raw) as SyncCursor : EMPTY_CURSOR);
+            const result = await syncNow(next, owner, cursor);
             if (!active) return;
             next = mergeRemote(next, result.rows);
-            await AsyncStorage.setItem(cursorKey, JSON.stringify(result.cursor));
+            cursor = result.cursor;
+            await AsyncStorage.setItem(`${CURSOR_KEY}:${owner}`, JSON.stringify(result.cursor));
             setLastSyncAt(nowISO());
             setSyncError(undefined);
             setSyncStatus('idle');
           } catch (error) {
+            log.warn('sync', 'Initial sync failed.', error);
             if (active) { setSyncError(error instanceof Error ? error.message : String(error)); setSyncStatus('error'); }
           }
+          syncedBefore = cursor.lastPushedAt;
         }
+        next = pruneState(next, { now: nowISO(), syncedBefore });
         if (active) dispatch({ type: 'HYDRATE', state: next });
       })
-      .catch(() => { if (active) { dispatch({ type: 'HYDRATE', state: emptyState(newId(), nowISO()) }); setStorageError('Saved data could not be read.'); } })
+      .catch((e) => {
+        log.error('store', 'Saved data could not be read.', e);
+        if (active) { dispatch({ type: 'HYDRATE', state: emptyState(newId(), nowISO()) }); setStorageError('Saved data could not be read.'); }
+      })
       .finally(() => { if (active) { setHydratedScope(owner); setHydrated(true); } });
     return () => { active = false; };
   }, [owner, integrationsLoaded, authReady, configured, session?.user.id]);
@@ -132,7 +160,10 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!scopeReady || owner === 'signed-out') return;
     const t = setTimeout(() => {
-      AsyncStorage.setItem(stateKey(owner), JSON.stringify(state)).catch(() => setStorageError('Could not save to this device. Storage may be full.'));
+      AsyncStorage.setItem(stateKey(owner), JSON.stringify(state)).catch((e) => {
+        log.error('store', 'Could not persist state.', e);
+        setStorageError('Could not save to this device. Storage may be full.');
+      });
     }, 250);
     return () => clearTimeout(t);
   }, [state, scopeReady, owner]);
@@ -145,8 +176,8 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
   const act = useCallback((action: Action) => {
     if (!scopeReady) return;
-    checkAction(stateRef.current, action); // throws for the caller to show
-    dispatch(action);
+    // Checked once here (throws for the caller to show); the reducer skips re-checking it.
+    dispatch(checkedAction(stateRef.current, action));
   }, [scopeReady]);
 
   // ---- adaptive coaching engine + notifications ----
@@ -180,8 +211,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
         try {
           const { data, error } = await sb.functions.invoke('notify', { body: { title: c.title, body: c.body, dedupe_key: c.dedupeKey, local_date: date, push: false } });
           if (!error && data && data.allowed === false) continue;
-        } catch {
-          /* offline: fall back to the synced local cap */
+        } catch (e) {
+          // offline: fall back to the synced local cap
+          log.warn('notify', 'Server notification cap check failed; using the local cap.', e);
         }
       }
       const shown = await showSystemNotification(c.title, c.body);
@@ -197,7 +229,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     }
   }, [scopeReady]);
 
-  const engineKey = `${state.foodLog.length}|${state.weights.length}|${state.activity.length}|${state.sessions.length}|${state.targets?.updatedAt}|${state.profile?.updatedAt}|${today}`;
+  // Content signatures (count + newest edit per collection), so edits re-trigger too, not just additions.
+  const engineKey = useMemo(() => `${contentSignature(state, ENGINE_KEYS)}|${today}`, [state, today]);
+  const syncKey = useMemo(() => contentSignature(state), [state]);
   useEffect(() => {
     if (!scopeReady) return;
     const t = setTimeout(() => void runCoach(), 800);
@@ -235,9 +269,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     setSyncStatus('syncing');
     try {
       const cursorKey = `${CURSOR_KEY}:${userId}`;
-      const raw = await AsyncStorage.getItem(cursorKey);
-      const cursor: SyncCursor = raw ? JSON.parse(raw) : EMPTY_CURSOR;
-      const result = await syncNow(stateRef.current, userId, cursor);
+      const result = await syncNow(stateRef.current, userId, await loadCursor(userId));
       if (sessionRef.current?.user.id !== userId) return;
       // Merged into the current state, so edits made during the network call are kept.
       dispatch({ type: 'MERGE_REMOTE', rows: result.rows });
@@ -246,6 +278,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       setSyncError(undefined);
       setSyncStatus('idle');
     } catch (e) {
+      log.warn('sync', 'Sync failed.', e);
       if (sessionRef.current?.user.id === userId) {
         setSyncError(e instanceof Error ? e.message : String(e));
         setSyncStatus('error');
@@ -275,12 +308,12 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     };
   }, [configured, session, scopeReady, doSync]);
 
-  // push soon after local edits
+  // push soon after local edits to ANY synced collection or singleton (see SYNCED_* in state.ts)
   useEffect(() => {
     if (!session || !scopeReady) return;
     const t = setTimeout(() => void doSync(), 5000);
     return () => clearTimeout(t);
-  }, [state.foodLog, state.weights, state.sessions, state.proposals, state.plan, state.targets, state.profile, session, scopeReady, doSync]);
+  }, [syncKey, session, scopeReady, doSync]);
 
   const value = useMemo<StoreValue>(
     () => ({

@@ -76,3 +76,24 @@ export type SyncedCollection = (typeof SYNCED_COLLECTIONS)[number];
 /** Single documents that sync as a whole. */
 export const SYNCED_SINGLETONS = ['profile', 'targets', 'plan', 'settings'] as const;
 export type SyncedSingleton = (typeof SYNCED_SINGLETONS)[number];
+
+type SignatureKey = SyncedCollection | SyncedSingleton;
+
+/**
+ * A cheap content signature: per key, the item count plus the newest `updatedAt`.
+ * Every edit (including deletes, which are tombstones) bumps `updatedAt`, so this
+ * changes on edits as well as additions, unlike a plain length check.
+ */
+export function contentSignature(state: AppState, keys: readonly SignatureKey[] = [...SYNCED_COLLECTIONS, ...SYNCED_SINGLETONS]): string {
+  return keys
+    .map((k) => {
+      const v = state[k] as { updatedAt?: string }[] | { updatedAt?: string } | undefined;
+      if (Array.isArray(v)) {
+        let max = '';
+        for (const x of v) if (x.updatedAt && x.updatedAt > max) max = x.updatedAt;
+        return `${k}:${v.length}:${max}`;
+      }
+      return `${k}:${v?.updatedAt ?? '-'}`;
+    })
+    .join('|');
+}

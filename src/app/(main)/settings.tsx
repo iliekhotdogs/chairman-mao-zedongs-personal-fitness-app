@@ -1,5 +1,4 @@
 import React, { useEffect, useState } from 'react';
-import { Platform, Share } from 'react-native';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
@@ -22,6 +21,8 @@ import { MAX_COACH_NOTIFICATIONS_PER_DAY, remainingToday } from '@/lib/notificat
 import { supabase } from '@/lib/sync/supabase';
 import { functionErrorMessage } from '@/lib/ai/provider';
 import { deleteCloudData } from '@/lib/sync/sync';
+import { csvExports, jsonExport } from '@/lib/export';
+import { saveExportFile } from '@/lib/exportFile';
 import { clearIntegrationConfig } from '@/lib/integrations/config';
 import type { BodyArea, GoalPriority, NutritionTargets, Profile } from '@/lib/types';
 
@@ -277,18 +278,12 @@ function PrivacySection() {
   const toast = useToast();
   const [confirm, setConfirm] = useState<'local' | 'cloud' | null>(null);
 
-  const exportData = async () => {
-    const json = JSON.stringify({ exportedAt: nowISO(), app: 'FitCoach', data: state }, null, 2);
-    if (Platform.OS === 'web') {
-      const blob = new Blob([json], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `fitcoach-export-${new Date().toISOString().slice(0, 10)}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } else {
-      await Share.share({ message: json, title: 'FitCoach data export' });
+  const exportData = async (format: 'json' | 'csv') => {
+    try {
+      const files = format === 'json' ? [jsonExport(state, nowISO())] : csvExports(state, nowISO());
+      for (const f of files) await saveExportFile(f);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Export failed', 'error');
     }
   };
 
@@ -314,7 +309,8 @@ function PrivacySection() {
       <Text variant="h3">Privacy &amp; your data</Text>
       <Muted variant="small">Your food log, photos, body weight, workouts and chat are private to you. With an account, cloud data is protected so only your signed-in account can read it. AI requests send a short context summary or reduced photo to the selected provider.</Muted>
       <Row wrap gap={Space.sm}>
-        <Button title="Export my data" kind="secondary" size="sm" icon="download-outline" onPress={exportData} />
+        <Button title="Export my data" kind="secondary" size="sm" icon="download-outline" onPress={() => exportData('json')} />
+        <Button title="Export food & weights (CSV)" kind="secondary" size="sm" icon="document-text-outline" onPress={() => exportData('csv')} />
         <Button title="Delete data on this device" kind="danger" size="sm" onPress={() => setConfirm('local')} />
         {sync.session ? <Button title="Delete my cloud data" kind="danger" size="sm" onPress={() => setConfirm('cloud')} /> : null}
       </Row>

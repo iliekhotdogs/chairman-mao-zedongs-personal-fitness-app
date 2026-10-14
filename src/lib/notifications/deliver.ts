@@ -1,5 +1,7 @@
 import { Platform } from 'react-native';
 
+import { log } from '@/lib/log';
+
 export type PermissionResult = 'granted' | 'denied' | 'unsupported';
 
 type ExpoNotifications = typeof import('expo-notifications');
@@ -12,7 +14,8 @@ async function native(): Promise<ExpoNotifications | null> {
       handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: false, shouldSetBadge: false }),
     });
     return mod;
-  } catch {
+  } catch (e) {
+    log.warn('notify', 'expo-notifications is unavailable on this build.', e);
     return null;
   }
 }
@@ -60,7 +63,8 @@ export async function showSystemNotification(title: string, body: string): Promi
     if (!perm.granted) return false;
     await N.scheduleNotificationAsync({ content: { title, body }, trigger: Platform.OS === 'android' ? { channelId: 'coach' } : null });
     return true;
-  } catch {
+  } catch (e) {
+    log.warn('notify', 'Could not show a system notification.', e);
     return false;
   }
 }

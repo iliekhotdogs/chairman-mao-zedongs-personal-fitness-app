@@ -111,11 +111,26 @@ function updateSession(state: AppState, id: string, fn: (s: WorkoutSession) => W
   return { ...state, sessions: state.sessions.map((s) => (s.id === id ? fn(s) : s)) };
 }
 
+/** Actions that `checkedAction` already validated, so the reducer doesn't check them twice. */
+const prechecked = new WeakSet<Action>();
+
+/**
+ * Validate an action once (throwing RuleViolation for the caller to show) and mark it so
+ * the reducer skips its own check. The reducer still guards anything it applies.
+ */
+export function checkedAction<A extends Action>(state: AppState, action: A): A {
+  checkAction(state, action);
+  prechecked.add(action);
+  return action;
+}
+
 export function reducer(state: AppState, action: Action): AppState {
-  try {
-    checkAction(state, action);
-  } catch {
-    return state;
+  if (!prechecked.has(action)) {
+    try {
+      checkAction(state, action);
+    } catch {
+      return state;
+    }
   }
   switch (action.type) {
     case 'HYDRATE':
@@ -238,7 +253,9 @@ export function reducer(state: AppState, action: Action): AppState {
 
 /** Apply an accepted proposal. This is the only code path that changes plans/targets from a suggestion. */
 function applyProposal(state: AppState, id: string, now: string): AppState {
-  const p = state.proposals.find((x) => x.id === id)!;
+  const p = state.proposals.find((x) => x.id === id);
+  // The action may have been checked against an earlier state; never apply a stale proposal.
+  if (!p || p.status !== 'pending') return state;
   const proposals = state.proposals.map((x) => (x.id === id ? { ...x, status: 'accepted' as const, decidedAt: now, updatedAt: now } : x));
   const c = p.change;
   switch (c.type) {
@@ -251,7 +268,8 @@ function applyProposal(state: AppState, id: string, now: string): AppState {
       };
     }
     case 'target_change':
-      return { ...state, proposals, targets: { ...state.targets!, ...c.next, updatedAt: now, method: `${state.targets!.method} · adjusted from your progress (${now.slice(0, 10)})` } };
+      if (!state.targets) return state;
+      return { ...state, proposals, targets: { ...state.targets, ...c.next, updatedAt: now, method: `${state.targets.method} · adjusted from your progress (${now.slice(0, 10)})` } };
     case 'goal_change':
       return {
         ...state,

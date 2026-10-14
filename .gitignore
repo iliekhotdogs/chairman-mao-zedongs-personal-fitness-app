@@ -45,3 +45,6 @@ yarn-error.*
 .env
 supabase/.env
 supabase/.temp/
+
+# Claude Code agent worktrees
+.claude/worktrees/

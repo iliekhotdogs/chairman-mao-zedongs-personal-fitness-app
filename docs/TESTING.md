@@ -1,7 +1,26 @@
 # Verification
 
-Run `npm run typecheck`, `npm run lint`, and `npm test -- --runInBand`. As of 3 October 2026, all pass, with 98 unit tests. Tests cover account-build provider selection, NVIDIA image model preservation, OpenRouter chat model selection, USDA request format, sync merge logic, and core fitness rules.
+## Automated
 
-The Supabase migration and both Edge Functions were deployed to fitdih. The owner account successfully loaded aggregate admin stats. Separate-account isolation and live AI requests still need end-to-end checks with a second account and the owner’s API keys. A real NVIDIA/OpenRouter request was not made in this workspace because the owner's keys remain private. Follow [SETUP.md](SETUP.md) and test with owner credentials after deployment.
+Run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build:web`. CI runs the same on every push and pull request (`.github/workflows/ci.yml`), plus a Deno type-check of `supabase/functions`.
 
-Health syncing and push delivery are still simulated or limited to local notification behavior; they are not part of this account/AI change.
+Unit tests (`src/lib/__tests__`) cover:
+
+- core fitness rules: targets, workout generation, progression, the reducer's confirmation/approval rules;
+- sync: last-write-wins merge, tombstones, the keyset pull cursor across page boundaries (mocked Supabase client), cursor backwards compatibility, clock-skew clamping;
+- stored state: schema validation, migrations, pruning of old tombstones and chat history;
+- data export (JSON, food log and weight CSV);
+- helpers: selectors, dates across DST, units, notification quiet hours and daily cap;
+- the client side of the server AI gateway and the USDA request format.
+
+Tests run in the `America/New_York` time zone (`jest.global-setup.js`) so date logic is exercised across DST.
+
+## Manual checks (before a release)
+
+- Accounts: two separate accounts never see each other's records or photos.
+- AI: a live coach chat and meal photo through the server AI gateway, with owner credentials, after deploying the Edge Functions (see [SETUP.md](SETUP.md)).
+- Sync: log food on one device and see it on another within ~2 minutes; delete it and it disappears.
+- Export: JSON and CSV export download on web and open the share sheet on Android.
+- Web: after `npm run build:web`, serve `dist/` and refresh on a nested route.
+
+Health syncing and push delivery are still simulated or limited to local notification behaviour.

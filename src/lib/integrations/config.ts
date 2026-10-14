@@ -2,6 +2,8 @@ import { useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { log } from '@/lib/log';
+
 type IntegrationConfig = { supabaseUrl: string; supabaseKey: string; usdaKey: string };
 const EMPTY: IntegrationConfig = { supabaseUrl: '', supabaseKey: '', usdaKey: '' };
 const STORAGE_KEY = 'fitapp.integrations.v1';
@@ -39,7 +41,8 @@ export async function loadIntegrationConfig(): Promise<void> {
         usdaKey: typeof parsed.usdaKey === 'string' ? parsed.usdaKey : '',
       };
     }
-  } catch {
+  } catch (e) {
+    log.warn('config', 'Saved integration settings were unreadable; using defaults.', e);
     saved = EMPTY;
   }
   loaded = true;
