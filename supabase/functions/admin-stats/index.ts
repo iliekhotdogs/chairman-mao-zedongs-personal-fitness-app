@@ -1,54 +1,116 @@
-// Aggregate-only dashboard for the app owner. Deploy with JWT verification on.
-// Set ADMIN_USER_ID to the owner's Supabase auth user UUID as an Edge Function secret.
-import { createClient } from 'npm:@supabase/supabase-js@2';
+// Admin API for the owner screen (src/app/admin.tsx). Deploy with JWT verification on.
+// Admin = profiles.role 'admin', or the bootstrap owner in the ADMIN_USER_ID secret.
+// Actions: check, stats, list_users, create_invite, list_invites, revoke_invite,
+// set_disabled, reset_quota, get_config, set_config.
+// No health data, records or chat content leave this function.
+import { admin, isAdmin, requestUser } from '../_shared/auth.ts';
+import { BodyError, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
+import { describeRegistry, resolveConfig, validateConfigUpdate } from '../_shared/providers.ts';
+import { generateInviteCode, inviteExpiry, normalizeInviteCode } from '../_shared/invite.ts';
 
-const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
+const randomBytes = (length: number) => crypto.getRandomValues(new Uint8Array(length));
+const isUuid = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f-]{36}$/i.test(value);
 
 Deno.serve(async (request) => {
-  if (request.method === 'OPTIONS') return new Response('ok', { headers: CORS });
-  if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
-  const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '');
-  if (!token) return json({ error: 'Sign in first' }, 401);
-  const { data: auth, error: authError } = await admin.auth.getUser(token);
-  if (authError || !auth.user || auth.user.is_anonymous) return json({ error: 'Sign in first' }, 401);
-  const ownerId = Deno.env.get('ADMIN_USER_ID');
-  if (!ownerId || auth.user.id !== ownerId) return json({ error: 'Admin access required' }, 403);
+  const early = preflight(request);
+  if (early) return early;
+  const json = (value: unknown, status = 200) => jsonFor(request, value, status);
+  const user = await requestUser(request);
+  if (!user) return json({ error: 'Sign in first' }, 401);
+  if (!(await isAdmin(user))) return json({ error: 'Admin access required' }, 403);
 
-  let input: { action?: string } = {};
-  try { input = await request.json(); } catch { /* Empty body means stats. */ }
-  if (input.action === 'check') return json({ admin: true });
-
-  // No user-level records, email addresses, health data or chat content leave this function.
-  let accounts = 0;
-  let active7Days = 0;
-  const sevenDaysAgo = Date.now() - 7 * 86_400_000;
-  for (let page = 1; page <= 100; page++) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 1000 });
-    if (error) return json({ error: 'Could not load account statistics.' }, 502);
-    const users = data.users ?? [];
-    accounts += users.length;
-    active7Days += users.filter((user) => user.last_sign_in_at && new Date(user.last_sign_in_at).getTime() >= sevenDaysAgo).length;
-    if (users.length < 1000) break;
+  let input: Record<string, unknown>;
+  try { input = await readJsonBody(request, 16_000, true); } catch (error) {
+    return error instanceof BodyError ? json({ error: error.message }, error.status) : json({ error: 'Invalid request.' }, 400);
   }
-  const counts = await Promise.all([
-    admin.from('records').select('id', { count: 'exact', head: true }).eq('collection', 'foodLog').eq('deleted', false),
-    admin.from('records').select('id', { count: 'exact', head: true }).eq('collection', 'sessions').eq('deleted', false),
-    admin.from('records').select('id', { count: 'exact', head: true }).eq('collection', 'chat').eq('deleted', false),
-    admin.from('ai_global_usage').select('requests').eq('day', new Date().toISOString().slice(0, 10)).maybeSingle(),
-  ]);
-  if (counts.some((result) => result.error)) return json({ error: 'Could not load usage statistics. Apply the account SQL setup first.' }, 502);
-  return json({
-    accounts, active7Days,
-    foodEntries: counts[0].count ?? 0,
-    workoutSessions: counts[1].count ?? 0,
-    chatMessages: counts[2].count ?? 0,
-    aiRequestsToday: counts[3].data?.requests ?? 0,
-    measuredAt: new Date().toISOString(),
-  });
+  const action = typeof input.action === 'string' ? input.action : 'stats';
+
+  switch (action) {
+    case 'check':
+      return json({ admin: true });
+
+    case 'stats': {
+      const { data, error } = await admin.rpc('admin_stats');
+      if (error) return json({ error: 'Could not load statistics. Apply the latest SQL migration first.' }, 502);
+      return json(data);
+    }
+
+    case 'list_users': {
+      const offset = Number.isInteger(input.offset) ? input.offset as number : 0;
+      const { data, error } = await admin.rpc('admin_list_users', { p_limit: 200, p_offset: offset });
+      if (error) return json({ error: 'Could not load users.' }, 502);
+      return json({ users: data ?? [] });
+    }
+
+    case 'create_invite': {
+      const expiresAt = inviteExpiry(input.expiresInDays, new Date());
+      if (expiresAt === undefined) return json({ error: 'Expiry must be 1 to 365 days, or empty for none.' }, 400);
+      const note = typeof input.note === 'string' ? input.note.trim().slice(0, 200) || null : null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const code = generateInviteCode(randomBytes);
+        const { error } = await admin.from('invites').insert({ code, created_by: user.id, expires_at: expiresAt, note });
+        if (!error) return json({ code, expires_at: expiresAt, note });
+        if (error.code !== '23505') return json({ error: 'Could not create the invite.' }, 502);
+      }
+      return json({ error: 'Could not create a unique invite code. Try again.' }, 502);
+    }
+
+    case 'list_invites': {
+      const { data, error } = await admin.rpc('admin_list_invites');
+      if (error) return json({ error: 'Could not load invites.' }, 502);
+      return json({ invites: data ?? [] });
+    }
+
+    case 'revoke_invite': {
+      const code = normalizeInviteCode(input.code);
+      if (!code) return json({ error: 'Unknown invite code.' }, 400);
+      // Used codes stay as a record of who joined with them.
+      const { data, error } = await admin.from('invites').delete().eq('code', code).is('used_at', null).select('code');
+      if (error) return json({ error: 'Could not revoke the invite.' }, 502);
+      if (!data?.length) return json({ error: 'That invite is already used or does not exist.' }, 409);
+      return json({ ok: true });
+    }
+
+    case 'set_disabled': {
+      if (!isUuid(input.userId) || typeof input.disabled !== 'boolean') return json({ error: 'userId and disabled are required.' }, 400);
+      if (input.userId === user.id) return json({ error: 'You cannot disable your own account.' }, 400);
+      const { error } = await admin.from('profiles').upsert({ user_id: input.userId, disabled: input.disabled }, { onConflict: 'user_id' });
+      if (error) return json({ error: 'Could not update the account.' }, 502);
+      // A ban also blocks sign-in and token refresh, so sync stops too.
+      const { error: banError } = await admin.auth.admin.updateUserById(input.userId, { ban_duration: input.disabled ? '876000h' : 'none' });
+      if (banError) return json({ error: 'Saved, but the sign-in ban could not be updated.' }, 502);
+      return json({ ok: true });
+    }
+
+    case 'reset_quota': {
+      if (!isUuid(input.userId)) return json({ error: 'userId is required.' }, 400);
+      const { error } = await admin.from('ai_usage').update({ requests: 0 }).eq('user_id', input.userId).eq('day', utcDay());
+      if (error) return json({ error: 'Could not reset the quota.' }, 502);
+      return json({ ok: true });
+    }
+
+    case 'get_config': {
+      const { data, error } = await admin.from('app_config').select('*').eq('id', 1).maybeSingle();
+      if (error) return json({ error: 'AI configuration is not ready. Apply the latest SQL migration first.' }, 502);
+      return json({
+        config: resolveConfig(data),
+        updatedAt: data?.updated_at ?? null,
+        providers: describeRegistry((keyEnv) => Boolean(Deno.env.get(keyEnv))),
+      });
+    }
+
+    case 'set_config': {
+      const { data, error } = await admin.from('app_config').select('*').eq('id', 1).maybeSingle();
+      if (error) return json({ error: 'AI configuration is not ready. Apply the latest SQL migration first.' }, 502);
+      const patch = input.config && typeof input.config === 'object' && !Array.isArray(input.config) ? input.config as Record<string, unknown> : {};
+      const result = validateConfigUpdate(resolveConfig(data), patch);
+      if (!result.ok) return json({ error: result.error }, 400);
+      const { error: saveError } = await admin.from('app_config').upsert({ id: 1, ...result.config, updated_at: new Date().toISOString() });
+      if (saveError) return json({ error: 'Could not save the AI configuration.' }, 502);
+      return json({ config: result.config });
+    }
+
+    default:
+      return json({ error: 'Unknown action.' }, 400);
+  }
 });

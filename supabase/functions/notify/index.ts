@@ -8,27 +8,21 @@
 // With push=true it also sends to the user's registered devices through Expo's push
 // service (requires a development/production build with push credentials).
 
-import { createClient } from 'npm:@supabase/supabase-js@^2';
-
-const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-const json = (b: unknown, status = 200) => new Response(JSON.stringify(b), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
+import { admin, requestUser } from '../_shared/auth.ts';
+import { json as jsonFor, preflight, readJsonBody } from '../_shared/http.ts';
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: CORS });
-  const token = req.headers.get('Authorization')?.replace('Bearer ', '');
-  const { data: auth } = token ? await admin.auth.getUser(token) : { data: { user: null } };
-  if (!auth.user) return json({ error: 'Not signed in' }, 401);
+  const early = preflight(req);
+  if (early) return early;
+  const json = (b: unknown, status = 200) => jsonFor(req, b, status);
+  const user = await requestUser(req);
+  if (!user) return json({ error: 'Not signed in' }, 401);
 
-  const b = await req.json().catch(() => null);
-  if (!b?.title || !b?.dedupe_key || !/^\d{4}-\d{2}-\d{2}$/.test(b.local_date ?? '')) return json({ error: 'Bad request' }, 400);
+  const b = await readJsonBody(req, 8_000).catch(() => null);
+  if (!b?.title || !b?.dedupe_key || !/^\d{4}-\d{2}-\d{2}$/.test(String(b.local_date ?? ''))) return json({ error: 'Bad request' }, 400);
 
   const { data: allowed, error } = await admin.rpc('claim_notification_slot', {
-    p_user: auth.user.id,
+    p_user: user.id,
     p_local_date: b.local_date,
     p_dedupe: String(b.dedupe_key).slice(0, 200),
     p_title: String(b.title).slice(0, 120),
@@ -37,7 +31,7 @@ Deno.serve(async (req) => {
   if (error) return json({ error: error.message }, 500);
   if (!allowed || !b.push) return json({ allowed: Boolean(allowed), pushed: 0 });
 
-  const { data: tokens } = await admin.from('push_tokens').select('token').eq('user_id', auth.user.id);
+  const { data: tokens } = await admin.from('push_tokens').select('token').eq('user_id', user.id);
   const messages = (tokens ?? []).filter((t) => t.token.startsWith('ExponentPushToken')).map((t) => ({ to: t.token, title: b.title, body: b.body, channelId: 'coach' }));
   if (!messages.length) return json({ allowed: true, pushed: 0 });
   const res = await fetch('https://exp.host/--/api/v2/push/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(messages) });

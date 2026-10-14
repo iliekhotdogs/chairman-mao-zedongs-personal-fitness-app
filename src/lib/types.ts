@@ -307,8 +307,5 @@ export interface Settings {
   aiMode: 'simulated' | 'server';
   /** Retained for old saved settings; the server picks the photo model. */
   aiModels?: { vision: string; chat: string };
-  geminiModel?: string;
-  /** Groq coach model; see src/lib/ai/groqModels.ts. */
-  chatModel?: string;
   updatedAt: ISODateTime;
 }

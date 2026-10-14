@@ -14,7 +14,6 @@ import { isSupabaseConfigured, supabase } from '@/lib/sync/supabase';
 import { EMPTY_CURSOR, syncNow, type SyncCursor } from '@/lib/sync/sync';
 import { mergeRemote } from '@/lib/sync/merge';
 import type { Proposal } from '@/lib/types';
-import { loadApiKey, loadGeminiKey } from '@/lib/ai/apiKey';
 import { loadIntegrationConfig, useIntegrationConfig } from '@/lib/integrations/config';
 
 const STORAGE_KEY = 'fitapp:state:v1';
@@ -79,7 +78,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
 
   // ---- provider settings and account-scoped state ----
   useEffect(() => {
-    Promise.all([loadApiKey(), loadGeminiKey(), loadIntegrationConfig()])
+    loadIntegrationConfig()
       .catch(() => setStorageError('Saved settings could not be read.'));
     loadState('local').then((saved) => setLegacyAvailable(Boolean(saved?.profile))).catch(() => {});
   }, []);

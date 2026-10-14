@@ -20,9 +20,9 @@ import { newId } from '@/lib/id';
 import { permissionStatus, requestPermission } from '@/lib/notifications/deliver';
 import { MAX_COACH_NOTIFICATIONS_PER_DAY, remainingToday } from '@/lib/notifications/policy';
 import { supabase } from '@/lib/sync/supabase';
+import { functionErrorMessage } from '@/lib/ai/provider';
 import { deleteCloudData } from '@/lib/sync/sync';
 import { clearIntegrationConfig } from '@/lib/integrations/config';
-import { removeApiKey, removeGeminiKey } from '@/lib/ai/apiKey';
 import type { BodyArea, GoalPriority, NutritionTargets, Profile } from '@/lib/types';
 
 const GOALS: { value: GoalPriority; label: string }[] = [
@@ -46,6 +46,7 @@ export default function Settings() {
             <NotificationsSection />
             <IntegrationSettings />
             <AccountCard />
+            <DeleteAccountSection />
             <PrivacySection />
             <AboutSection />
           </Stack>,
@@ -299,8 +300,6 @@ function PrivacySection() {
       await clearLocalData(sync.session?.user.id);
       if (!sync.configured) {
         await clearIntegrationConfig();
-        await removeApiKey();
-        await removeGeminiKey();
       }
       doAct({ type: 'REPLACE_STATE', state: emptyState(newId(), nowISO()) });
       setConfirm(null);
@@ -341,6 +340,62 @@ function PrivacySection() {
   );
 }
 
+/** Permanently deletes the signed-in account (photos, synced rows, login) on the server. */
+function DeleteAccountSection() {
+  const { sync } = useStore();
+  const doAct = useAct();
+  const toast = useToast();
+  const [confirm, setConfirm] = useState(false);
+  const [typed, setTyped] = useState('');
+  const [busy, setBusy] = useState(false);
+  if (!sync.session) return null;
+  const userId = sync.session.user.id;
+
+  const deleteAccount = async () => {
+    const sb = supabase();
+    if (!sb) return;
+    setBusy(true);
+    try {
+      const { error } = await sb.functions.invoke('delete-account', { body: {} });
+      if (error) throw new Error(await functionErrorMessage(error, 'Account deletion failed.'));
+      // The server session is gone; sign out locally, then clear this account's cache.
+      await sb.auth.signOut({ scope: 'local' }).catch(() => {});
+      await clearLocalData(userId);
+      doAct({ type: 'REPLACE_STATE', state: emptyState(newId(), nowISO()) });
+      setConfirm(false);
+      toast('Your account was deleted.');
+      router.replace('/onboarding');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Account deletion failed.', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card style={{ gap: Space.sm }}>
+      <Text variant="h3">Delete account</Text>
+      <Muted variant="small">Permanently deletes your account, your synced records and your food photos from the server. This cannot be undone. Export your data first if you want a copy.</Muted>
+      <Row>
+        <Button title="Delete account" kind="danger" size="sm" icon="trash-outline" onPress={() => { setTyped(''); setConfirm(true); }} />
+      </Row>
+      <Sheet
+        visible={confirm}
+        onClose={() => setConfirm(false)}
+        title="Delete your account?"
+        footer={
+          <Row gap={Space.sm}>
+            <Button title="Cancel" kind="secondary" style={{ flex: 1 }} onPress={() => setConfirm(false)} />
+            <Button title="Delete forever" kind="danger" style={{ flex: 1 }} loading={busy} disabled={typed.trim().toUpperCase() !== 'DELETE'} onPress={deleteAccount} />
+          </Row>
+        }>
+        <Muted>Your login, synced data and photos for {sync.session.user.email} are removed for good, and you are signed out on this device. Type DELETE to confirm.</Muted>
+        <Field value={typed} onChangeText={setTyped} autoCapitalize="characters" placeholder="DELETE" accessibilityLabel="Type DELETE to confirm" />
+      </Sheet>
+    </Card>
+  );
+}
+
 function AboutSection() {
   const { state, today } = useStore();
   const imageEngine = useAiEngine('food');
@@ -351,8 +406,8 @@ function AboutSection() {
     <Card style={{ gap: Space.sm }}>
       <Text variant="h3">Prototype &amp; design review</Text>
       <Row wrap gap={6}>
-        <Badge kind={imageEngine === 'simulated' ? 'simulated' : 'info'} label={imageEngine === 'nvidia' ? 'NVIDIA images' : imageEngine === 'server' ? 'Server images' : 'Built-in image estimates'} />
-        <Badge kind={chatEngine === 'simulated' ? 'simulated' : 'info'} label={chatEngine === 'gemini' ? 'Gemini chat' : chatEngine === 'server' ? 'Server chat' : 'Built-in chat'} />
+        <Badge kind={imageEngine === 'simulated' ? 'simulated' : 'info'} label={imageEngine === 'server' ? 'Server images' : 'Built-in image estimates'} />
+        <Badge kind={chatEngine === 'simulated' ? 'simulated' : 'info'} label={chatEngine === 'server' ? 'Server chat' : 'Built-in chat'} />
         <Badge kind="simulated" label="Simulated health sync" />
         <Badge kind="info" label="USDA lookup is live" />
       </Row>
