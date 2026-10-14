@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import { Platform, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 
@@ -132,12 +132,10 @@ function SessionView({ session }: { session: WorkoutSession }) {
     rest.start(defaultRestSec(EXERCISE_BY_ID[exerciseId], planned?.exercises.find((e) => e.exerciseId === exerciseId), state.settings.rest), exerciseId);
   };
 
-  const exerciseIds = useMemo(() => {
-    const ids = [...(planned?.exercises.map((e) => e.exerciseId) ?? [])];
-    for (const s of session.sets) if (!ids.includes(s.exerciseId)) ids.push(s.exerciseId);
-    for (const e of extra) if (!ids.includes(e)) ids.push(e);
-    return ids;
-  }, [planned, session.sets, extra]);
+  // The React Compiler memoizes this; a manual useMemo can't be preserved here.
+  const exerciseIds = [...(planned?.exercises.map((e) => e.exerciseId) ?? [])];
+  for (const s of session.sets) if (!exerciseIds.includes(s.exerciseId)) exerciseIds.push(s.exerciseId);
+  for (const e of extra) if (!exerciseIds.includes(e)) exerciseIds.push(e);
 
   const progression = state.proposals.find((p) => p.dedupeKey === `progression-${session.id}`);
   const currentEx = focusEx ?? exerciseIds.find((id) => {

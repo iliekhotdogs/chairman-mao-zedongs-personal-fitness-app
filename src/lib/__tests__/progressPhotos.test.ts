@@ -3,7 +3,7 @@ import { emptyState, SYNCED_COLLECTIONS } from '../state';
 import { sanitizeState } from '../schemaMigrations';
 import { validateRecord } from '../schema';
 import { mergeRemote } from '../sync/merge';
-import { comparePair, galleryOrder } from '../progressPhotos';
+import { comparePair, compareSummary, galleryOrder, photoDateError } from '../progressPhotos';
 import type { ProgressPhoto } from '../types';
 
 const NOW = '2026-10-02T12:00:00.000Z';
@@ -55,5 +55,17 @@ describe('progress photos', () => {
     expect(comparePair(g)?.map((p) => p.id)).toEqual(['a', 'c']);
     expect(comparePair(g, 'b')?.map((p) => p.id)).toEqual(['a', 'b']);
     expect(comparePair(g.slice(0, 1))).toBeUndefined();
+  });
+
+  it('summarises days and weight change between two photos', () => {
+    expect(compareSummary(photo({ date: '2026-08-01', weightKg: 85 }), photo({ date: '2026-10-01', weightKg: 81.5 }))).toEqual({ days: 61, weightDeltaKg: -3.5 });
+    expect(compareSummary(photo({ date: '2026-08-01' }), photo({ date: '2026-08-08', weightKg: 80 })).weightDeltaKg).toBeUndefined();
+  });
+
+  it('validates typed dates', () => {
+    expect(photoDateError('2026-10-01', '2026-10-02')).toBeUndefined();
+    expect(photoDateError('2026-10-03', '2026-10-02')).toMatch(/future/);
+    expect(photoDateError('2026-02-30', '2026-10-02')).toMatch(/exist/);
+    expect(photoDateError('10/1/2026', '2026-10-02')).toMatch(/YYYY/);
   });
 });

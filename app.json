@@ -50,8 +50,17 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Allow FitCoach to use your photos to log meals.",
-          "cameraPermission": "Allow FitCoach to use the camera to photograph meals."
+          "photosPermission": "Allow FitCoach to use your photos to log meals and save progress photos.",
+          "cameraPermission": "Allow FitCoach to use the camera to photograph meals and take progress photos."
+        }
+      ],
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Allow FitCoach to use the camera to scan food barcodes and photograph meals.",
+          "microphonePermission": false,
+          "recordAudioAndroid": false,
+          "barcodeScannerEnabled": true
         }
       ],
       [

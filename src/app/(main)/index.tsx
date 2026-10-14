@@ -47,6 +47,7 @@ export default function Dashboard() {
       <Row wrap gap={Space.sm}>
         <Button title="Snap a meal" icon="camera" onPress={() => router.push('/food/capture')} />
         <Button title="Add manually" kind="secondary" icon="add" onPress={() => router.push('/food/manual')} />
+        <Button title="Scan barcode" kind="secondary" icon="barcode-outline" onPress={() => router.push('/food/barcode')} />
       </Row>
     </Card>
   );

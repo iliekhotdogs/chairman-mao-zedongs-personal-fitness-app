@@ -54,7 +54,10 @@ export default function ManualEntry() {
       <Columns ratio={[1, 1]}>
         {[
           <Stack key="search" gap={Space.md}>
-            <Text variant="h3">Find a food</Text>
+            <Row>
+              <Text variant="h3" style={{ flex: 1 }}>Find a food</Text>
+              {!existing ? <Button title="Scan barcode" kind="secondary" size="sm" icon="barcode-outline" onPress={() => router.replace({ pathname: '/food/barcode', params: { date } })} /> : null}
+            </Row>
             <FoodSearch onPick={(item) => setItems([...items, item])} />
           </Stack>,
           <Stack key="items" gap={Space.md}>

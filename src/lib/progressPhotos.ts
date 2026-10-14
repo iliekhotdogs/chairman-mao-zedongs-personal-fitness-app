@@ -1,3 +1,4 @@
+import { daysBetween, parseISODate, toISODate } from './dates';
 import type { ProgressPhoto } from './types';
 
 /** Live photos, oldest first (by date, then creation), the order the gallery slides in. */
@@ -16,4 +17,20 @@ export function comparePair(ordered: ProgressPhoto[], withId?: string): [Progres
   const first = ordered[0];
   const other = (withId && withId !== first.id ? ordered.find((p) => p.id === withId) : undefined) ?? ordered[ordered.length - 1];
   return [first, other];
+}
+
+/** Days and body-weight change between two photos (weight only when both carry one). */
+export function compareSummary(before: ProgressPhoto, after: ProgressPhoto): { days: number; weightDeltaKg?: number } {
+  const days = daysBetween(before.date, after.date);
+  const weightDeltaKg = before.weightKg !== undefined && after.weightKg !== undefined ? after.weightKg - before.weightKg : undefined;
+  return { days, weightDeltaKg };
+}
+
+/** Validate a typed photo date: a real calendar day, not in the future. */
+export function photoDateError(date: string, today: string): string | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return 'Use the format YYYY-MM-DD.';
+  const d = parseISODate(date);
+  if (Number.isNaN(d.getTime()) || toISODate(d) !== date) return 'That date does not exist.';
+  if (date > today) return 'Progress photos can’t be dated in the future.';
+  return undefined;
 }

@@ -41,6 +41,7 @@ export default function FoodLog() {
         right={
           <Row gap={Space.sm}>
             <Button title="Snap" icon="camera" onPress={() => router.push({ pathname: '/food/capture', params: { date } })} />
+            <Button title="Scan" kind="secondary" icon="barcode-outline" onPress={() => router.push({ pathname: '/food/barcode', params: { date } })} />
             <Button title="Add" kind="secondary" icon="add" onPress={() => router.push({ pathname: '/food/manual', params: { date } })} />
           </Row>
         }
