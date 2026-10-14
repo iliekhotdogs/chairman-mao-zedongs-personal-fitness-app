@@ -14,7 +14,10 @@ import { C } from '@/constants/theme';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { Splash } from '@/components/Splash';
 import { Landing } from '@/components/landing/Landing';
+import { initErrorReporting, withErrorReporting } from '@/lib/errorReporting';
 
+// Crash/error reporting, only when EXPO_PUBLIC_SENTRY_DSN is set (no-op otherwise).
+initErrorReporting();
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function Gate() {
@@ -30,7 +33,7 @@ function Gate() {
   return <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg } }} />;
 }
 
-export default function RootLayout() {
+function RootLayout() {
   return (
     <SafeAreaProvider style={{ backgroundColor: C.bg }}>
       <ErrorBoundary>
@@ -44,3 +47,5 @@ export default function RootLayout() {
     </SafeAreaProvider>
   );
 }
+
+export default withErrorReporting(RootLayout);

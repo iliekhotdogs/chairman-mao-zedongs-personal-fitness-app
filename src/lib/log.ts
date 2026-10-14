@@ -1,7 +1,8 @@
 /**
  * Tiny logger so failures are never swallowed silently.
  * In development it writes to the console; in production it is quiet unless a
- * reporter (e.g. Sentry) is registered with `setLogReporter`.
+ * reporter is registered with `setLogReporter` (Sentry, see errorReporting.ts, when
+ * EXPO_PUBLIC_SENTRY_DSN is set).
  */
 export type LogLevel = 'warn' | 'error';
 export type LogReporter = (level: LogLevel, scope: string, message: string, error?: unknown) => void;

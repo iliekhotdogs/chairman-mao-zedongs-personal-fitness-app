@@ -3,6 +3,7 @@ import { Platform, View } from 'react-native';
 import { C, Space } from '@/constants/theme';
 import { AccentRule, Button, Muted, Stack, Text } from './ui';
 import { LogoMark } from './Brand';
+import { log } from '@/lib/log';
 
 type Props = { children: React.ReactNode };
 type State = { error?: Error };
@@ -16,7 +17,9 @@ export class ErrorBoundary extends React.Component<Props, State> {
   }
 
   componentDidCatch(error: Error, info: React.ErrorInfo) {
-    console.error('FitCoach crashed:', error, info.componentStack);
+    // Goes to the error reporter (Sentry) when one is configured; the console in development.
+    log.error('crash', 'FitCoach crashed while rendering.', error);
+    if (__DEV__) console.error(info.componentStack);
   }
 
   reload = () => {
