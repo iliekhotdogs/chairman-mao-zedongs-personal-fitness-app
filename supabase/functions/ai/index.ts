@@ -1,44 +1,48 @@
 // Shared AI gateway. Deploy with JWT verification enabled.
-// Secrets: GROQ_API_KEY, optional FDC_API_KEY, AI_DAILY_LIMIT, AI_GLOBAL_DAILY_LIMIT.
-// Never place the Groq key in Expo env vars.
-import { createClient } from 'npm:@supabase/supabase-js@2';
+// The admin picks the provider, models, limits and kill switch in app_config
+// (see the admin screen). Keys are Edge Function secrets only: GROQ_API_KEY,
+// GEMINI_API_KEY, NVIDIA_API_KEY; optional FDC_API_KEY. Never place them in Expo env vars.
+import type { User } from 'npm:@supabase/supabase-js@2';
+import { admin, profileOf, requestUser } from '../_shared/auth.ts';
+import { BodyError, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
+import { findModel, modelLabel, PROVIDERS, resolveConfig, type AiConfig } from '../_shared/providers.ts';
 
-const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
-// Must match src/lib/ai/groqModels.ts.
-const CHAT_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b'];
-// The only Groq model on this account that accepts images.
-const VISION_MODEL = 'qwen/qwen3.8-27b';
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-};
-const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { ...CORS, 'Content-Type': 'application/json' } });
 const safeNumber = (value: unknown, max: number) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max ? value : 0;
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.slice(0, max) : '';
+const MAX_BODY_BYTES = 7_200_000;
+const AI_OFF = 'Coach AI is switched off by the app owner right now. Built-in answers still work.';
+
+async function loadConfig(): Promise<AiConfig> {
+  const { data, error } = await admin.from('app_config').select('*').eq('id', 1).maybeSingle();
+  if (error) throw new Error('AI configuration is not ready. Apply the latest SQL migration first.');
+  return resolveConfig(data);
+}
 
 type Completion = { text: string; input: number; output: number };
-async function complete(model: string, messages: unknown[], maxTokens: number): Promise<Completion> {
-  const key = Deno.env.get('GROQ_API_KEY');
-  if (!key) throw new Error('Groq is not configured on the server.');
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+async function complete(config: AiConfig, kind: 'chat' | 'vision', messages: unknown[], maxTokens: number): Promise<Completion> {
+  const info = PROVIDERS[config.provider];
+  const model = kind === 'chat' ? config.chat_model : config.vision_model;
+  const modelInfo = findModel(kind === 'chat' ? info.chatModels : info.visionModels, model);
+  const key = Deno.env.get(info.keyEnv);
+  if (!key) throw new Error(`${info.label} is not configured on the server.`);
+  const response = await fetch(info.url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${key.trim()}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: maxTokens }),
+    body: JSON.stringify({ model, messages, temperature: 0.2, max_tokens: maxTokens, ...info.extra, ...modelInfo?.extra }),
     signal: AbortSignal.timeout(90_000),
   });
   if (!response.ok) {
-    console.error(`Groq ${response.status} for ${model}: ${(await response.text().catch(() => '')).slice(0, 300)}`);
-    if (response.status === 429) throw new Error('Groq rate limit reached. Try again in a minute.');
-    if (response.status === 401 || response.status === 403) throw new Error('The server Groq key was rejected. Check GROQ_API_KEY in Supabase.');
-    if (response.status === 404) throw new Error(`Groq doesn't offer "${model}" to this key.`);
-    throw new Error(`Groq request failed (${response.status}).`);
+    console.error(`${info.label} ${response.status} for ${model}: ${(await response.text().catch(() => '')).slice(0, 300)}`);
+    if (response.status === 429) throw new Error(`${info.label} rate limit reached. Try again in a minute.`);
+    if (response.status === 401 || response.status === 403) throw new Error(`The server ${info.label} key was rejected. Check ${info.keyEnv} in Supabase.`);
+    if (response.status === 404) throw new Error(`${info.label} doesn't offer "${model}" to this key.`);
+    throw new Error(`${info.label} request failed (${response.status}).`);
   }
   const data = await response.json();
   const content = data.choices?.[0]?.message?.content;
   // Reasoning models may inline their thinking; only the answer after it is used.
   const reply = (typeof content === 'string' ? content : '').replace(/<think>[\s\S]*?<\/think>/g, '');
-  if (!reply.trim()) throw new Error('The model returned an empty reply. Try another model.');
+  if (!reply.trim()) throw new Error('The model returned an empty reply. Try again.');
   return { text: reply, input: safeNumber(data.usage?.prompt_tokens, 10_000_000), output: safeNumber(data.usage?.completion_tokens, 10_000_000) };
 }
 
@@ -53,7 +57,7 @@ Up to 8 items. "usda_search_query" is a short generic USDA food search term. "no
 function parseObject(reply: string): Record<string, unknown> {
   const start = reply.indexOf('{');
   const end = reply.lastIndexOf('}');
-  if (start < 0 || end <= start) throw new Error('The selected model did not return usable JSON. Try another model.');
+  if (start < 0 || end <= start) throw new Error('The selected model did not return usable JSON. Try again.');
   const value = JSON.parse(reply.slice(start, end + 1));
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('The model returned an invalid reply.');
   return value;
@@ -71,10 +75,8 @@ function validatedIntents(value: unknown): unknown[] {
   });
 }
 
-async function coach(body: Record<string, unknown>) {
-  // Older app builds still send OpenRouter ids; those get the default Groq model.
-  const requested = text(body.model, 100);
-  const model = CHAT_MODELS.includes(requested) ? requested : CHAT_MODELS[0];
+// Older app builds still send a "model" field; it is ignored. The admin picks the model.
+async function coach(config: AiConfig, body: Record<string, unknown>) {
   const message = text(body.message, 2000);
   if (!message.trim()) throw new Error('Enter a message first.');
   const context = body.context && typeof body.context === 'object' ? JSON.stringify(body.context).slice(0, 6000) : '{}';
@@ -89,7 +91,7 @@ async function coach(body: Record<string, unknown>) {
     'Do not diagnose injuries, recommend extreme diets, or tell users to train through pain. For chest pain, fainting or trouble breathing, urge emergency medical help and return no intents.',
     `User context: ${context}`,
   ].join('\n');
-  const response = await complete(model, [{ role: 'system', content: system }, ...history, { role: 'user', content: message }], 4096);
+  const response = await complete(config, 'chat', [{ role: 'system', content: system }, ...history, { role: 'user', content: message }], 4096);
   const value = parseObject(response.text);
   const reply = text(value.reply, 2000).trim();
   if (!reply) throw new Error('The selected model returned no coach reply.');
@@ -99,8 +101,9 @@ async function coach(body: Record<string, unknown>) {
 type VisionItem = { name: string; portion: string; grams: number; calories: number; protein_g: number; carbs_g: number; fat_g: number; confidence: string; portion_assumption: string; usda_search_query: string };
 async function searchUsda(query: string, pageSize: number) {
   const key = Deno.env.get('FDC_API_KEY') || 'DEMO_KEY';
-  const response = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(key)}`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+  // The key goes in a header so it never appears in URLs or proxy logs.
+  const response = await fetch('https://api.nal.usda.gov/fdc/v1/foods/search', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Api-Key': key },
     body: JSON.stringify({ query, pageSize, dataType: ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'] }),
   });
   if (!response.ok) throw new Error(`USDA search failed (${response.status}).`);
@@ -124,7 +127,7 @@ async function usdaItem(item: VisionItem) {
   };
 }
 
-async function estimateFood(body: Record<string, unknown>) {
+async function estimateFood(config: AiConfig, body: Record<string, unknown>) {
   const hint = text(body.hint, 300);
   const image = body.image as { data?: unknown; mediaType?: unknown } | undefined;
   const data = text(image?.data, 7_000_001);
@@ -133,13 +136,13 @@ async function estimateFood(body: Record<string, unknown>) {
   if (image && (!['image/jpeg', 'image/png', 'image/webp'].includes(mime) || !/^[A-Za-z0-9+/=]+$/.test(data) || data.length > 7_000_000)) throw new Error('Use a smaller JPEG, PNG, or WebP photo.');
   const prompt = `${FOOD_INSTRUCTIONS}\n\nUser hint: ${hint || '(none)'}${data ? '' : '\nThere is no photo; estimate from the hint only.'}`;
   const content = data ? [{ type: 'text', text: prompt }, { type: 'image_url', image_url: { url: `data:${mime};base64,${data}` } }] : prompt;
-  // Groq's free tier allows 1000 output tokens per minute for this model, and max_tokens counts against it.
-  const response = await complete(VISION_MODEL, [{ role: 'user', content }], 900);
+  // Groq's free tier allows 1000 output tokens per minute for its vision model, and max_tokens counts against it.
+  const response = await complete(config, 'vision', [{ role: 'user', content }], PROVIDERS[config.provider].visionMaxTokens);
   let value: Record<string, unknown>;
   try {
     value = parseObject(response.text.replace(/```(?:json)?/gi, ''));
   } catch (error) {
-    console.error(`Unusable ${VISION_MODEL} reply: ${response.text.slice(0, 500)}`);
+    console.error(`Unusable ${config.vision_model} reply: ${response.text.slice(0, 500)}`);
     throw error;
   }
   if (!Array.isArray(value.items)) throw new Error('The model returned an invalid meal estimate.');
@@ -160,26 +163,49 @@ async function estimateFood(body: Record<string, unknown>) {
       source_kind: 'visual_estimate', source_label: 'Visual estimate (no matching USDA value)', source_url: null,
     };
   }));
-  return { result: { items, overall_confidence: ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes: Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [], model: VISION_MODEL }, tokens: response };
+  return { result: { items, overall_confidence: ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes: Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [], model: config.vision_model, provider: PROVIDERS[config.provider].label }, tokens: response };
+}
+
+async function aiInfo(user: User) {
+  const config = await loadConfig();
+  const { data } = await admin.from('ai_usage').select('requests').eq('user_id', user.id).eq('day', utcDay()).maybeSingle();
+  return {
+    enabled: config.ai_enabled && Boolean(Deno.env.get(PROVIDERS[config.provider].keyEnv)),
+    provider: config.provider,
+    providerLabel: PROVIDERS[config.provider].label,
+    chatModel: config.chat_model,
+    chatModelLabel: modelLabel(config.provider, config.chat_model),
+    visionModel: config.vision_model,
+    visionModelLabel: modelLabel(config.provider, config.vision_model),
+    perUserDailyLimit: config.per_user_daily_limit,
+    usedToday: data?.requests ?? 0,
+  };
 }
 
 Deno.serve(async (request) => {
-  if (request.method === 'OPTIONS') return new Response('ok', { headers: CORS });
-  if (request.method !== 'POST') return json({ error: 'POST only' }, 405);
-  const token = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '');
-  if (!token) return json({ error: 'Sign in first.' }, 401);
-  const { data: auth, error: authError } = await admin.auth.getUser(token);
-  if (authError || !auth.user || auth.user.is_anonymous) return json({ error: 'Sign in first.' }, 401);
-  const raw = await request.text();
-  if (raw.length > 7_200_000) return json({ error: 'Request too large.' }, 413);
+  const early = preflight(request);
+  if (early) return early;
+  const json = (value: unknown, status = 200) => jsonFor(request, value, status);
+  const declared = Number(request.headers.get('content-length') ?? '');
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) return json({ error: 'Request too large.' }, 413);
+  const user = await requestUser(request);
+  if (!user) return json({ error: 'Sign in first.' }, 401);
+  // Invite-created accounts are confirmed at creation; older self-signups must confirm by email.
+  if (!user.email_confirmed_at) return json({ error: 'Confirm your email address first, then sign in again.' }, 403);
+  const profile = await profileOf(user.id);
+  if (profile.disabled) return json({ error: 'This account is disabled. Contact the app owner.' }, 403);
   let body: Record<string, unknown>;
-  try { body = JSON.parse(raw); } catch { return json({ error: 'Invalid JSON.' }, 400); }
-  if (!body || typeof body !== 'object' || Array.isArray(body)) return json({ error: 'Invalid request.' }, 400);
+  try { body = await readJsonBody(request, MAX_BODY_BYTES); } catch (error) {
+    return error instanceof BodyError ? json({ error: error.message }, error.status) : json({ error: 'Invalid request.' }, 400);
+  }
+  if (body.action === 'info') {
+    try { return json(await aiInfo(user)); } catch (error) { return json({ error: error instanceof Error ? error.message : 'AI info unavailable.' }, 503); }
+  }
   if (body.action === 'search_food') {
     const query = text(body.query, 100).trim();
     if (query.length < 2) return json({ foods: [] });
     const { data: searchClaim, error: searchClaimError } = await admin.rpc('claim_food_search', {
-      p_user: auth.user.id, p_day: new Date().toISOString().slice(0, 10),
+      p_user: user.id, p_day: utcDay(),
       p_user_limit: 30, p_global_limit: 500,
     });
     if (searchClaimError) return json({ error: 'Food search metering is not ready. Apply the account SQL setup first.' }, 503);
@@ -195,20 +221,31 @@ Deno.serve(async (request) => {
     } catch (error) { return json({ error: error instanceof Error ? error.message : 'USDA search failed.' }, 502); }
   }
   if (body.action !== 'coach' && body.action !== 'estimate_food') return json({ error: 'Unknown action.' }, 400);
-  if (!Deno.env.get('GROQ_API_KEY')) return json({ error: 'Groq is not configured on the server.' }, 503);
-  const day = new Date().toISOString().slice(0, 10);
+
+  let config: AiConfig;
+  try { config = await loadConfig(); } catch (error) { return json({ error: error instanceof Error ? error.message : 'AI is not ready.' }, 503); }
+  if (!config.ai_enabled) return json({ error: AI_OFF }, 503);
+  const info = PROVIDERS[config.provider];
+  if (!Deno.env.get(info.keyEnv)) return json({ error: `${info.label} is not configured on the server.` }, 503);
+
+  const day = utcDay();
   const { data: claim, error: claimError } = await admin.rpc('claim_ai_request', {
-    p_user: auth.user.id, p_day: day,
-    p_user_limit: Number(Deno.env.get('AI_DAILY_LIMIT') || 5),
-    p_global_limit: Number(Deno.env.get('AI_GLOBAL_DAILY_LIMIT') || 40),
+    p_user: user.id, p_day: day,
+    p_user_limit: config.per_user_daily_limit,
+    p_global_limit: config.global_daily_limit,
   });
   if (claimError) return json({ error: 'AI metering is not ready. Apply the account SQL setup first.' }, 503);
+  // A limit of 0 also switches AI off.
+  if (claim === 'disabled') return json({ error: AI_OFF }, 503);
   if (claim !== 'ok') return json({ error: claim === 'user_limit' ? 'Your daily AI limit is reached.' : 'The shared free AI allowance is used up today. Try tomorrow.' }, 429);
   try {
-    const { result, tokens } = body.action === 'coach' ? await coach(body) : await estimateFood(body);
-    await admin.rpc('record_ai_tokens', { p_user: auth.user.id, p_day: day, p_input: tokens.input, p_output: tokens.output });
+    const { result, tokens } = body.action === 'coach' ? await coach(config, body) : await estimateFood(config, body);
+    await admin.rpc('record_ai_tokens', { p_user: user.id, p_day: day, p_input: tokens.input, p_output: tokens.output });
     return json(result);
   } catch (error) {
+    // A failed or unusable provider reply does not use up the user's allowance.
+    const { error: releaseError } = await admin.rpc('release_ai_request', { p_user: user.id, p_day: day });
+    if (releaseError) console.error(`Quota release failed: ${releaseError.message}`);
     return json({ error: error instanceof Error ? error.message : 'AI request failed.' }, 502);
   }
 });
