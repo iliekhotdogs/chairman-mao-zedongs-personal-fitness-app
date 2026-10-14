@@ -62,7 +62,7 @@ Signup is invite-only: the admin creates invite codes and the `redeem-invite` Ed
 
 ## How AI works
 
-The client never holds a provider key. Signed-in users call the Supabase `ai` Edge Function (the server AI gateway). The admin picks the provider and model globally (`app_config`); the function holds the secret keys and meters per-user quotas. Without Supabase, the app uses built-in simulated answers. AI output is always a *proposal*: nothing changes plans, targets or the food log until the user accepts. Quotas: per user, per network (IP, stored hashed) and global per day, all in `app_config`; failed provider calls are refunded. Provider details and the verified model ids are in `docs/AI_PROVIDER.md`.
+The client never holds a provider key. Signed-in users call the Supabase `ai` Edge Function (the server AI gateway). The admin picks the provider and model globally (`app_config`); the function holds the secret keys and meters per-user quotas. Without Supabase, the app uses built-in simulated answers. AI output is always a *proposal*: nothing changes plans, targets or the food log until the user accepts. Quotas: per user, per network (IP, stored hashed) and global per day, all in `app_config`; a call is refunded only when the provider never billed it (network error, 429, 5xx); provider errors are shown to users as generic messages. Provider details and the verified model ids are in `docs/AI_PROVIDER.md`.
 
 ## Conventions
 
