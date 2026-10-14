@@ -66,13 +66,6 @@ async function loadCursor(owner: string): Promise<SyncCursor> {
   return parseCursor(await AsyncStorage.getItem(`${CURSOR_KEY}:${owner}`));
 }
 
-/**
- * How long a signed-in device with no local profile waits (behind the splash screen) for
- * the account's data before showing onboarding. Without the wait, a fresh device would
- * offer onboarding and could stamp a new profile over the one on the server.
- */
-const FIRST_SYNC_WAIT_MS = 4000;
-
 /** Collections whose changes should re-run the coaching engine. */
 const ENGINE_KEYS = ['foodLog', 'weights', 'activity', 'sessions', 'proposals', 'dayAdjustments', 'targets', 'profile', 'plan'] as const;
 
@@ -276,14 +269,8 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     return () => { active = false; data.subscription.unsubscribe(); };
   }, [supabaseIdentity, integrationsLoaded]);
 
-  // A signed-in device with no local profile waits (splash) for its first sync, at most
-  // FIRST_SYNC_WAIT_MS, before the app decides it needs onboarding. See `hydrated` below.
+  // A signed-in device with no local profile waits for a completed first pull.
   const [firstSyncSettled, setFirstSyncSettled] = useState<string>();
-  useEffect(() => {
-    if (!configured || !userId || !scopeReady) return;
-    const t = setTimeout(() => setFirstSyncSettled(userId), FIRST_SYNC_WAIT_MS);
-    return () => clearTimeout(t);
-  }, [configured, userId, scopeReady]);
   const awaitingAccountData = configured && !!userId && scopeReady && !state.profile && firstSyncSettled !== userId;
 
   const doSync = useCallback(async () => {
@@ -308,6 +295,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       if (!stillSignedIn()) return;
       // Merged into the current state, so edits made during the network calls are kept.
       dispatch({ type: 'MERGE_REMOTE', rows: result.rows });
+      setFirstSyncSettled(userId);
       cursorRef.current = result.cursor;
       await AsyncStorage.setItem(cursorKey, JSON.stringify(result.cursor));
       setLastSyncAt(nowISO());
@@ -321,7 +309,6 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       }
     } finally {
       if (syncing.current === userId) syncing.current = null;
-      setFirstSyncSettled(userId);
     }
   }, [userId, scopeReady, dispatch]);
 

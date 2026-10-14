@@ -74,7 +74,10 @@ Deno.serve(async (req) => {
   const json = (b: unknown, status = 200) => jsonFor(req, b, status);
   const user = await requestUser(req);
   if (!user) return json({ error: 'Not signed in' }, 401);
-  if ((await profileOf(user.id)).disabled) return json({ error: 'This account is disabled.' }, 403);
+  let profile;
+  try { profile = await profileOf(user.id); } catch { return json({ error: 'Account status is unavailable.' }, 503); }
+  if (!profile) return json({ error: 'Account profile is missing.' }, 503);
+  if (profile.disabled) return json({ error: 'This account is disabled.' }, 403);
 
   const b = await readJsonBody(req, 8_000).catch(() => null);
   if (!b || typeof b.dedupe_key !== 'string' || !b.dedupe_key.trim()) return json({ error: 'Bad request' }, 400);

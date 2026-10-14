@@ -7,6 +7,7 @@ import { admin, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, clientIpHash, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
 import { findModel, modelLabel, PROVIDERS, resolveConfig, type AiConfig } from '../_shared/providers.ts';
 import { matchingFood, validateVisionItem, type VisionItem } from './foodValidation.ts';
+import { hasInjuryRedFlag, isUrgentSymptom } from '../_shared/coachSafety.ts';
 
 const safeNumber = (value: unknown, max: number) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max ? value : 0;
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.slice(0, max) : '';
@@ -88,7 +89,7 @@ async function complete(config: AiConfig, meter: Meter, kind: 'chat' | 'vision',
   meter.output = safeNumber(data.usage?.completion_tokens, 10_000_000);
   const content = data.choices?.[0]?.message?.content;
   // Reasoning models may inline their thinking; only the answer after it is used.
-  const reply = (typeof content === 'string' ? content : '').replace(/<think>[\s\S]*?<\/think>/g, '');
+  const reply = (typeof content === 'string' ? content : '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/<think>[\s\S]*$/g, '');
   if (!reply.trim()) {
     console.error(`${info.label} returned an empty reply for ${model}.`);
     throw new AiError(AI_UNUSABLE);
@@ -130,11 +131,10 @@ function validatedIntents(value: unknown): unknown[] {
 async function coach(config: AiConfig, meter: Meter, body: Record<string, unknown>) {
   const message = text(body.message, 2000);
   if (!message.trim()) throw new AiError('Enter a message first.', 400);
-  const lower = message.toLowerCase();
-  if (/\b(chest (pain|tightness|pressure)|can'?t breathe|cannot breathe|trouble breathing|difficulty breathing|short(ness)? of breath|faint|passed out|black(ed)? out|dizz)/.test(lower)) {
+  if (isUrgentSymptom(message)) {
     return { result: { reply: 'Stop exercising now. Chest pain, trouble breathing, or feeling faint can be serious. Seek emergency care if symptoms are severe or persist; otherwise contact a doctor today before training again.', safety: true, intents: [] }, tokens: { input: 0, output: 0 } };
   }
-  if (/\b(swell|swollen|numb|tingl|sharp|pop(ped)?|snap|can'?t (walk|bear|put weight|move)|cannot (walk|bear|put weight|move)|unable to (walk|bear weight|move)|fell|fall|bruis|locked|gave way|giving way|worse at night|radiat)/.test(lower)) {
+  if (hasInjuryRedFlag(message)) {
     return { result: { reply: 'Stop movements that hurt. Swelling, numbness, sharp pain, a pop, or trouble bearing weight should be checked by a doctor or physiotherapist before training that area again. I cannot assess an injury here.', safety: true, intents: [] }, tokens: { input: 0, output: 0 } };
   }
   const context = body.context && typeof body.context === 'object' ? JSON.stringify(body.context).slice(0, 6000) : '{}';
@@ -171,6 +171,7 @@ async function searchUsda(query: string, pageSize: number) {
   const response = await fetch('https://api.nal.usda.gov/fdc/v1/foods/search', {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Api-Key': key },
     body: JSON.stringify({ query, pageSize, dataType: ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'] }),
+    signal: AbortSignal.timeout(8_000),
   });
   if (!response.ok) {
     console.error(`USDA search ${response.status}: ${(await response.text().catch(() => '')).slice(0, 200)}`);
@@ -222,7 +223,10 @@ async function estimateFood(config: AiConfig, meter: Meter, body: Record<string,
   const validated = value.items.slice(0, 8).map(validateVisionItem);
   const rejected = validated.filter((item) => item === null).length;
   if (validated.every((item) => item === null)) throw new AiError('No usable food portions were identified. Please enter the meal manually.', 502);
-  const items = await Promise.all(validated.filter((item): item is VisionItem => item !== null).map(async (item) => {
+  const validItems = validated.filter((item): item is VisionItem => item !== null);
+  const items = [];
+  for (let start = 0; start < validItems.length; start += 2) {
+    items.push(...await Promise.all(validItems.slice(start, start + 2).map(async (item) => {
     const sourced = item.review_required ? null : await usdaItem(item).catch(() => null);
     return sourced ?? {
       name: item.name, portion: item.portion, grams: item.grams, calories: item.calories,
@@ -231,7 +235,8 @@ async function estimateFood(config: AiConfig, meter: Meter, body: Record<string,
       portion_assumption: item.portion_assumption, review_required: Boolean(item.review_required),
       source_kind: 'visual_estimate', source_label: 'Visual estimate (no matching USDA value)', source_url: null,
     };
-  }));
+    })));
+  }
   const notes = Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [];
   if (rejected) notes.unshift(`${rejected} food item(s) had unusable amounts and were omitted. Review the plate and add them manually.`);
   if (items.some((item) => item.review_required)) notes.unshift('One or more portions need correction before saving.');
@@ -242,7 +247,7 @@ async function aiInfo(user: User) {
   const config = await loadConfig();
   const { data } = await admin.from('ai_usage').select('requests').eq('user_id', user.id).eq('day', utcDay()).maybeSingle();
   return {
-    enabled: config.ai_enabled && Boolean(Deno.env.get(PROVIDERS[config.provider].keyEnv)),
+    enabled: config.ai_enabled && config.per_user_daily_limit > 0 && config.global_daily_limit > 0 && Boolean(Deno.env.get(PROVIDERS[config.provider].keyEnv)),
     provider: config.provider,
     providerLabel: PROVIDERS[config.provider].label,
     chatModel: config.chat_model,
@@ -264,7 +269,9 @@ Deno.serve(async (request) => {
   if (!user) return json({ error: 'Sign in first.' }, 401);
   // Invite-created accounts are confirmed at creation; older self-signups must confirm by email.
   if (!user.email_confirmed_at) return json({ error: 'Confirm your email address first, then sign in again.' }, 403);
-  const profile = await profileOf(user.id);
+  let profile;
+  try { profile = await profileOf(user.id); } catch { return json({ error: 'Account status is unavailable. Try again later.' }, 503); }
+  if (!profile) return json({ error: 'Account profile is missing.' }, 503);
   if (profile.disabled) return json({ error: 'This account is disabled. Contact the app owner.' }, 403);
   let body: Record<string, unknown>;
   try { body = await readJsonBody(request, MAX_BODY_BYTES); } catch (error) {
@@ -292,6 +299,8 @@ Deno.serve(async (request) => {
       return json({ foods: result });
     } catch (error) {
       if (!(error instanceof AiError)) console.error(`USDA search failed: ${error}`);
+      const { error: refundError } = await admin.rpc('release_food_search', { p_user: user.id, p_day: utcDay() });
+      if (refundError) console.error(`Food search refund failed: ${refundError.message}`);
       return json({ error: error instanceof AiError ? error.message : 'Food search is not available right now. Try again later.' }, 502);
     }
   }

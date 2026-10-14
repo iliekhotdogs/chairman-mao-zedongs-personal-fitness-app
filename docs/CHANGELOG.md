@@ -1,5 +1,12 @@
 # Change log
 
+## 2026-10-14 15:33 PDT — Codex
+
+- Fixed coach safety word matching and fail-closed profile checks; added regression tests.
+- Repaired zero-limit AI status, USDA timeouts and concurrency, food-search refunds, atomic quota reset, signup metering, unclosed thinking blocks, admin user paging, and first-pull onboarding guard.
+
+Signed off: Codex
+
 Record each repository change here in the same commit as the change. Use the local date and time with a time zone, short point-form notes, and the name of the person or agent who made it. Newest entries go first. This log starts on October 14, 2026; earlier changes remain in Git history.
 
 ## 2026-10-14 15:28 PDT — Codex

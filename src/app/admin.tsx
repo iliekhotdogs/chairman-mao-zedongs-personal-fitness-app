@@ -266,16 +266,19 @@ function InvitesSection() {
 function UsersSection() {
   const toast = useToast();
   const [users, setUsers] = useState<AdminUser[]>([]);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState<string>();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (more = false) => {
     try {
-      const data = await adminCall<{ users: AdminUser[] }>('list_users');
-      setUsers(data.users ?? []);
+      const data = await adminCall<{ users: AdminUser[] }>('list_users', { offset: more ? users.length : 0 });
+      const page = data.users ?? [];
+      setUsers(more ? [...users, ...page] : page);
+      setHasMore(page.length === 200);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not load users.'); }
-  }, []);
-  useEffect(() => { void Promise.resolve().then(load); }, [load]);
+  }, [users]);
+  useEffect(() => { void adminCall<{ users: AdminUser[] }>('list_users').then((data) => { setUsers(data.users ?? []); setHasMore((data.users ?? []).length === 200); }).catch((e) => setError(e instanceof Error ? e.message : 'Could not load users.')); }, []);
 
   const act = async (userId: string, action: 'set_disabled' | 'reset_quota', extra: Record<string, unknown>, message: string) => {
     setBusy(userId + action);
@@ -292,7 +295,7 @@ function UsersSection() {
     <Card style={{ gap: Space.md }}>
       <Row>
         <Text variant="h3" style={{ flex: 1 }}>Users</Text>
-        <Button title="Refresh" kind="ghost" size="sm" icon="refresh" onPress={load} />
+        <Button title="Refresh" kind="ghost" size="sm" icon="refresh" onPress={() => void load()} />
       </Row>
       {error ? <Banner kind="warning">{error}</Banner> : null}
       {users.map((user, index) => (
@@ -313,6 +316,7 @@ function UsersSection() {
           </Row>
         </Stack>
       ))}
+      {hasMore ? <Button title="Load more" kind="secondary" onPress={() => void load(true)} /> : null}
     </Card>
   );
 }
