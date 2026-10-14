@@ -3,9 +3,10 @@ import { View } from 'react-native';
 import { Redirect, router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, Columns, Field, Muted, NumberField, OptionCard, ProgressBar, Row, Screen, Segmented, Stack, Text, Expandable, Ionicons } from '@/components/ui';
+import { AccentRule, Badge, Banner, Button, Card, Chip, Columns, Field, Muted, NumberField, OptionCard, ProgressBar, Row, Screen, Segmented, Stack, Text, Expandable, Ionicons } from '@/components/ui';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
+import { LogoMark } from '@/components/Brand';
 import type { BodyArea, DailyActivity, Equipment, Experience, GoalPriority, Profile, Sex, UnitSystem } from '@/lib/types';
 import { computeTargets, macrosFor } from '@/lib/nutrition/targets';
 import { generatePlan, dayMinutes } from '@/lib/workouts/generator';
@@ -123,7 +124,7 @@ export default function Onboarding() {
   };
 
   return (
-    <Screen maxWidth={720}>
+    <Screen size="narrow">
       {step > 0 ? (
         <Stack gap={6}>
           <Row>
@@ -135,10 +136,9 @@ export default function Onboarding() {
 
       {step === 0 && (
         <Stack gap={Space.lg} style={{ paddingTop: isPhone ? Space.xl : Space.xxxl }}>
-          <View style={{ width: 56, height: 56, borderRadius: 16, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' }}>
-            <Text variant="h1" color="#fff">F</Text>
-          </View>
+          <LogoMark size={56} />
           <Text variant="display">Your coach for food, training, and progress</Text>
+          <AccentRule width={48} />
           <Muted>
             Log meals from a photo, follow a training plan built around you, and get suggestions that adapt to your real results. You approve every change.
           </Muted>
@@ -283,9 +283,9 @@ export default function Onboarding() {
                 const m = calorieOverride ? macrosFor(calorieOverride, profile.startWeightKg, goal) : targets;
                 return (
                   <Row gap={Space.lg}>
-                    <Stack gap={0}><Text variant="h2" color={C.protein}>{m.proteinG} g</Text><Muted variant="small">protein</Muted></Stack>
-                    <Stack gap={0}><Text variant="h2" color={C.carbs}>{m.carbsG} g</Text><Muted variant="small">carbs</Muted></Stack>
-                    <Stack gap={0}><Text variant="h2" color={C.fat}>{m.fatG} g</Text><Muted variant="small">fat</Muted></Stack>
+                    <Stack gap={0}><Text variant="numberSm" color={C.protein}>{m.proteinG} g</Text><Muted variant="small">protein</Muted></Stack>
+                    <Stack gap={0}><Text variant="numberSm" color={C.carbs}>{m.carbsG} g</Text><Muted variant="small">carbs</Muted></Stack>
+                    <Stack gap={0}><Text variant="numberSm" color={C.fat}>{m.fatG} g</Text><Muted variant="small">fat</Muted></Stack>
                   </Row>
                 );
               })()}

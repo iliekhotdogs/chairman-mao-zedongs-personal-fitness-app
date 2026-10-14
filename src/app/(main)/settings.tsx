@@ -32,7 +32,7 @@ const GOALS: { value: GoalPriority; label: string }[] = [
 
 export default function Settings() {
   return (
-    <Screen maxWidth={1080}>
+    <Screen size="medium">
       <PageHeader title="Settings" right={<IconButton icon="close" label="Close settings" onPress={() => router.back()} />} />
       <Columns>
         {[
@@ -119,10 +119,10 @@ function TargetsSection() {
     <Card style={{ gap: Space.sm }}>
       <Text variant="h3">Nutrition targets</Text>
       <Row wrap gap={Space.xl}>
-        <Stack gap={0}><Text variant="h2">{t.calories.toLocaleString()}</Text><Muted variant="small">kcal</Muted></Stack>
-        <Stack gap={0}><Text variant="h2" color={C.protein}>{t.proteinG} g</Text><Muted variant="small">protein</Muted></Stack>
-        <Stack gap={0}><Text variant="h2" color={C.carbs}>{t.carbsG} g</Text><Muted variant="small">carbs</Muted></Stack>
-        <Stack gap={0}><Text variant="h2" color={C.fat}>{t.fatG} g</Text><Muted variant="small">fat</Muted></Stack>
+        <Stack gap={0}><Text variant="numberSm">{t.calories.toLocaleString()}</Text><Muted variant="small">kcal</Muted></Stack>
+        <Stack gap={0}><Text variant="numberSm" color={C.protein}>{t.proteinG} g</Text><Muted variant="small">protein</Muted></Stack>
+        <Stack gap={0}><Text variant="numberSm" color={C.carbs}>{t.carbsG} g</Text><Muted variant="small">carbs</Muted></Stack>
+        <Stack gap={0}><Text variant="numberSm" color={C.fat}>{t.fatG} g</Text><Muted variant="small">fat</Muted></Stack>
       </Row>
       <Expandable title="How this was set" icon="calculator-outline">
         <Muted variant="small">{t.method}</Muted>

@@ -42,7 +42,7 @@ export function CaloriesRing({ eaten, target, size = 156 }: { eaten: number; tar
   const remaining = Math.round(target - eaten);
   return (
     <Ring value={eaten} max={target} size={size} stroke={size > 140 ? 13 : 10}>
-      <Text variant={size > 140 ? 'number' : 'h2'}>{Math.abs(remaining).toLocaleString()}</Text>
+      <Text variant={size > 140 ? 'number' : 'numberSm'}>{Math.abs(remaining).toLocaleString()}</Text>
       <Muted variant="small">{remaining >= 0 ? 'kcal left' : 'kcal over'}</Muted>
     </Ring>
   );

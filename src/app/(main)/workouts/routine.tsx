@@ -45,7 +45,7 @@ export default function RoutineEditor() {
   };
 
   return (
-    <Screen maxWidth={860}>
+    <Screen size="medium">
       <PageHeader title={existing ? 'Edit routine' : 'New routine'} right={<Button title="Cancel" kind="ghost" onPress={() => router.back()} />} />
       <Field label="Routine name" value={name} onChangeText={setName} />
       {days.map((d, di) => (

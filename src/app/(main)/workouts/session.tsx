@@ -28,7 +28,7 @@ export default function SessionScreen() {
 
   if (id && !viewing) {
     return (
-      <Screen maxWidth={720}>
+      <Screen size="narrow">
         <EmptyState icon="search-outline" title="Workout not found" body="It may have been deleted on another device." action={<Button title="Back to training" onPress={() => router.replace('/workouts')} />} />
       </Screen>
     );
@@ -67,7 +67,7 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
   };
 
   return (
-    <Screen maxWidth={820}>
+    <Screen size="narrow">
       <PageHeader title="Start a workout" subtitle={formatDateLabel(today, today)} right={<Button title="Back" kind="ghost" onPress={() => router.back()} />} />
       {first ? (
         <Card tone={overridden && !preferred ? 'saved' : 'default'} style={{ gap: Space.sm }}>
@@ -151,7 +151,7 @@ function SessionView({ session }: { session: WorkoutSession }) {
   const volume = session.sets.reduce((v, s) => v + s.weightKg * s.reps, 0);
 
   return (
-    <Screen maxWidth={1040}>
+    <Screen size="medium">
       <PageHeader
         title={session.name}
         subtitle={finished ? `${formatDateLabel(session.date)} · ${totalSets} sets · ${displayWeight(volume, units, 0)} volume` : `Started ${formatTime(session.startedAt)} · ${totalSets} sets logged`}
