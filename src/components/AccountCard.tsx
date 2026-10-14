@@ -6,7 +6,7 @@ import { C, Space } from '@/constants/theme';
 import { Badge, Button, Card, Field, Muted, Row, Text } from './ui';
 import { useStore } from '@/store/AppStore';
 import { useToast } from './Toast';
-import { supabase } from '@/lib/sync/supabase';
+import { signOut, supabase } from '@/lib/sync/supabase';
 import { functionErrorMessage } from '@/lib/ai/provider';
 
 const MIN_PASSWORD = 8;
@@ -147,7 +147,7 @@ export function AccountCard({ intro }: { intro?: string }) {
           <Row wrap gap={Space.sm}>
             <Button title="Sync now" kind="secondary" size="sm" icon="refresh" onPress={() => sync.syncNow()} />
             {isAdmin ? <Button title="Admin" kind="secondary" size="sm" onPress={() => router.push('/admin')} /> : null}
-            <Button title="Sign out" kind="ghost" size="sm" onPress={() => supabase()?.auth.signOut()} />
+            <Button title="Sign out" kind="ghost" size="sm" onPress={() => void signOut()} />
           </Row>
         </>
       ) : mode === 'forgot' ? (

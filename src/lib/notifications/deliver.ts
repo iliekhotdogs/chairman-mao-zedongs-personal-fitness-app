@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 
 import { log } from '@/lib/log';
+import { emitNotificationPermissionGranted } from './push';
 
 export type PermissionResult = 'granted' | 'denied' | 'unsupported';
 
@@ -32,9 +33,10 @@ export async function requestPermission(): Promise<PermissionResult> {
     await N.setNotificationChannelAsync('coach', { name: 'Coach check-ins', importance: N.AndroidImportance.DEFAULT });
   }
   const current = await N.getPermissionsAsync();
-  if (current.granted) return 'granted';
-  const r = await N.requestPermissionsAsync();
-  return r.granted ? 'granted' : 'denied';
+  const granted = current.granted || (await N.requestPermissionsAsync()).granted;
+  // Signed in: the store registers this device for remote push now.
+  if (granted) emitNotificationPermissionGranted();
+  return granted ? 'granted' : 'denied';
 }
 
 export async function permissionStatus(): Promise<PermissionResult | 'undetermined'> {

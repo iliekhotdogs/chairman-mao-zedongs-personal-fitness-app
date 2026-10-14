@@ -1,9 +1,10 @@
-import { emptyState } from '../state';
-import { EMPTY_CURSOR, keysetFilter, listAllPaths, parseCursor, PULL_PAGE_SIZE, pullSince, syncNow, type SyncCursor } from '../sync/sync';
+import { emptyState, SYNCED_COLLECTIONS } from '../state';
+import { EMPTY_CURSOR, keysetFilter, listAllPaths, parseCursor, PULL_PAGE_SIZE, pullSince, SETTLE_WINDOW_MS, syncNow, timestampMs, type SyncCursor } from '../sync/sync';
 
 /**
  * In-memory stand-in for the Supabase `records` table and the subset of the PostgREST
- * query builder that sync uses (eq / gte / or / order / limit / upsert).
+ * query builder that sync uses (eq / gte / or / order / limit / upsert), plus the
+ * `server_time` RPC (the database clock).
  */
 type Row = { user_id: string; collection: string; id: string; data: unknown; updated_at: string; deleted: boolean; synced_at: string };
 
@@ -39,6 +40,8 @@ function matchTerm(row: Row, term: string): boolean {
 let mockTable: Row[] = [];
 const mockCalls: { filters: string[] }[] = [];
 let mockServerNow = '2026-10-02T12:00:00.000000+00:00';
+/** False simulates a database without the server_time function (migration not applied). */
+let mockRpcAvailable = true;
 
 function builder() {
   let rows = [...mockTable];
@@ -75,7 +78,17 @@ function builder() {
   return b;
 }
 
-const mockClient = { from: () => builder() };
+const mockUploads: string[] = [];
+const mockClient = {
+  from: () => builder(),
+  storage: { from: () => ({ upload: async (path: string) => { mockUploads.push(path); return { error: null }; } }) },
+  rpc: async (name: string) => {
+    mockCalls.push({ filters: [`rpc:${name}`] });
+    return name === 'server_time' && mockRpcAvailable ? { data: mockServerNow, error: null } : { data: null, error: { message: 'function not found' } };
+  },
+};
+/** Only the table queries (the server_time RPC is counted separately). */
+const queries = () => mockCalls.filter((c) => !c.filters.some((f) => f.startsWith('rpc:')));
 jest.mock('../sync/supabase', () => ({ supabase: () => mockClient }));
 
 const USER = 'user-1';
@@ -89,6 +102,8 @@ const pad = (n: number) => String(n).padStart(5, '0');
 beforeEach(() => {
   mockTable = [];
   mockCalls.length = 0;
+  mockRpcAvailable = true;
+  mockServerNow = '2026-10-02T12:00:00.000000+00:00';
 });
 
 describe('sync pull keyset cursor', () => {
@@ -98,14 +113,14 @@ describe('sync pull keyset cursor', () => {
     const { rows, cursor } = await pullSince(mockClient as never, USER, EMPTY_CURSOR);
     expect(rows).toHaveLength(n);
     expect(new Set(rows.map((r) => r.id)).size).toBe(n);
-    expect(mockCalls).toHaveLength(3); // 1000 + 1000 + 37
+    expect(queries()).toHaveLength(3); // 1000 + 1000 + 37
     expect(cursor).toMatchObject({ lastPulledAt: TS, lastPulledCollection: 'weights', lastPulledId: `w${pad(n - 1)}` });
   });
 
   it('stops after one request when the first page is short', async () => {
     mockTable = [weightRow('a'), weightRow('b')];
     await pullSince(mockClient as never, USER, EMPTY_CURSOR);
-    expect(mockCalls).toHaveLength(1);
+    expect(queries()).toHaveLength(1);
   });
 
   it('resumes after the last (synced_at, collection, id) and picks up later ties', async () => {
@@ -130,9 +145,76 @@ describe('sync pull keyset cursor', () => {
     mockTable = [weightRow('a', '2026-10-02T09:00:00+00:00'), weightRow('b'), weightRow('c')];
     const old: SyncCursor = { lastPulledAt: TS, lastPushedAt: EMPTY_CURSOR.lastPushedAt };
     const { rows, cursor } = await pullSince(mockClient as never, USER, old);
-    expect(mockCalls[0].filters).toContain('gte:synced_at');
+    expect(queries()[0].filters).toContain('gte:synced_at');
     expect(rows.map((r) => r.id)).toEqual(['b', 'c']);
     expect(cursor.lastPulledId).toBe('c');
+  });
+
+  // A transaction stamps its rows when it writes them but they become visible only at commit,
+  // so another device can pull past a stamp before the row exists for it.
+  describe('late commits (synced_at race)', () => {
+    const at = (seconds: number) => `2026-10-02T12:00:${String(seconds).padStart(2, '0')}.000000+00:00`;
+
+    it('re-reads the settle window and picks up a row committed after the cursor passed its stamp', async () => {
+      mockTable = [weightRow('x', at(10))];
+      mockServerNow = at(11);
+      const first = await pullSince(mockClient as never, USER, EMPTY_CURSOR);
+      expect(first.cursor).toMatchObject({ lastPulledAt: at(10), lastPulledId: 'x' });
+      expect(timestampMs(first.cursor.settledAt!)).toBe(timestampMs(at(11)) - SETTLE_WINDOW_MS);
+
+      // Slow transaction: stamped at :08, before the cursor, but committed only now.
+      mockTable.push(weightRow('late', at(8)));
+      mockServerNow = at(20);
+      const second = await pullSince(mockClient as never, USER, first.cursor);
+      expect(second.rows.map((r) => r.id)).toContain('late');
+      // The cursor never moves backwards because of the rescan.
+      expect(second.cursor).toMatchObject({ lastPulledAt: at(10), lastPulledId: 'x' });
+
+      // Once the server clock is past the window, nothing old is read again.
+      mockServerNow = at(59);
+      const third = await pullSince(mockClient as never, USER, second.cursor);
+      expect(timestampMs(third.cursor.settledAt!)).toBeGreaterThan(timestampMs(at(10)));
+      const fourth = await pullSince(mockClient as never, USER, third.cursor);
+      expect(fourth.rows).toHaveLength(0);
+      expect(queries().at(-1)!.filters).toContain('or');
+    });
+
+    it('does not re-download settled rows when the cursor is idle', async () => {
+      mockTable = [weightRow('a', at(1)), weightRow('b', at(2))];
+      mockServerNow = at(50);
+      const first = await pullSince(mockClient as never, USER, EMPTY_CURSOR);
+      const second = await pullSince(mockClient as never, USER, first.cursor);
+      expect(second.rows).toHaveLength(0);
+    });
+
+    it('rescans a window larger than one page without skipping or moving the cursor back', async () => {
+      const n = PULL_PAGE_SIZE + 250;
+      mockTable = Array.from({ length: n }, (_, i) => weightRow(`w${pad(i)}`, at(5)));
+      mockServerNow = at(6);
+      const first = await pullSince(mockClient as never, USER, EMPTY_CURSOR);
+      expect(first.rows).toHaveLength(n);
+      // A late commit sorts first inside the window.
+      mockTable.push(weightRow('a-late', at(4)));
+      mockServerNow = at(7);
+      const second = await pullSince(mockClient as never, USER, first.cursor);
+      expect(new Set(second.rows.map((r) => r.id)).size).toBe(n + 1);
+      expect(second.cursor).toMatchObject({ lastPulledAt: at(5), lastPulledId: `w${pad(n - 1)}` });
+    });
+
+    it('without the server_time function, re-reads a fixed window before the cursor', async () => {
+      mockRpcAvailable = false;
+      mockTable = [weightRow('old', '2026-10-02T11:00:00.000000+00:00'), weightRow('x', at(10))];
+      const first = await pullSince(mockClient as never, USER, EMPTY_CURSOR);
+      expect(first.cursor.settledAt).toBeUndefined();
+      mockTable.push(weightRow('late', at(8)));
+      const second = await pullSince(mockClient as never, USER, first.cursor);
+      expect(second.rows.map((r) => r.id).sort()).toEqual(['late', 'x']); // 'old' is outside the window
+    });
+  });
+
+  it('parses Postgres timestamps with microseconds', () => {
+    expect(timestampMs('2026-10-02T10:00:00.123456+00:00')).toBe(Date.parse('2026-10-02T10:00:00.123Z'));
+    expect(timestampMs('2026-10-02T10:00:00+00:00')).toBe(Date.parse('2026-10-02T10:00:00Z'));
   });
 
   it('quotes values in the keyset filter', () => {
@@ -146,8 +228,8 @@ describe('stored cursor format', () => {
   it('accepts the old two-field cursor', () => {
     expect(parseCursor(JSON.stringify({ lastPulledAt: TS, lastPushedAt: TS }))).toEqual({ lastPulledAt: TS, lastPushedAt: TS });
   });
-  it('keeps tie-breakers when present', () => {
-    const c = { lastPulledAt: TS, lastPushedAt: TS, lastPulledCollection: 'chat', lastPulledId: 'x' };
+  it('keeps tie-breakers and the settled point when present', () => {
+    const c = { lastPulledAt: TS, lastPushedAt: TS, lastPulledCollection: 'chat', lastPulledId: 'x', settledAt: TS };
     expect(parseCursor(JSON.stringify(c))).toEqual(c);
   });
   it('falls back to a full pull for missing or corrupt cursors', () => {
@@ -191,5 +273,42 @@ describe('syncNow', () => {
     expect(Date.parse(pushed.updated_at)).toBeLessThan(Date.parse(future));
     expect(res.rows.some((r) => r.id === 'w1')).toBe(true);
     expect(res.cursor.lastPulledAt).toBe(mockServerNow);
+  });
+});
+
+describe('photo uploads', () => {
+  const realFetch = globalThis.fetch;
+  beforeEach(() => {
+    mockUploads.length = 0;
+    globalThis.fetch = jest.fn(async () => ({ blob: async () => ({}) })) as never;
+  });
+  afterEach(() => { globalThis.fetch = realFetch; });
+
+  it('uploads local food and progress photos and returns their storage uris', async () => {
+    const stamp = '2026-10-01T09:00:00.000Z';
+    const state = {
+      ...emptyState('d', TS),
+      foodLog: [{ id: 'f1', date: '2026-10-01', photoUri: 'file:///meal.jpg', updatedAt: stamp }],
+      progressPhotos: [
+        { id: 'p1', date: '2026-10-01', uri: 'file:///front.jpg', updatedAt: stamp },
+        { id: 'p2', date: '2026-10-01', uri: 'storage:food-photos/user-1/progress/p2.jpg', updatedAt: stamp },
+      ],
+    } as never;
+    const res = await syncNow(state, USER, EMPTY_CURSOR);
+    expect(mockUploads.sort()).toEqual([`${USER}/f1.jpg`, `${USER}/progress/p1.jpg`]);
+    const food = res.rows.find((r) => r.id === 'f1' && r.collection === 'foodLog');
+    expect((food?.data as { photoUri?: string })?.photoUri).toBe(`storage:food-photos/${USER}/f1.jpg`);
+    // Once progressPhotos is a synced collection, its new storage uri merges back the same way.
+    if ((SYNCED_COLLECTIONS as readonly string[]).includes('progressPhotos')) {
+      const progress = res.rows.filter((r) => (r.collection as string) === 'progressPhotos' && r.id === 'p1');
+      expect(progress.some((r) => (r.data as { uri?: string }).uri === `storage:food-photos/${USER}/progress/p1.jpg`)).toBe(true);
+    }
+  });
+
+  it('works when the state has no progressPhotos', async () => {
+    const state = { ...emptyState('d', TS) };
+    delete (state as { progressPhotos?: unknown }).progressPhotos;
+    await expect(syncNow(state, USER, EMPTY_CURSOR)).resolves.toBeDefined();
+    expect(mockUploads).toHaveLength(0);
   });
 });

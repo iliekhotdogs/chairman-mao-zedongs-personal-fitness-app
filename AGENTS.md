@@ -12,6 +12,8 @@ npm run lint           # expo lint (ESLint flat config, eslint-config-expo)
 npm test               # jest (jest-expo preset), tests in src/**/__tests__/*.test.ts
 npm run build:web      # static web export to dist/ (what Vercel serves)
 npx expo install <pkg> # add dependencies; resolves SDK-compatible versions
+npm run check:rls -- --yes  # RLS isolation check against a STAGING project (needs SUPABASE_URL,
+                            # SUPABASE_PUBLISHABLE_KEY, SUPABASE_SECRET_KEY); never in CI
 ```
 
 Run typecheck, lint and tests before calling a task done. CI (`.github/workflows/ci.yml`) runs all of them plus the web build on every push and PR, and type-checks `supabase/functions` with Deno.
@@ -33,8 +35,10 @@ src/lib/              business logic, no UI:
   coaching/ nutrition/ workouts/ activity/ notifications/  domain rules
   export.ts           JSON/CSV export builders; exportFile.ts saves them (web download / native share)
   log.ts              logger; use it instead of empty catch blocks
+  errorReporting.ts   optional Sentry (EXPO_PUBLIC_SENTRY_DSN); scrubs PII; feeds log.error/warn
 src/store/AppStore.tsx  React provider: hydration, persistence, coaching engine scheduler, sync loop
-supabase/migrations/  SQL schema with RLS
+supabase/migrations/  SQL schema with RLS; apply in filename order (see docs/SETUP.md)
+scripts/              rls-check.mjs (live RLS isolation check)
 supabase/functions/   Edge Functions (Deno): ai, admin-stats, notify, redeem-invite, delete-account; shared code in _shared/
 docs/                 SETUP, AI_PROVIDER, WEARABLES, TESTING, RELEASE
 ```
@@ -44,9 +48,13 @@ docs/                 SETUP, AI_PROVIDER, WEARABLES, TESTING, RELEASE
 - All app data is one `AppState` object, persisted to AsyncStorage (`localStorage` on web) per account (`fitapp:state:v1:user:<id>`). On load it is migrated (`MIGRATIONS` in `schemaMigrations.ts`) and validated. Invalid records are dropped and logged, not fatal. Old synced tombstones and chat beyond the last 500 messages are pruned locally at startup.
 - To change the stored shape: bump `STATE_VERSION` in `state.ts` and add a migration step from the previous version.
 - Every synced record has `id`, `updatedAt` and an optional `deleted` flag. Deletes are tombstones. Lists live in `SYNCED_COLLECTIONS`; whole documents (profile, targets, plan, settings) in `SYNCED_SINGLETONS`. Add new synced data there, and in the `records_collection_check` constraint if it is a new collection.
-- Sync (`src/lib/sync/sync.ts`) pushes rows edited since the last push, then pulls rows from the `records` table with a keyset cursor on `(synced_at, collection, id)`. `synced_at` is stamped by the server. Conflicts resolve by last write on `updatedAt`. Edit times more than 5 minutes in the future are clamped (clock skew).
+- Sync (`src/lib/sync/sync.ts`) pushes rows edited since the last push, then pulls rows from the `records` table with a keyset cursor on `(synced_at, collection, id)`. `synced_at` is stamped by the server (`clock_timestamp()`). Because a row becomes visible only when its transaction commits, each pull first reads the database clock (`server_time()` RPC) and the next pull re-reads rows stamped within 15 s of it (`settledAt` in the cursor), so late commits are never skipped. Conflicts resolve by last write on `updatedAt`, so re-reads are harmless. Edit times more than 5 minutes in the future are clamped (clock skew).
 - The store syncs on sign-in, every 2 minutes, on app foreground, and 5 s after any change to synced data (detected with `contentSignature`).
 - Business rules live in `checkAction` (reducer.ts). Screens dispatch through `act()`, which checks once and throws `RuleViolation` with a user-facing message.
+
+## Notifications
+
+Coaching notifications are capped at 3 per user per day by the `notify` function (`claim_notification_slot`). On Android/iOS builds the app registers an Expo push token once permission is granted and the user is signed in (`src/lib/notifications/push.ts`, `register_push_token` RPC); `notify` pushes to the user's other devices and deletes dead tokens. Sign out through `signOut()` in `src/lib/sync/supabase.ts`, which removes the device token first. Web uses local browser notifications only. Push credentials: docs/RELEASE.md.
 
 ## Accounts
 
@@ -54,14 +62,15 @@ Signup is invite-only: the admin creates invite codes and the `redeem-invite` Ed
 
 ## How AI works
 
-The client never holds a provider key. Signed-in users call the Supabase `ai` Edge Function (the server AI gateway). The admin picks the provider and model globally (`app_config`); the function holds the secret keys and meters per-user quotas. Without Supabase, the app uses built-in simulated answers. AI output is always a *proposal*: nothing changes plans, targets or the food log until the user accepts. Provider details are in `docs/AI_PROVIDER.md`.
+The client never holds a provider key. Signed-in users call the Supabase `ai` Edge Function (the server AI gateway). The admin picks the provider and model globally (`app_config`); the function holds the secret keys and meters per-user quotas. Without Supabase, the app uses built-in simulated answers. AI output is always a *proposal*: nothing changes plans, targets or the food log until the user accepts. Quotas: per user, per network (IP, stored hashed) and global per day, all in `app_config`; failed provider calls are refunded. Provider details and the verified model ids are in `docs/AI_PROVIDER.md`.
 
 ## Conventions
 
 - Weights are stored in kg, heights in cm; convert only for display (`src/lib/units.ts`). Dates are local `YYYY-MM-DD` strings (`src/lib/dates.ts`); timestamps are ISO UTC.
 - Keep logic in `src/lib` as pure functions with tests; keep screens thin.
 - Don't swallow errors: use `log.warn` / `log.error` from `src/lib/log.ts`.
-- Secrets never go in `EXPO_PUBLIC_*` variables or client code. Only the Supabase URL, publishable key and an optional USDA key are public.
+- Secrets never go in `EXPO_PUBLIC_*` variables or client code. Only the Supabase URL, publishable key, an optional USDA key and an optional Sentry DSN are public.
+- Never send health data or personal details to third parties other than the configured AI provider; error reports are scrubbed in `errorReporting.ts`.
 - Tests run in `America/New_York` (set in `jest.global-setup.js`) so date logic is exercised across DST.
 
 ## Expo specifics
