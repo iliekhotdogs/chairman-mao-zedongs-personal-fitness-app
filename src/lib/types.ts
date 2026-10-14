@@ -307,5 +307,23 @@ export interface Settings {
   aiMode: 'simulated' | 'server';
   /** Retained for old saved settings; the server picks the photo model. */
   aiModels?: { vision: string; chat: string };
+  /** Default rest between sets; a plan's own rest prescription still wins. */
+  rest?: RestPrefs;
   updatedAt: ISODateTime;
+}
+
+export interface RestPrefs {
+  compoundSec: number;
+  accessorySec: number;
+}
+
+// ---------- Progress photos ----------
+
+export interface ProgressPhoto extends SyncMeta {
+  date: ISODate;
+  /** local file / data: URL until uploaded, then `storage:<bucket>/<path>` */
+  uri: string;
+  note?: string;
+  weightKg?: number;
+  createdAt?: ISODateTime;
 }

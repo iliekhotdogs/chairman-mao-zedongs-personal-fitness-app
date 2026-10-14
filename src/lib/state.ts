@@ -1,6 +1,6 @@
 import type {
   ActivityRecord, ChatMessage, DayAdjustment, FoodEntry, Insight, IntegrationState, ISODate, NotificationRecord,
-  NutritionTargets, Profile, Proposal, Settings, SyncMeta, WeightEntry, WorkoutDay, WorkoutPlan, WorkoutSession,
+  NutritionTargets, Profile, ProgressPhoto, Proposal, Settings, SyncMeta, WeightEntry, WorkoutDay, WorkoutPlan, WorkoutSession,
 } from './types';
 
 export const STATE_VERSION = 1;
@@ -20,6 +20,7 @@ export interface AppState {
   workoutOverrides: WorkoutOverride[];
   foodLog: FoodEntry[];
   weights: WeightEntry[];
+  progressPhotos: ProgressPhoto[];
   plan?: WorkoutPlan;
   routines: WorkoutPlan[]; // user-created routines
   sessions: WorkoutSession[];
@@ -55,6 +56,7 @@ export function emptyState(deviceId: string, now: string): AppState {
     workoutOverrides: [],
     foodLog: [],
     weights: [],
+    progressPhotos: [],
     routines: [],
     sessions: [],
     activity: [],
@@ -70,7 +72,7 @@ export function emptyState(deviceId: string, now: string): AppState {
 }
 
 /** Collections that sync record-by-record (each item has id/updatedAt/deleted). */
-export const SYNCED_COLLECTIONS = ['dayAdjustments', 'workoutOverrides', 'foodLog', 'weights', 'routines', 'sessions', 'activity', 'proposals', 'chat', 'notifications'] as const;
+export const SYNCED_COLLECTIONS = ['dayAdjustments', 'workoutOverrides', 'foodLog', 'weights', 'routines', 'sessions', 'activity', 'proposals', 'chat', 'notifications', 'progressPhotos'] as const;
 export type SyncedCollection = (typeof SYNCED_COLLECTIONS)[number];
 
 /** Single documents that sync as a whole. */

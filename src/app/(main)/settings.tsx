@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, Columns, Expandable, Field, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, Toggle } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, Columns, Expandable, Field, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Toggle } from '@/components/ui';
 import { useStore, clearLocalData } from '@/store/AppStore';
 import { AccountCard } from '@/components/AccountCard';
 import { AiSettings } from '@/components/AiSettings';
@@ -24,6 +24,7 @@ import { deleteCloudData } from '@/lib/sync/sync';
 import { csvExports, jsonExport } from '@/lib/export';
 import { saveExportFile } from '@/lib/exportFile';
 import { clearIntegrationConfig } from '@/lib/integrations/config';
+import { formatRest, REST_MAX_SEC, REST_MIN_SEC, REST_STEP_SEC, sanitizeRestPrefs } from '@/lib/workouts/restTimer';
 import type { BodyArea, GoalPriority, NutritionTargets, Profile } from '@/lib/types';
 
 const GOALS: { value: GoalPriority; label: string }[] = [
@@ -41,6 +42,7 @@ export default function Settings() {
             <TargetsSection />
             <ProfileSection />
             <CoachSection />
+            <RestSection />
             <AiSettings />
           </Stack>,
           <Stack key="r" gap={Space.lg}>
@@ -205,6 +207,33 @@ function CoachSection() {
       <Text variant="smallStrong">Tone</Text>
       <OptionCard title="Supportive coach" body="Encouraging and explains the why." selected={state.settings.coachTone === 'supportive'} onPress={() => doAct({ type: 'UPDATE_SETTINGS', patch: { coachTone: 'supportive' }, now: nowISO() })} />
       <OptionCard title="Direct trainer" body="Short, to the point, no fluff." selected={state.settings.coachTone === 'direct'} onPress={() => doAct({ type: 'UPDATE_SETTINGS', patch: { coachTone: 'direct' }, now: nowISO() })} />
+    </Card>
+  );
+}
+
+function RestSection() {
+  const { state } = useStore();
+  const doAct = useAct();
+  const rest = sanitizeRestPrefs(state.settings.rest);
+  const set = (patch: Partial<typeof rest>) => doAct({ type: 'UPDATE_SETTINGS', patch: { rest: sanitizeRestPrefs({ ...rest, ...patch }) }, now: nowISO() });
+  return (
+    <Card style={{ gap: Space.sm }}>
+      <Text variant="h3">Rest timer</Text>
+      <Muted variant="small">Starts after every logged set. Plan days with their own rest times use those instead.</Muted>
+      <Row>
+        <Stack gap={0} style={{ flex: 1 }}>
+          <Text variant="bodyStrong">Compound lifts</Text>
+          <Muted variant="small">Squat, bench, rows, presses</Muted>
+        </Stack>
+        <Stepper value={rest.compoundSec} onChange={(compoundSec) => set({ compoundSec })} step={REST_STEP_SEC} min={REST_MIN_SEC} max={REST_MAX_SEC} format={formatRest} />
+      </Row>
+      <Row>
+        <Stack gap={0} style={{ flex: 1 }}>
+          <Text variant="bodyStrong">Accessories</Text>
+          <Muted variant="small">Curls, raises, isolation work</Muted>
+        </Stack>
+        <Stepper value={rest.accessorySec} onChange={(accessorySec) => set({ accessorySec })} step={REST_STEP_SEC} min={REST_MIN_SEC} max={REST_MAX_SEC} format={formatRest} />
+      </Row>
     </Card>
   );
 }

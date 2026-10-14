@@ -1,7 +1,7 @@
 import type { AppState, WorkoutOverride } from './state';
 import type {
   ActivityRecord, ChatMessage, FoodEntry, GoalPriority, Insight, IntegrationState, LoggedSet, NotificationRecord,
-  NutritionTargets, Profile, Proposal, Settings, WeightEntry, WorkoutPlan, WorkoutSession, ISODate,
+  NutritionTargets, Profile, ProgressPhoto, Proposal, Settings, WeightEntry, WorkoutPlan, WorkoutSession, ISODate,
 } from './types';
 import { mergeActivity } from './activity/activity';
 import { newId } from './id';
@@ -18,6 +18,8 @@ export type Action =
   | { type: 'DELETE_FOOD'; id: string; now: string }
   | { type: 'LOG_WEIGHT'; entry: WeightEntry }
   | { type: 'DELETE_WEIGHT'; id: string; now: string }
+  | { type: 'ADD_PROGRESS_PHOTO'; photo: ProgressPhoto }
+  | { type: 'DELETE_PROGRESS_PHOTO'; id: string; now: string }
   | { type: 'SET_PLAN'; plan: WorkoutPlan; confirmed: boolean }
   | { type: 'SAVE_ROUTINE'; routine: WorkoutPlan }
   | { type: 'DELETE_ROUTINE'; id: string; now: string }
@@ -90,6 +92,17 @@ export function checkAction(state: AppState, action: Action): void {
     }
     case 'LOG_WEIGHT':
       if (!(action.entry.weightKg > 20 && action.entry.weightKg < 400)) throw new RuleViolation('That body weight looks out of range.');
+      return;
+    case 'ADD_PROGRESS_PHOTO': {
+      const p = action.photo;
+      if (!p.uri) throw new RuleViolation('The photo could not be saved. Try again.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date)) throw new RuleViolation('Pick a date for this photo.');
+      if (p.weightKg !== undefined && !(p.weightKg > 20 && p.weightKg < 400)) throw new RuleViolation('That body weight looks out of range.');
+      if (p.note !== undefined && p.note.length > 280) throw new RuleViolation('Keep the note under 280 characters.');
+      return;
+    }
+    case 'DELETE_PROGRESS_PHOTO':
+      if (!state.progressPhotos.some((p) => p.id === action.id && !p.deleted)) throw new RuleViolation('Photo not found. It may have been deleted on another device.');
       return;
     default:
       return;
@@ -174,6 +187,11 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case 'DELETE_WEIGHT':
       return { ...state, weights: tombstone(state.weights, action.id, action.now) };
+
+    case 'ADD_PROGRESS_PHOTO':
+      return { ...state, progressPhotos: upsert(state.progressPhotos, action.photo) };
+    case 'DELETE_PROGRESS_PHOTO':
+      return { ...state, progressPhotos: tombstone(state.progressPhotos, action.id, action.now) };
 
     case 'SET_PLAN':
       return { ...state, plan: action.plan };

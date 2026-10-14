@@ -8,6 +8,9 @@ import { ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
 import { useSpeech } from '@/hooks/useSpeech';
+import { useRestTimer, type RestTimerControls } from '@/hooks/useRestTimer';
+import { RestTimerCard } from '@/components/RestTimer';
+import { defaultRestSec } from '@/lib/workouts/restTimer';
 import { activeSession, live, workoutForDay } from '@/lib/selectors';
 import { EXERCISES, exerciseName, EXERCISE_BY_ID, formatPrescription } from '@/lib/workouts/exercises';
 import { recommendNext } from '@/lib/workouts/progression';
@@ -123,6 +126,11 @@ function SessionView({ session }: { session: WorkoutSession }) {
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [focusEx, setFocusEx] = useState<string | undefined>();
+  const rest = useRestTimer();
+  const startRestAfter = (exerciseId: string) => {
+    if (finished) return;
+    rest.start(defaultRestSec(EXERCISE_BY_ID[exerciseId], planned?.exercises.find((e) => e.exerciseId === exerciseId), state.settings.rest), exerciseId);
+  };
 
   const exerciseIds = useMemo(() => {
     const ids = [...(planned?.exercises.map((e) => e.exerciseId) ?? [])];
@@ -140,6 +148,7 @@ function SessionView({ session }: { session: WorkoutSession }) {
   const finish = () => {
     const now = nowISO();
     if (!doAct({ type: 'FINISH_SESSION', sessionId: session.id, now }, 'Workout saved')) return;
+    rest.skip();
     const after: AppState = { ...state, sessions: state.sessions.map((s) => (s.id === session.id ? { ...s, finishedAt: now } : s)) };
     const p = progressionProposal(after, { ...session, finishedAt: now });
     if (p) doAct({ type: 'ADD_PROPOSALS', proposals: [p] });
@@ -165,12 +174,12 @@ function SessionView({ session }: { session: WorkoutSession }) {
           <Stack key="ex" gap={Space.md}>
             {exerciseIds.length === 0 ? <EmptyState icon="barbell-outline" title="No exercises yet" body="Add an exercise, or log a set by voice or text." /> : null}
             {exerciseIds.map((exId) => (
-              <ExerciseBlock key={exId} session={session} exerciseId={exId} planned={planned?.exercises.find((e) => e.exerciseId === exId)} highlighted={!finished && exId === currentEx} onFocus={() => setFocusEx(exId)} />
+              <ExerciseBlock key={exId} session={session} exerciseId={exId} planned={planned?.exercises.find((e) => e.exerciseId === exId)} highlighted={!finished && exId === currentEx} onFocus={() => setFocusEx(exId)} onLogged={() => startRestAfter(exId)} rest={!finished && rest.timer?.exerciseId === exId ? rest : undefined} />
             ))}
             <Button title="Add exercise" kind="secondary" icon="add" onPress={() => setPickerOpen(true)} />
           </Stack>,
           <Stack key="voice" gap={Space.md}>
-            <VoiceLogger session={session} currentExerciseId={currentEx} />
+            <VoiceLogger session={session} currentExerciseId={currentEx} onLogged={startRestAfter} />
             {!finished ? (
               <Button title="Discard workout" kind="danger" size="sm" icon="trash-outline" onPress={() => setConfirmDiscard(true)} />
             ) : (
@@ -219,7 +228,7 @@ function SessionView({ session }: { session: WorkoutSession }) {
   );
 }
 
-function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: { session: WorkoutSession; exerciseId: string; planned?: PlannedExercise; highlighted: boolean; onFocus: () => void }) {
+function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onLogged, rest }: { session: WorkoutSession; exerciseId: string; planned?: PlannedExercise; highlighted: boolean; onFocus: () => void; onLogged: () => void; rest?: RestTimerControls }) {
   const { state } = useStore();
   const doAct = useAct();
   const units = state.settings.units;
@@ -240,7 +249,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: {
   const log = () => {
     if (weight === undefined) return;
     const now = nowISO();
-    doAct({ type: 'ADD_SETS', sessionId: session.id, now, sets: [{ id: newId(), exerciseId, weightKg: toKg(weight, units), reps, via: 'manual', loggedAt: now }] });
+    if (doAct({ type: 'ADD_SETS', sessionId: session.id, now, sets: [{ id: newId(), exerciseId, weightKg: toKg(weight, units), reps, via: 'manual', loggedAt: now }] })) onLogged();
     onFocus();
   };
 
@@ -294,6 +303,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: {
           </Row>
         </View>
       </Row>
+      {rest ? <RestTimerCard rest={rest} label={exerciseName(exerciseId)} /> : null}
       <EditSetSheet key={editing?.id ?? 'none'} set={editing} onClose={() => setEditing(null)} sessionId={session.id} />
     </Card>
   );
@@ -329,7 +339,7 @@ function EditSetSheet({ set, onClose, sessionId }: { set: LoggedSet | null; onCl
   );
 }
 
-function VoiceLogger({ session, currentExerciseId }: { session: WorkoutSession; currentExerciseId?: string }) {
+function VoiceLogger({ session, currentExerciseId, onLogged }: { session: WorkoutSession; currentExerciseId?: string; onLogged: (exerciseId: string) => void }) {
   const { state } = useStore();
   const doAct = useAct();
   const units = state.settings.units;
@@ -362,6 +372,7 @@ function VoiceLogger({ session, currentExerciseId }: { session: WorkoutSession; 
     const weightKg = toKg(parsed.weight, unitSys);
     const sets: LoggedSet[] = Array.from({ length: parsed.sets }, (_, i) => ({ id: newId(), exerciseId: parsed.exerciseId!, weightKg, reps: parsed.reps!, via: 'voice', loggedAt: new Date(Date.now() + i).toISOString() }));
     if (doAct({ type: 'ADD_SETS', sessionId: session.id, sets, now }, `Logged ${sets.length} set${sets.length > 1 ? 's' : ''}`)) {
+      onLogged(parsed.exerciseId);
       setParsed(null);
       setText('');
     }
