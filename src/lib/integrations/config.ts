@@ -51,9 +51,14 @@ export async function loadIntegrationConfig(): Promise<void> {
 
 export function getIntegrationConfig(): IntegrationConfig { return saved; }
 
+// Build-time values are often pasted into hosting dashboards with quotes or a trailing newline.
+function cleanEnv(value: string | undefined): string {
+  return (value ?? '').trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+}
+
 export function getSupabaseConfig() {
-  const builtUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-  const builtKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  const builtUrl = cleanEnv(process.env.EXPO_PUBLIC_SUPABASE_URL).replace(/\/$/, '');
+  const builtKey = cleanEnv(process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY) || cleanEnv(process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
   return {
     url: builtUrl && builtKey ? builtUrl : saved.supabaseUrl,
     key: builtUrl && builtKey ? builtKey : saved.supabaseKey,

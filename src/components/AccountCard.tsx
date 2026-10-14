@@ -56,7 +56,11 @@ export function AccountCard({ intro }: { intro?: string }) {
       const message = await task();
       if (message) toast(message);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Something went wrong.');
+      const message = e instanceof Error ? e.message : 'Something went wrong.';
+      // Supabase's wording when the build has a wrong or mistyped publishable key.
+      setErr(/invalid api key/i.test(message)
+        ? "Accounts are unavailable: this site's Supabase key is misconfigured. Check EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY and redeploy."
+        : message);
     } finally {
       setBusy(false);
     }
