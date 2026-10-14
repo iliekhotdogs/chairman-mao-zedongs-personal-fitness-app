@@ -85,23 +85,24 @@ function Gallery({ photos, onOpen }: { photos: ProgressPhoto[]; onOpen: (i: numb
   const step = slideW + gap;
   const current = Math.min(index, photos.length - 1);
 
-  // open on the newest photo
+  // The newest photo sits at the end; open there.
+  const maxX = Math.max(0, photos.length * step - gap - width);
   const didInit = React.useRef(false);
   useEffect(() => {
     if (!slideW || didInit.current) return;
     didInit.current = true;
-    ref.current?.scrollTo({ x: (photos.length - 1) * step, animated: false });
-  }, [slideW, step, photos.length]);
+    ref.current?.scrollTo({ x: maxX, animated: false });
+  }, [slideW, maxX]);
 
+  // Counter follows the slide snapped to the left edge; at the very end it is the newest photo.
+  const indexAt = (x: number) => (x >= maxX - 2 ? photos.length - 1 : Math.max(0, Math.min(photos.length - 1, Math.round(x / step))));
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
-    if (!step) return;
-    const i = Math.round(e.nativeEvent.contentOffset.x / step);
-    setIndex(Math.max(0, Math.min(photos.length - 1, i)));
+    if (step) setIndex(indexAt(e.nativeEvent.contentOffset.x));
   };
 
   const go = (d: number) => {
     const i = Math.max(0, Math.min(photos.length - 1, current + d));
-    ref.current?.scrollTo({ x: i * step, animated: true });
+    ref.current?.scrollTo({ x: Math.min(maxX, i * step), animated: true });
     setIndex(i);
   };
 
@@ -134,7 +135,7 @@ function Gallery({ photos, onOpen }: { photos: ProgressPhoto[]; onOpen: (i: numb
           disableIntervalMomentum
           onScroll={onScroll}
           scrollEventThrottle={32}
-          contentContainerStyle={{ gap, paddingRight: width - slideW }}>
+          contentContainerStyle={{ gap }}>
           {photos.map((p, i) => (
             <Pressable key={p.id} onPress={() => onOpen(i)} accessibilityRole="imagebutton" accessibilityLabel={`Progress photo from ${longDate(p.date)}${p.weightKg ? `, ${displayWeight(p.weightKg, units)}` : ''}. Open full view`} style={({ pressed }) => [styles.slide, { width: slideW, opacity: pressed ? 0.9 : 1, borderColor: i === current ? C.primaryBorder : C.border }]}>
               <PhotoImage uri={p.uri} style={{ width: '100%', height: '100%' }} />
@@ -182,7 +183,7 @@ function Compare({ photos }: { photos: ProgressPhoto[] }) {
   return (
     <Card style={{ gap: Space.md }}>
       <Row wrap gap={Space.md} align="flex-end">
-        <Text variant="h3" style={{ flex: 1 }}>Compare</Text>
+        <Text variant="h2" style={{ flex: 1 }}>Compare</Text>
         <Row gap={Space.lg}>
           <Stack gap={0}>
             <Text variant="eyebrow" color={C.textSecondary}>Days apart</Text>
@@ -200,7 +201,7 @@ function Compare({ photos }: { photos: ProgressPhoto[] }) {
           ) : null}
         </Row>
       </Row>
-      <Row align="flex-start" gap={Space.md}>
+      <Row align="flex-start" gap={Space.md} style={{ width: '100%', maxWidth: 760, alignSelf: 'center' }}>
         {side('Before', before, before.id, setBeforeId)}
         {side('After', after, after.id, setAfterId)}
       </Row>
