@@ -13,7 +13,7 @@ type Stats = {
 };
 type Model = { id: string; label: string };
 type ProviderEntry = { id: string; label: string; keyEnv: string; keySet: boolean; chatModels: Model[]; visionModels: Model[] };
-type AiConfig = { provider: string; chat_model: string; vision_model: string; per_user_daily_limit: number; global_daily_limit: number; ai_enabled: boolean };
+type AiConfig = { provider: string; chat_model: string; vision_model: string; per_user_daily_limit: number; global_daily_limit: number; per_ip_daily_limit?: number; ai_enabled: boolean };
 type Invite = { code: string; created_at: string; expires_at: string | null; used_at: string | null; used_email: string | null; note: string | null; status: 'open' | 'used' | 'expired' };
 type AdminUser = { user_id: string; email: string; created_at: string; last_sign_in_at: string | null; email_confirmed_at: string | null; role: 'admin' | 'user'; disabled: boolean; ai_requests_today: number };
 
@@ -149,6 +149,9 @@ function AiConfigSection() {
           </Row>
           <NumberField label="Requests per user per day" value={draft.per_user_daily_limit} onChange={(v) => setDraft({ ...draft, per_user_daily_limit: Math.max(0, Math.round(v ?? 0)) })} />
           <NumberField label="Requests for everyone per day" value={draft.global_daily_limit} onChange={(v) => setDraft({ ...draft, global_daily_limit: Math.max(0, Math.round(v ?? 0)) })} />
+          {draft.per_ip_daily_limit !== undefined ? (
+            <NumberField label="Requests per network (IP) per day, 0 = no cap" value={draft.per_ip_daily_limit} onChange={(v) => setDraft({ ...draft, per_ip_daily_limit: Math.max(0, Math.round(v ?? 0)) })} />
+          ) : null}
           <Row gap={Space.sm}>
             <Button title="Save AI settings" loading={busy} disabled={!changed} onPress={save} />
             {changed ? <Button title="Discard" kind="ghost" onPress={() => setDraft(saved)} /> : null}

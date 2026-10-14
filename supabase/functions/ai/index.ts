@@ -4,13 +4,24 @@
 // GEMINI_API_KEY, NVIDIA_API_KEY; optional FDC_API_KEY. Never place them in Expo env vars.
 import type { User } from 'npm:@supabase/supabase-js@2';
 import { admin, profileOf, requestUser } from '../_shared/auth.ts';
-import { BodyError, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
+import { BodyError, clientIp, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
 import { findModel, modelLabel, PROVIDERS, resolveConfig, type AiConfig } from '../_shared/providers.ts';
 
 const safeNumber = (value: unknown, max: number) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max ? value : 0;
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.slice(0, max) : '';
 const MAX_BODY_BYTES = 7_200_000;
 const AI_OFF = 'Coach AI is switched off by the app owner right now. Built-in answers still work.';
+
+/** Keyed SHA-256 of the client IP, so the per-IP table never stores raw addresses.
+ * Keyed with the service-role key (server-only); null when the IP is unknown. */
+async function ipHash(request: Request): Promise<string | null> {
+  const ip = clientIp(request);
+  if (ip === 'unknown') return null;
+  const secret = new TextEncoder().encode(Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? 'fitcoach');
+  const key = await crypto.subtle.importKey('raw', secret, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+  const mac = new Uint8Array(await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(ip)));
+  return Array.from(mac, (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
 
 async function loadConfig(): Promise<AiConfig> {
   const { data, error } = await admin.from('app_config').select('*').eq('id', 1).maybeSingle();
@@ -229,11 +240,26 @@ Deno.serve(async (request) => {
   if (!Deno.env.get(info.keyEnv)) return json({ error: `${info.label} is not configured on the server.` }, 503);
 
   const day = utcDay();
+  // Per-network cap first (0 = off). Requests with no known client IP skip it; the
+  // per-user and global caps below still apply.
+  const ip = config.per_ip_daily_limit > 0 ? await ipHash(request) : null;
+  if (ip) {
+    const { data: ipAllowed, error: ipError } = await admin.rpc('claim_ai_ip_request', { p_ip_hash: ip, p_day: day, p_limit: config.per_ip_daily_limit });
+    if (ipError) return json({ error: 'AI metering is not ready. Apply the latest SQL migration first.' }, 503);
+    if (!ipAllowed) return json({ error: 'Too many AI requests from this network today. Try again tomorrow.' }, 429);
+  }
+  const releaseIp = async () => {
+    if (!ip) return;
+    const { error } = await admin.rpc('release_ai_ip_request', { p_ip_hash: ip, p_day: day });
+    if (error) console.error(`IP quota release failed: ${error.message}`);
+  };
+
   const { data: claim, error: claimError } = await admin.rpc('claim_ai_request', {
     p_user: user.id, p_day: day,
     p_user_limit: config.per_user_daily_limit,
     p_global_limit: config.global_daily_limit,
   });
+  if (claimError || claim !== 'ok') await releaseIp();
   if (claimError) return json({ error: 'AI metering is not ready. Apply the account SQL setup first.' }, 503);
   // A limit of 0 also switches AI off.
   if (claim === 'disabled') return json({ error: AI_OFF }, 503);
@@ -246,6 +272,7 @@ Deno.serve(async (request) => {
     // A failed or unusable provider reply does not use up the user's allowance.
     const { error: releaseError } = await admin.rpc('release_ai_request', { p_user: user.id, p_day: day });
     if (releaseError) console.error(`Quota release failed: ${releaseError.message}`);
+    await releaseIp();
     return json({ error: error instanceof Error ? error.message : 'AI request failed.' }, 502);
   }
 });
