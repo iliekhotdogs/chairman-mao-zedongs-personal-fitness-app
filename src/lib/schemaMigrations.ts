@@ -13,6 +13,15 @@ type Raw = Record<string, unknown>;
 export const MIGRATIONS: Record<number, (s: Raw) => Raw> = {
   // v0: saved before the version field existed. Same shape; just stamp it.
   0: (s) => ({ ...s, version: 1 }),
+  1: (s) => ({
+    ...s,
+    version: 2,
+    foodLog: Array.isArray(s.foodLog) ? s.foodLog.map((entry) => {
+      if (!entry || typeof entry !== 'object') return entry;
+      const e = entry as Record<string, unknown>;
+      return { ...e, estimateQuality: e.estimateQuality ?? (e.origin === 'photo' ? { provider: 'Earlier estimate', overallConfidence: 'low', corrected: false, notes: ['Estimate quality was not recorded in this version.'] } : undefined) };
+    }) : s.foodLog,
+  }),
 };
 
 /** Run every migration from the stored version up to `target`. Unknown/newer versions pass through. */

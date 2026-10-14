@@ -95,6 +95,9 @@ export interface FoodItem {
   carbsG: number;
   fatG: number;
   source: NutritionSource;
+  confidence?: Confidence;
+  portionAssumption?: string;
+  reviewRequired?: boolean;
 }
 
 export interface FoodEntry extends SyncMeta {
@@ -104,6 +107,7 @@ export interface FoodEntry extends SyncMeta {
   origin: 'photo' | 'manual';
   photoUri?: string;
   hint?: string;
+  estimateQuality?: { provider: string; overallConfidence: Confidence; corrected: boolean; notes: string[] };
   /** set only when the user explicitly accepted; logging requires it */
   confirmedAt: ISODateTime;
   createdAt: ISODateTime;
@@ -127,6 +131,7 @@ export interface FoodEstimate {
   overallConfidence: Confidence;
   followUpQuestion?: string;
   notes: string[];
+  rejectedItems?: number;
   simulated: boolean;
   provider: string;
   /** Set when the real AI failed and the built-in estimate was used instead. */
@@ -203,6 +208,9 @@ export interface WorkoutSession extends SyncMeta {
   finishedAt?: ISODateTime;
   sets: LoggedSet[];
   notes?: string;
+  effort?: number;
+  pain?: boolean;
+  painNote?: string;
 }
 
 // ---------- Activity / wearables ----------

@@ -3,7 +3,7 @@ import type {
   NutritionTargets, Profile, ProgressPhoto, Proposal, Settings, SyncMeta, WeightEntry, WorkoutDay, WorkoutPlan, WorkoutSession,
 } from './types';
 
-export const STATE_VERSION = 1;
+export const STATE_VERSION = 2;
 
 /** An approved one-day workout replacement (e.g. a 20-minute version). */
 export interface WorkoutOverride extends SyncMeta {

@@ -20,7 +20,7 @@ const SUPPORT = [
 ];
 
 export default function Activity() {
-  const { state, today } = useStore();
+  const { state, today, sync } = useStore();
   const doAct = useAct();
   const [manualOpen, setManualOpen] = useState(false);
   const [steps, setSteps] = useState<number | undefined>();
@@ -63,11 +63,11 @@ export default function Activity() {
               <Row wrap gap={Space.sm}>
                 {hc.status === 'connected' ? (
                   <>
-                    <Button title="Sync now" kind="secondary" size="sm" icon="refresh" onPress={connectSimulated} />
+                    {!sync.configured && isSim ? <Button title="Sync now" kind="secondary" size="sm" icon="refresh" onPress={connectSimulated} /> : null}
                     <Button title="Disconnect" kind="danger" size="sm" onPress={() => setDisconnectOpen(true)} />
                   </>
                 ) : (
-                  <Button title="Use simulated data" kind="secondary" size="sm" icon="flask-outline" onPress={connectSimulated} />
+                  !sync.configured ? <Button title="Use simulated data" kind="secondary" size="sm" icon="flask-outline" onPress={connectSimulated} /> : null
                 )}
                 <Button title="Add steps manually" kind="secondary" size="sm" icon="create-outline" onPress={() => setManualOpen(true)} />
               </Row>
@@ -78,7 +78,7 @@ export default function Activity() {
               <Muted variant="small">When several devices report the same day, one is counted (manual entries first, then the source with the most steps) so nothing is double counted.</Muted>
             </Card>
             <Expandable title="Supported integrations & limitations" icon="information-circle-outline">
-              {SUPPORT.map(([n, s, d]) => (
+              {SUPPORT.filter(([n]) => !sync.configured || n !== 'Simulated data').map(([n, s, d]) => (
                 <Stack key={n} gap={2} style={{ paddingVertical: 4 }}>
                   <Row gap={6}>
                     <Text variant="smallStrong">{n}</Text>

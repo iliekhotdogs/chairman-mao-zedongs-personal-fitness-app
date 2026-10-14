@@ -133,6 +133,9 @@ describe('workout logging', () => {
     const done = reducer(good, { type: 'FINISH_SESSION', sessionId: 's1', now: NOW });
     expect(done.activeSessionId).toBeUndefined();
     expect(done.sessions[0].finishedAt).toBe(NOW);
+    const checked = reducer(good, { type: 'FINISH_SESSION', sessionId: 's1', now: NOW, effort: 9, pain: true, painNote: 'sharp knee pain' });
+    expect(checked.sessions[0]).toMatchObject({ effort: 9, pain: true, painNote: 'sharp knee pain' });
+    expect(reducer(good, { type: 'FINISH_SESSION', sessionId: 's1', now: NOW, effort: 11 })).toBe(good);
   });
 
   it('keeps one weigh-in per day', () => {

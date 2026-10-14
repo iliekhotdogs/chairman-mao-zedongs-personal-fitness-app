@@ -61,7 +61,7 @@ export function computeTargets(profile: Pick<Profile, 'sex' | 'birthYear' | 'hei
   const training = averageDailyTrainingKcal(profile.trainingDays.length, profile.sessionMinutes);
   const maintenance = Math.round(bmr * NEAT_FACTOR[profile.dailyActivity] + training);
   const calories = roundTo(maintenance * (1 + GOAL_ADJUST[profile.goal]), 10);
-  const floor = profile.sex === 'female' ? 1200 : profile.sex === 'male' ? 1500 : 1350;
+  const floor = calorieFloor(profile.sex);
   const safeCalories = Math.max(calories, floor);
   const macros = macrosFor(safeCalories, weightKg, profile.goal);
   return {
@@ -73,6 +73,10 @@ export function computeTargets(profile: Pick<Profile, 'sex' | 'birthYear' | 'hei
     method: `Mifflin–St Jeor BMR × ${NEAT_FACTOR[profile.dailyActivity]} (daily activity) + ${training} kcal/day planned training, ${goalAdjustLabel(profile.goal)}`,
     updatedAt: nowISO(),
   };
+}
+
+export function calorieFloor(sex: Profile['sex']): number {
+  return sex === 'female' ? 1200 : sex === 'male' ? 1500 : 1350;
 }
 
 export function macrosFor(calories: number, weightKg: number, goal: GoalPriority): MacroTargets {

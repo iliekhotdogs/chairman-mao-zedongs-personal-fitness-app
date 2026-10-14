@@ -125,6 +125,9 @@ function SessionView({ session }: { session: WorkoutSession }) {
   const [extra, setExtra] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const [effort, setEffort] = useState<number | undefined>();
+  const [pain, setPain] = useState(false);
+  const [painNote, setPainNote] = useState('');
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [focusEx, setFocusEx] = useState<string | undefined>();
   const rest = useRestTimer();
@@ -146,10 +149,11 @@ function SessionView({ session }: { session: WorkoutSession }) {
 
   const finish = () => {
     const now = nowISO();
-    if (!doAct({ type: 'FINISH_SESSION', sessionId: session.id, now }, 'Workout saved')) return;
+    if (!doAct({ type: 'FINISH_SESSION', sessionId: session.id, now, effort, pain, painNote: painNote.trim() || undefined }, 'Workout saved')) return;
     rest.skip();
-    const after: AppState = { ...state, sessions: state.sessions.map((s) => (s.id === session.id ? { ...s, finishedAt: now } : s)) };
-    const p = progressionProposal(after, { ...session, finishedAt: now });
+    const completed = { ...session, finishedAt: now, effort, pain, painNote: painNote.trim() || undefined };
+    const after: AppState = { ...state, sessions: state.sessions.map((s) => (s.id === session.id ? completed : s)) };
+    const p = progressionProposal(after, completed);
     if (p) doAct({ type: 'ADD_PROPOSALS', proposals: [p] });
     setConfirmFinish(false);
     router.replace({ pathname: '/workouts/session', params: { id: session.id } });
@@ -201,6 +205,10 @@ function SessionView({ session }: { session: WorkoutSession }) {
           </Row>
         }>
         <Muted>{totalSets === 0 ? 'Log at least one set before finishing, or discard this workout.' : `${totalSets} sets logged. The coach will suggest next-session targets, and you choose whether to apply them.`}</Muted>
+        <NumberField label="Effort (1–10, optional)" value={effort} onChange={(value) => setEffort(value && value >= 1 && value <= 10 ? value : undefined)} />
+        <Button title={pain ? 'Pain during workout: yes' : 'Pain during workout: no'} kind={pain ? 'danger' : 'secondary'} onPress={() => setPain(!pain)} />
+        {pain ? <Field label="Where and what did you feel?" value={painNote} onChangeText={setPainNote} placeholder="Describe the pain" /> : null}
+        {pain ? <Banner kind="warning">The coach will not suggest a heavier workout when pain is reported.</Banner> : null}
       </Sheet>
       <Sheet
         visible={confirmDiscard}

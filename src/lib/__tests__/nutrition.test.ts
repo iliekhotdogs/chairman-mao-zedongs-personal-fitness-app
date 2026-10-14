@@ -106,11 +106,12 @@ describe('food confirmation rule', () => {
     expect(() => confirmEstimate({ estimate, items: [{ ...estimate.items[0], calories: -5 }], meal: 'lunch', date: '2026-10-02', userAccepted: true })).toThrow();
   });
 
-  it('logs accepted estimates with a confirmation timestamp and no AI-only fields', () => {
+  it('logs accepted estimates with a confirmation timestamp and review metadata', () => {
     const entry = confirmEstimate({ estimate, items: estimate.items, meal: 'lunch', date: '2026-10-02', userAccepted: true });
     expect(entry.confirmedAt).toBeTruthy();
     expect(entry.origin).toBe('photo');
-    expect('confidence' in entry.items[0]).toBe(false);
+    expect(entry.items[0].confidence).toBe(estimate.items[0].confidence);
+    expect(entry.estimateQuality?.provider).toBe(estimate.provider);
   });
 
   it('marks macro edits as user-entered', () => {

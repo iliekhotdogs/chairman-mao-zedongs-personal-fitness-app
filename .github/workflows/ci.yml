@@ -34,8 +34,6 @@ jobs:
     name: Deno type-check (supabase/functions)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # The Edge Functions are being reworked; report problems without blocking merges.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: denoland/setup-deno@v2

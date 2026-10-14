@@ -424,23 +424,23 @@ function DeleteAccountSection() {
 }
 
 function AboutSection() {
-  const { state, today } = useStore();
+  const { state, today, sync } = useStore();
   const imageEngine = useAiEngine('food');
   const chatEngine = useAiEngine('chat');
   const doAct = useAct();
   const [confirm, setConfirm] = useState(false);
   return (
     <Card style={{ gap: Space.sm }}>
-      <Text variant="h3">Prototype &amp; design review</Text>
+      <Text variant="h3">{sync.configured ? 'Private pilot' : 'Prototype & design review'}</Text>
       <Row wrap gap={6}>
         <Badge kind={imageEngine === 'simulated' ? 'simulated' : 'info'} label={imageEngine === 'server' ? 'Server images' : 'Built-in image estimates'} />
         <Badge kind={chatEngine === 'simulated' ? 'simulated' : 'info'} label={chatEngine === 'server' ? 'Server chat' : 'Built-in chat'} />
-        <Badge kind="simulated" label="Simulated health sync" />
+        {!sync.configured ? <Badge kind="simulated" label="Simulated health sync" /> : null}
         <Badge kind="info" label="USDA lookup is live" />
       </Row>
       <Row wrap gap={Space.sm}>
         {__DEV__ ? <Button title="UI states gallery" kind="secondary" size="sm" icon="color-palette-outline" onPress={() => router.push('/states')} /> : null}
-        <Button title="Load sample data" kind="ghost" size="sm" icon="flask-outline" onPress={() => setConfirm(true)} />
+        {!sync.configured ? <Button title="Load sample data" kind="ghost" size="sm" icon="flask-outline" onPress={() => setConfirm(true)} /> : null}
       </Row>
       <Muted variant="small">FitCoach v1.0.0 (prototype) · Not medical advice. Consult a professional for injuries, medical conditions, or eating-disorder concerns.</Muted>
       <Sheet

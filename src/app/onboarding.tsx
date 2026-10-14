@@ -162,7 +162,7 @@ export default function Onboarding() {
           <Field label="What should we call you? (optional)" value={name} onChangeText={setName} placeholder="First name" autoComplete="given-name" />
           <Row wrap gap={Space.sm}>
             <Button title="Get started" size="lg" icon="arrow-forward" onPress={next} loading={firstSyncPending} disabled={firstSyncPending} />
-            <Button title="Explore with sample data" kind="secondary" size="lg" icon="flask-outline" onPress={loadSample} disabled={firstSyncPending} />
+            {!sync.configured ? <Button title="Explore with sample data" kind="secondary" size="lg" icon="flask-outline" onPress={loadSample} disabled={firstSyncPending} /> : null}
           </Row>
           {firstSyncPending ? <Muted variant="small" accessibilityLiveRegion="polite">Checking your account for existing data…</Muted> : null}
           {sync.configured ? (
@@ -171,8 +171,8 @@ export default function Onboarding() {
               {sync.session && !state.profile ? <Muted variant="small">Signed in. Downloading your data… If you are new, tap Get started.</Muted> : null}
             </Expandable>
           ) : null}
-          <Banner kind="simulated" title="Prototype">
-            AI analysis, nutrition lookups, health syncing and notifications are simulated in this version and labelled where they appear.
+          <Banner kind={sync.configured ? 'info' : 'simulated'} title={sync.configured ? 'Private pilot' : 'Prototype'}>
+            {sync.configured ? 'Food photos and chat use the configured AI service when enabled. Estimates need your review. USDA lookups are live; device health syncing is not available yet.' : 'Built-in AI estimates and chat are labelled as simulated. USDA lookups are live; health syncing is simulated in this local prototype.'}
           </Banner>
         </Stack>
       )}

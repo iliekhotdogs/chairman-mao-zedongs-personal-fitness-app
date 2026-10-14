@@ -95,6 +95,7 @@ describe('progression proposal', () => {
     const s = sample();
     const last = s.sessions[s.sessions.length - 1];
     const p = progressionProposal(s, last);
+    expect(progressionProposal(s, { ...last, pain: true })).toBeUndefined();
     if (p) {
       expect(p.kind).toBe('plan_weight_update');
       expect(p.status).toBe('pending');
@@ -181,7 +182,7 @@ describe('plan generator', () => {
     expect(ids).not.toContain('back_squat');
     expect(ids).not.toContain('deadlift');
     expect(ids).not.toContain('leg_extension');
-    expect(s.version).toBe(1);
+    expect(s.version).toBe(2);
   });
 
   it('only uses available equipment', () => {

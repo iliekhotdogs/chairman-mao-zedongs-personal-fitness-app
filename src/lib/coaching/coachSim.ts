@@ -31,12 +31,16 @@ const AREAS: { area: BodyArea; re: RegExp }[] = [
   { area: 'neck', re: /\bneck\b/ },
 ];
 
-const URGENT = /\b(chest pain|chest tight|can'?t breathe|short of breath|faint|passed out|dizz)/;
-const RED_FLAGS = /\b(swell|swollen|numb|tingl|sharp|pop(ped)?|snap|can'?t (walk|bear|put weight|move)|fell|fall|bruis|locked|gave way|giving way|worse at night|radiat)/;
+const URGENT = /\b(chest (pain|tightness|pressure)|can'?t breathe|cannot breathe|trouble breathing|difficulty breathing|short(ness)? of breath|faint|passed out|black(ed)? out|dizz)/;
+const RED_FLAGS = /\b(swell|swollen|numb|tingl|sharp|pop(ped)?|snap|can'?t (walk|bear|put weight|move)|cannot (walk|bear|put weight|move)|unable to (walk|bear weight|move)|fell|fall|bruis|locked|gave way|giving way|worse at night|radiat)/;
 
 /** Chest pain, fainting, trouble breathing: always answered by fixed safety text, never by an AI model. */
 export function isUrgentSymptom(message: string): boolean {
   return URGENT.test(message.toLowerCase());
+}
+
+export function hasInjuryRedFlag(message: string): boolean {
+  return RED_FLAGS.test(message.toLowerCase());
 }
 
 function tone(t: CoachTone, supportive: string, direct: string) {
@@ -64,7 +68,7 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
         'Please stop exercising now. Chest pain, trouble breathing, or feeling faint can be serious. If it is severe or does not settle quickly, call your local emergency number. Otherwise, contact a doctor today before training again.\n\nI can\'t assess medical symptoms, but I\'ll adjust your training once you have been cleared.',
     };
   }
-  if (/\b(hurt|hurts|pain|painful|sore|injur|ache|aching|tweak|strain|sprain)/.test(t)) {
+  if (RED_FLAGS.test(t) || /\b(hurt|hurts|pain|painful|sore|injur|ache|aching|tweak|strain|sprain)/.test(t)) {
     const area = AREAS.find((a) => a.re.test(t))?.area;
     const redFlag = RED_FLAGS.test(t);
     const proposals: Proposal[] = [];
@@ -77,6 +81,7 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
     } else {
       lines.push("• If it doesn't improve within a week or two, or gets worse, see a physiotherapist or doctor.");
     }
+    if (redFlag) return { safety: true, proposals: [], text: lines.join('\n') };
     if (area && profile) {
       if (day) {
         const swapped = swapForArea(day, area, profile.equipment);

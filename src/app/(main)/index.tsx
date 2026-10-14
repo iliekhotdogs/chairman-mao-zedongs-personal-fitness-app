@@ -172,8 +172,8 @@ function ActivityCard({ onLogWeight }: { onLogWeight: () => void }) {
       </Row>
       {a.missing ? (
         <Stack gap={Space.sm}>
-          <Muted variant="small">{hc?.status === 'connected' ? 'No activity has synced for today yet.' : 'Connect a health app or add steps manually to see activity here.'}</Muted>
-          <Button title={hc?.status === 'connected' ? 'Review activity' : 'Connect activity'} kind="secondary" size="sm" icon="footsteps-outline" onPress={() => router.push('/activity')} />
+          <Muted variant="small">{hc?.status === 'connected' ? 'No activity has synced for today yet.' : 'Add steps manually to see activity here.'}</Muted>
+          <Button title={hc?.status === 'connected' ? 'Review activity' : 'Add activity'} kind="secondary" size="sm" icon="footsteps-outline" onPress={() => router.push('/activity')} />
         </Stack>
       ) : (
         <Pressable onPress={() => router.push('/activity')} accessibilityRole="button" accessibilityLabel="Open activity details" style={{ gap: Space.sm }}>

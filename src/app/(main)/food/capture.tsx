@@ -230,6 +230,7 @@ export default function CaptureScreen() {
                   <Button title="Update estimate" kind="secondary" size="sm" icon="refresh" disabled={!answer.trim()} onPress={() => analyze(answer)} />
                 </Card>
               ) : null}
+              {estimate.rejectedItems ? <Banner kind="warning" title="Check for missing foods">{estimate.rejectedItems} item(s) had unusable amounts. Add any missing foods before saving.</Banner> : null}
             </Stack>,
             <Stack key="right" gap={Space.md}>
               <Text variant="h3">Items ({items.length})</Text>
@@ -246,7 +247,8 @@ export default function CaptureScreen() {
                   onRemove={() => setItems(items.filter((_, j) => j !== i))}
                   extra={
                     <>
-                      {'confidence' in it ? <Badge kind={CONF[it.confidence].kind} label={CONF[it.confidence].label} /> : null}
+                      {it.confidence ? <Badge kind={CONF[it.confidence].kind} label={CONF[it.confidence].label} /> : null}
+                      {it.reviewRequired ? <Badge kind="danger" label="Correct portion before saving" /> : null}
                       <Expandable title="Nutrition source & portion assumption" icon="document-text-outline">
                         <ItemSourceDetails item={it} />
                       </Expandable>

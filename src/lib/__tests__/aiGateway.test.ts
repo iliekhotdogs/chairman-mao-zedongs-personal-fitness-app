@@ -36,7 +36,7 @@ describe('shared AI gateway', () => {
 
   it('labels meal estimates with the provider the server used', async () => {
     const state = sample();
-    mockInvoke.mockResolvedValue({ data: { items: [], overall_confidence: 'low', notes: [], model: 'gemini-3.8-flash', provider: 'Gemini' }, error: null });
+    mockInvoke.mockResolvedValue({ data: { items: [{ name: 'Apple', portion: '1', grams: 100, calories: 95, protein_g: 0, carbs_g: 25, fat_g: 0, confidence: 'low', portion_assumption: 'one apple', source_kind: 'visual_estimate', source_label: 'Visual estimate' }], overall_confidence: 'low', notes: [], model: 'gemini-3.8-flash', provider: 'Gemini' }, error: null });
     const result = await estimateFood(state, { hint: 'apple' });
     expect(result.provider).toBe('Gemini (gemini-3.8-flash) via your server');
     expect(mockInvoke).toHaveBeenCalledWith('ai', { body: expect.objectContaining({ action: 'estimate_food' }) });
