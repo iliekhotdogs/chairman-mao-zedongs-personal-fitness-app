@@ -1,5 +1,9 @@
-import { emptyState, SYNCED_COLLECTIONS } from '../state';
-import { EMPTY_CURSOR, keysetFilter, listAllPaths, parseCursor, PULL_PAGE_SIZE, pullSince, SETTLE_WINDOW_MS, syncNow, timestampMs, type SyncCursor } from '../sync/sync';
+import { emptyState } from '../state';
+import { log } from '../log';
+import type { FoodEntry, ProgressPhoto } from '../types';
+import {
+  EMPTY_CURSOR, keysetFilter, listAllPaths, memoryStore, parseCursor, PULL_PAGE_SIZE, pullSince, PUSH_CHUNK_SIZE, SETTLE_WINDOW_MS, syncNow, timestampMs, type SyncCursor,
+} from '../sync/sync';
 
 /**
  * In-memory stand-in for the Supabase `records` table and the subset of the PostgREST
@@ -65,23 +69,54 @@ function builder() {
         }
         return 0;
       });
+      if (mockPullError) return resolve({ data: null, error: { message: mockPullError } } as never);
       resolve({ data: sorted.slice(0, limit), error: null });
     },
     upsert: async (input: Omit<Row, 'synced_at'>[]) => {
+      mockUpsertCalls.push(input.length);
+      // Like Postgres: one bad row fails the whole statement.
+      for (const r of input) {
+        const err = mockRowError(r);
+        if (err) return { error: { message: err.message, code: err.code }, status: err.status ?? 400 };
+      }
       for (const r of input) {
         mockTable = mockTable.filter((x) => !(x.user_id === r.user_id && x.collection === r.collection && x.id === r.id));
         mockTable.push({ ...r, synced_at: mockServerNow });
       }
-      return { error: null };
+      return { error: null, status: 201 };
     },
   };
   return b;
 }
 
+/** Per-row upsert failure (none by default). */
+let mockRowError: (r: Omit<Row, 'synced_at'>) => { message: string; code?: string; status?: number } | undefined = () => undefined;
+const mockUpsertCalls: number[] = [];
+let mockPullError: string | undefined;
+
 const mockUploads: string[] = [];
+const mockRemoved: string[] = [];
+/** Runs while an upload is in flight (simulates the user editing meanwhile). */
+let mockDuringUpload: (path: string) => void = () => {};
+let mockRemoveError: string | undefined;
+let mockStoredSize = 100;
 const mockClient = {
   from: () => builder(),
-  storage: { from: () => ({ upload: async (path: string) => { mockUploads.push(path); return { error: null }; } }) },
+  storage: {
+    from: () => ({
+      upload: async (path: string) => {
+        mockUploads.push(path);
+        mockDuringUpload(path);
+        return { data: { path, id: 'x', fullPath: `food-photos/${path}` }, error: null };
+      },
+      info: async () => ({ data: { size: mockStoredSize }, error: null }),
+      remove: async (paths: string[]) => {
+        if (mockRemoveError) return { data: null, error: { message: mockRemoveError } };
+        mockRemoved.push(...paths);
+        return { data: [], error: null };
+      },
+    }),
+  },
   rpc: async (name: string) => {
     mockCalls.push({ filters: [`rpc:${name}`] });
     return name === 'server_time' && mockRpcAvailable ? { data: mockServerNow, error: null } : { data: null, error: { message: 'function not found' } };
@@ -90,6 +125,11 @@ const mockClient = {
 /** Only the table queries (the server_time RPC is counted separately). */
 const queries = () => mockCalls.filter((c) => !c.filters.some((f) => f.startsWith('rpc:')));
 jest.mock('../sync/supabase', () => ({ supabase: () => mockClient }));
+/** Photos "on this device": file:///here/* and data: URLs. Anything else is another device's path. */
+jest.mock('../photo', () => ({
+  readLocalPhoto: async (uri: string) =>
+    uri.startsWith('file:///here/') || uri.startsWith('data:') ? { body: new Uint8Array([1, 2, 3]), size: 3 } : undefined,
+}));
 
 const USER = 'user-1';
 const TS = '2026-10-02T10:00:00.123456+00:00';
@@ -104,6 +144,14 @@ beforeEach(() => {
   mockCalls.length = 0;
   mockRpcAvailable = true;
   mockServerNow = '2026-10-02T12:00:00.000000+00:00';
+  mockRowError = () => undefined;
+  mockUpsertCalls.length = 0;
+  mockPullError = undefined;
+  mockUploads.length = 0;
+  mockRemoved.length = 0;
+  mockDuringUpload = () => {};
+  mockRemoveError = undefined;
+  mockStoredSize = 100;
 });
 
 describe('sync pull keyset cursor', () => {
@@ -267,7 +315,7 @@ describe('syncNow', () => {
     const future = new Date(Date.now() + 7 * 86_400_000).toISOString();
     const state = { ...emptyState('d', TS), weights: [{ id: 'w1', date: '2026-10-01', weightKg: 80, updatedAt: future }] };
     mockServerNow = '2026-10-02T12:00:00.000001+00:00';
-    const res = await syncNow(state, USER, EMPTY_CURSOR);
+    const res = await syncNow(memoryStore(state), USER, EMPTY_CURSOR);
     expect(res.pushed).toBeGreaterThan(0);
     const pushed = mockTable.find((r) => r.id === 'w1')!;
     expect(Date.parse(pushed.updated_at)).toBeLessThan(Date.parse(future));
@@ -276,39 +324,193 @@ describe('syncNow', () => {
   });
 });
 
-describe('photo uploads', () => {
-  const realFetch = globalThis.fetch;
-  beforeEach(() => {
-    mockUploads.length = 0;
-    globalThis.fetch = jest.fn(async () => ({ blob: async () => ({}) })) as never;
-  });
-  afterEach(() => { globalThis.fetch = realFetch; });
+const OLD = '2026-10-01T09:00:00.000Z';
+const meal = (over: Partial<FoodEntry> = {}): FoodEntry => ({
+  id: 'f1', date: '2026-10-01', meal: 'lunch', origin: 'photo', confirmedAt: OLD, createdAt: OLD, updatedAt: OLD,
+  photoUri: 'file:///here/meal.jpg', hint: 'pasta',
+  items: [{ name: 'Pasta', portionLabel: '1 plate', calories: 600, proteinG: 20, carbsG: 90, fatG: 15, source: { kind: 'user_entered', sourced: false, label: '' } }],
+  ...over,
+});
+const photo = (over: Partial<ProgressPhoto> = {}): ProgressPhoto => ({ id: 'p1', date: '2026-10-01', uri: 'file:///here/front.jpg', note: 'week 1', weightKg: 80, updatedAt: OLD, ...over });
+const serverRow = (collection: string, id: string) => mockTable.find((r) => r.collection === collection && r.id === id);
 
-  it('uploads local food and progress photos and returns their storage uris', async () => {
-    const stamp = '2026-10-01T09:00:00.000Z';
-    const state = {
+describe('photo uploads', () => {
+  it('uploads local food and progress photos and points the records at their cloud copies', async () => {
+    const store = memoryStore({
       ...emptyState('d', TS),
-      foodLog: [{ id: 'f1', date: '2026-10-01', photoUri: 'file:///meal.jpg', updatedAt: stamp }],
-      progressPhotos: [
-        { id: 'p1', date: '2026-10-01', uri: 'file:///front.jpg', updatedAt: stamp },
-        { id: 'p2', date: '2026-10-01', uri: 'storage:food-photos/user-1/progress/p2.jpg', updatedAt: stamp },
-      ],
-    } as never;
-    const res = await syncNow(state, USER, EMPTY_CURSOR);
+      foodLog: [meal()],
+      progressPhotos: [photo(), photo({ id: 'p2', uri: `storage:food-photos/${USER}/progress/p2.jpg` })],
+    });
+    await syncNow(store, USER, EMPTY_CURSOR);
     expect(mockUploads.sort()).toEqual([`${USER}/f1.jpg`, `${USER}/progress/p1.jpg`]);
-    const food = res.rows.find((r) => r.id === 'f1' && r.collection === 'foodLog');
-    expect((food?.data as { photoUri?: string })?.photoUri).toBe(`storage:food-photos/${USER}/f1.jpg`);
-    // Once progressPhotos is a synced collection, its new storage uri merges back the same way.
-    if ((SYNCED_COLLECTIONS as readonly string[]).includes('progressPhotos')) {
-      const progress = res.rows.filter((r) => (r.collection as string) === 'progressPhotos' && r.id === 'p1');
-      expect(progress.some((r) => (r.data as { uri?: string }).uri === `storage:food-photos/${USER}/progress/p1.jpg`)).toBe(true);
-    }
+    expect(store.state.foodLog[0].photoUri).toBe(`storage:food-photos/${USER}/f1.jpg`);
+    expect(store.state.progressPhotos[0].uri).toBe(`storage:food-photos/${USER}/progress/p1.jpg`);
+    // The rows pushed in the same sync carry the cloud uris.
+    expect((serverRow('foodLog', 'f1')?.data as FoodEntry).photoUri).toBe(`storage:food-photos/${USER}/f1.jpg`);
+    expect((serverRow('progressPhotos', 'p1')?.data as ProgressPhoto).uri).toBe(`storage:food-photos/${USER}/progress/p1.jpg`);
   });
 
   it('works when the state has no progressPhotos', async () => {
     const state = { ...emptyState('d', TS) };
     delete (state as { progressPhotos?: unknown }).progressPhotos;
-    await expect(syncNow(state, USER, EMPTY_CURSOR)).resolves.toBeDefined();
+    await expect(syncNow(memoryStore(state), USER, EMPTY_CURSOR)).resolves.toBeDefined();
     expect(mockUploads).toHaveLength(0);
+  });
+
+  it("skips another device's photo paths quietly", async () => {
+    const warn = jest.spyOn(log, 'warn').mockImplementation(() => {});
+    const store = memoryStore({ ...emptyState('d', TS), progressPhotos: [photo({ uri: 'file:///data/user/0/other-phone/front.jpg' })] });
+    await syncNow(store, USER, EMPTY_CURSOR);
+    expect(mockUploads).toHaveLength(0);
+    expect(store.state.progressPhotos[0].uri).toBe('file:///data/user/0/other-phone/front.jpg');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('keeps the local photo when the stored object turns out empty', async () => {
+    const warn = jest.spyOn(log, 'warn').mockImplementation(() => {});
+    mockStoredSize = 0;
+    const store = memoryStore({ ...emptyState('d', TS), progressPhotos: [photo()] });
+    await syncNow(store, USER, EMPTY_CURSOR);
+    expect(store.state.progressPhotos[0].uri).toBe('file:///here/front.jpg');
+    warn.mockRestore();
+  });
+
+  describe('edits made while a photo uploads', () => {
+    it('a photo deleted during its upload stays deleted, here and on the server, and its upload is removed', async () => {
+      const store = memoryStore({ ...emptyState('d', TS), progressPhotos: [photo()] });
+      mockDuringUpload = () => store.dispatch({ type: 'DELETE_PROGRESS_PHOTO', id: 'p1', now: new Date().toISOString() });
+      await syncNow(store, USER, EMPTY_CURSOR);
+      const local = store.state.progressPhotos[0];
+      expect(local.deleted).toBe(true);
+      expect(local.uri).toBe('');
+      expect(mockRemoved).toEqual([`${USER}/progress/p1.jpg`]);
+      expect((local as { storagePath?: string }).storagePath).toBeUndefined(); // removal done
+      const row = serverRow('progressPhotos', 'p1')!;
+      expect(row.deleted).toBe(true);
+      expect(JSON.stringify(row.data)).not.toContain('front.jpg');
+      expect(JSON.stringify(row.data)).not.toContain('week 1');
+    });
+
+    it('a meal edited during its photo upload keeps the edit and gets the cloud photo', async () => {
+      const store = memoryStore({ ...emptyState('d', TS), foodLog: [meal()] });
+      mockDuringUpload = () => {
+        const current = store.state.foodLog[0];
+        store.dispatch({ type: 'UPDATE_FOOD', entry: { ...current, items: [{ ...current.items[0], calories: 450 }], updatedAt: new Date().toISOString() } });
+      };
+      await syncNow(store, USER, EMPTY_CURSOR);
+      const local = store.state.foodLog[0];
+      expect(local.items[0].calories).toBe(450);
+      expect(local.photoUri).toBe(`storage:food-photos/${USER}/f1.jpg`);
+      const pushed = serverRow('foodLog', 'f1')!.data as FoodEntry;
+      expect(pushed.items[0].calories).toBe(450);
+      expect(pushed.photoUri).toBe(`storage:food-photos/${USER}/f1.jpg`);
+    });
+
+    it('a meal deleted during its photo upload is not resurrected', async () => {
+      const store = memoryStore({ ...emptyState('d', TS), foodLog: [meal()] });
+      mockDuringUpload = () => store.dispatch({ type: 'DELETE_FOOD', id: 'f1', now: new Date().toISOString() });
+      await syncNow(store, USER, EMPTY_CURSOR);
+      expect(store.state.foodLog[0].deleted).toBe(true);
+      expect(store.state.foodLog[0].photoUri).toBeUndefined();
+      expect(serverRow('foodLog', 'f1')!.deleted).toBe(true);
+      expect(mockRemoved).toEqual([`${USER}/f1.jpg`]);
+    });
+
+    it('a photo replaced during the upload is not overwritten by the old upload', async () => {
+      const store = memoryStore({ ...emptyState('d', TS), foodLog: [meal()] });
+      mockDuringUpload = () => store.dispatch({ type: 'UPDATE_FOOD', entry: { ...store.state.foodLog[0], photoUri: 'file:///here/retake.jpg', updatedAt: new Date().toISOString() } });
+      await syncNow(store, USER, EMPTY_CURSOR);
+      expect(store.state.foodLog[0].photoUri).toBe('file:///here/retake.jpg');
+    });
+  });
+});
+
+describe('deleted photos in cloud storage', () => {
+  it('removes the cloud copy of a deleted photo once, and retries after a failure', async () => {
+    const warn = jest.spyOn(log, 'warn').mockImplementation(() => {});
+    const store = memoryStore({ ...emptyState('d', TS), progressPhotos: [photo({ uri: `storage:food-photos/${USER}/progress/p1.jpg` })] });
+    store.dispatch({ type: 'DELETE_PROGRESS_PHOTO', id: 'p1', now: new Date().toISOString() });
+    mockRemoveError = 'offline';
+    await syncNow(store, USER, EMPTY_CURSOR);
+    expect((store.state.progressPhotos[0] as { storagePath?: string }).storagePath).toBe(`${USER}/progress/p1.jpg`);
+    mockRemoveError = undefined;
+    await syncNow(store, USER, EMPTY_CURSOR);
+    expect(mockRemoved).toEqual([`${USER}/progress/p1.jpg`]);
+    expect((store.state.progressPhotos[0] as { storagePath?: string }).storagePath).toBeUndefined();
+    await syncNow(store, USER, EMPTY_CURSOR);
+    expect(mockRemoved).toHaveLength(1);
+    warn.mockRestore();
+  });
+
+  it("never tries to remove a path outside the user's folder", async () => {
+    const store = memoryStore({ ...emptyState('d', TS), progressPhotos: [photo({ uri: 'storage:food-photos/someone-else/progress/p1.jpg' })] });
+    store.dispatch({ type: 'DELETE_PROGRESS_PHOTO', id: 'p1', now: new Date().toISOString() });
+    await syncNow(store, USER, EMPTY_CURSOR);
+    expect(mockRemoved).toHaveLength(0);
+    expect((store.state.progressPhotos[0] as { storagePath?: string }).storagePath).toBeUndefined();
+  });
+});
+
+describe('push failures', () => {
+  const weights = (n: number, stamp: (i: number) => string) =>
+    Array.from({ length: n }, (_, i) => ({ id: `w${pad(i)}`, date: '2026-10-01', weightKg: 80, updatedAt: stamp(i) }));
+
+  it('pushes in chunks and skips a row the server rejects for good, without blocking the rest', async () => {
+    const err = jest.spyOn(log, 'error').mockImplementation(() => {});
+    mockRowError = (r) => (r.id === 'w00250' ? { message: 'violates check constraint "records_size_check"', code: '23514' } : undefined);
+    const store = memoryStore({ ...emptyState('d', TS), weights: weights(450, () => OLD) });
+    mockTable = [weightRow('remote-1', TS)];
+    const res = await syncNow(store, USER, EMPTY_CURSOR);
+    expect(Math.max(...mockUpsertCalls)).toBeLessThanOrEqual(PUSH_CHUNK_SIZE);
+    expect(res.pushed).toBe(449);
+    expect(res.rejected).toBe(1);
+    expect(res.pushError).toBeUndefined();
+    expect(mockTable.filter((r) => r.collection === 'weights' && r.id.startsWith('w0'))).toHaveLength(449);
+    expect(res.rows.some((r) => r.id === 'remote-1')).toBe(true);
+    // The cursor moves past the rejected row so it doesn't fail on every sync.
+    expect(res.cursor.lastPushedAt > OLD).toBe(true);
+    expect(err).toHaveBeenCalled();
+    err.mockRestore();
+  });
+
+  it('still pulls when the push fails, and keeps the failed rows for the next push', async () => {
+    const warn = jest.spyOn(log, 'warn').mockImplementation(() => {});
+    const stamp = (i: number) => new Date(Date.parse('2026-10-02T08:00:00.000Z') + i * 1000).toISOString();
+    mockRowError = (r) => (r.id >= 'w00003' ? { message: 'Failed to fetch', status: 0 } : undefined);
+    const store = memoryStore({ ...emptyState('d', TS), weights: weights(5, stamp) });
+    mockTable = [weightRow('remote-1', TS)];
+    const res = await syncNow(memoryStore(store.state), USER, EMPTY_CURSOR);
+    expect(res.pushError).toMatch(/Upload failed/);
+    expect(res.rows.some((r) => r.id === 'remote-1')).toBe(true);
+    // Every row that did not arrive is newer than the saved push cursor, so it is sent again.
+    expect(res.cursor.lastPushedAt < stamp(0)).toBe(true);
+    warn.mockRestore();
+  });
+
+  it('a transient failure in one chunk holds the push cursor below the failed rows only', async () => {
+    const warn = jest.spyOn(log, 'warn').mockImplementation(() => {});
+    const stamp = (i: number) => new Date(Date.parse('2026-10-02T08:00:00.000Z') + i * 1000).toISOString();
+    let failOnce = true;
+    mockRowError = (r) => (r.id === 'w00300' && failOnce ? { message: 'timeout', code: '57014', status: 500 } : undefined);
+    const store = memoryStore({ ...emptyState('d', TS), weights: weights(450, stamp) });
+    const first = await syncNow(store, USER, EMPTY_CURSOR);
+    expect(first.pushed).toBe(200);
+    expect(first.cursor.lastPushedAt < stamp(200)).toBe(true);
+    expect(first.cursor.lastPushedAt > stamp(199)).toBe(true); // just below the first failed row
+    failOnce = false;
+    const second = await syncNow(store, USER, first.cursor);
+    expect(second.pushError).toBeUndefined();
+    expect(mockTable.filter((r) => r.collection === 'weights')).toHaveLength(450);
+    warn.mockRestore();
+  });
+
+  it('reports both errors when the pull fails after a failed push', async () => {
+    const warn = jest.spyOn(log, 'warn').mockImplementation(() => {});
+    mockRowError = () => ({ message: 'Failed to fetch', status: 0 });
+    mockPullError = 'Network request failed';
+    const store = memoryStore({ ...emptyState('d', TS), weights: weights(1, () => OLD) });
+    await expect(syncNow(store, USER, EMPTY_CURSOR)).rejects.toThrow(/Upload failed: Failed to fetch.*Download failed: Network request failed/);
+    warn.mockRestore();
   });
 });

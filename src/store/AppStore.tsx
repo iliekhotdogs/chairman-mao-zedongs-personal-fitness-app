@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState as RNAppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
@@ -14,8 +14,8 @@ import { decide, type Candidate } from '@/lib/notifications/policy';
 import { showSystemNotification } from '@/lib/notifications/deliver';
 import { currentPushToken, onNotificationPermissionGranted, onPushTokenChange, registerPushToken } from '@/lib/notifications/push';
 import { isSupabaseConfigured, supabase } from '@/lib/sync/supabase';
-import { parseCursor, syncNow, type SyncCursor } from '@/lib/sync/sync';
-import { mergeRemote } from '@/lib/sync/merge';
+import { EMPTY_CURSOR, parseCursor, syncNow, type SyncCursor, type SyncStore } from '@/lib/sync/sync';
+import { localChanges } from '@/lib/sync/merge';
 import type { Proposal } from '@/lib/types';
 import { loadIntegrationConfig, useIntegrationConfig } from '@/lib/integrations/config';
 
@@ -66,6 +66,13 @@ async function loadCursor(owner: string): Promise<SyncCursor> {
   return parseCursor(await AsyncStorage.getItem(`${CURSOR_KEY}:${owner}`));
 }
 
+/**
+ * How long a signed-in device with no local profile waits (behind the splash screen) for
+ * the account's data before showing onboarding. Without the wait, a fresh device would
+ * offer onboarding and could stamp a new profile over the one on the server.
+ */
+const FIRST_SYNC_WAIT_MS = 4000;
+
 /** Collections whose changes should re-run the coaching engine. */
 const ENGINE_KEYS = ['foodLog', 'weights', 'activity', 'sessions', 'proposals', 'dayAdjustments', 'targets', 'profile', 'plan'] as const;
 
@@ -83,16 +90,23 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   const { config: integrationConfig, loaded: integrationsLoaded } = useIntegrationConfig();
   const supabaseIdentity = `${integrationConfig.supabaseUrl}|${integrationConfig.supabaseKey}`;
   const configured = isSupabaseConfigured();
-  const [state, dispatch] = useReducer(reducer, undefined, () => emptyState(newId(), nowISO()));
+  const [state, setState] = useState<AppState>(() => emptyState(newId(), nowISO()));
+  // The latest state, updated synchronously by every dispatch (not after the next render),
+  // so act(), the coaching engine and sync never read a state that is a dispatch behind.
+  const stateRef = useRef(state);
+  const dispatch = useCallback((action: Action) => {
+    const next = reducer(stateRef.current, action);
+    if (next === stateRef.current) return;
+    stateRef.current = next;
+    setState(next);
+  }, []);
   const [hydrated, setHydrated] = useState(false);
   const [hydratedScope, setHydratedScope] = useState('');
   const [storageError, setStorageError] = useState<string>();
   const [legacyAvailable, setLegacyAvailable] = useState(false);
   const [today, setToday] = useState(toISODate());
-  const stateRef = useRef(state);
-  useEffect(() => {
-    stateRef.current = state;
-  }, [state]);
+  /** The signed-in account's saved sync cursor (loaded at hydration, updated after each sync). */
+  const cursorRef = useRef<SyncCursor>(EMPTY_CURSOR);
 
   // ---- provider settings and account-scoped state ----
   useEffect(() => {
@@ -109,7 +123,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
   const [syncStatus, setSyncStatus] = useState<SyncStatus>('idle');
   const [lastSyncAt, setLastSyncAt] = useState<string>();
   const [syncError, setSyncError] = useState<string>();
-  const owner = configured ? (session?.user.id ?? 'signed-out') : 'local';
+  // Effects key on the user id, not the session object, which changes on every token refresh.
+  const userId = session?.user.id;
+  const owner = configured ? (userId ?? 'signed-out') : 'local';
   const authReady = !configured || authIdentity === supabaseIdentity;
   const scopeReady = integrationsLoaded && authReady && hydrated && hydratedScope === owner;
 
@@ -125,26 +141,17 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       });
       return () => { active = false; };
     }
+    // Show what is saved on this device right away; the first sync runs in the background
+    // once hydrated (see the sync effect below), so startup never waits on the network.
     loadState(owner)
       .then(async (saved) => {
         let next = saved ?? emptyState(newId(), nowISO());
         // Records edited at or before this are on the server; undefined = sync is off (local only).
         let syncedBefore: string | undefined;
-        if (configured && session?.user.id === owner) {
-          let cursor: SyncCursor = await loadCursor(owner);
-          try {
-            const result = await syncNow(next, owner, cursor);
-            if (!active) return;
-            next = mergeRemote(next, result.rows);
-            cursor = result.cursor;
-            await AsyncStorage.setItem(`${CURSOR_KEY}:${owner}`, JSON.stringify(result.cursor));
-            setLastSyncAt(nowISO());
-            setSyncError(undefined);
-            setSyncStatus('idle');
-          } catch (error) {
-            log.warn('sync', 'Initial sync failed.', error);
-            if (active) { setSyncError(error instanceof Error ? error.message : String(error)); setSyncStatus('error'); }
-          }
+        if (configured && userId === owner) {
+          const cursor = await loadCursor(owner);
+          if (!active) return;
+          cursorRef.current = cursor;
           syncedBefore = cursor.lastPushedAt;
         }
         next = pruneState(next, { now: nowISO(), syncedBefore });
@@ -156,7 +163,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       })
       .finally(() => { if (active) { setHydratedScope(owner); setHydrated(true); } });
     return () => { active = false; };
-  }, [owner, integrationsLoaded, authReady, configured, session?.user.id]);
+  }, [owner, integrationsLoaded, authReady, configured, userId, dispatch]);
 
   useEffect(() => {
     if (!scopeReady || owner === 'signed-out') return;
@@ -179,7 +186,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     if (!scopeReady) return;
     // Checked once here (throws for the caller to show); the reducer skips re-checking it.
     dispatch(checkedAction(stateRef.current, action));
-  }, [scopeReady]);
+  }, [scopeReady, dispatch]);
 
   // ---- adaptive coaching engine + notifications ----
   const sessionRef = useRef<Session | null>(null);
@@ -211,10 +218,11 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       if (sb && sessionRef.current) {
         try {
           // push: the server also sends it to the user's OTHER registered phones; this device
-          // shows it locally below, so its own token is excluded.
+          // shows it locally below, so its own token is excluded. Only the category is sent:
+          // the server picks fixed push text for it (no coaching details leave the device).
           const ownToken = currentPushToken(sessionRef.current.user.id);
           const { data, error } = await sb.functions.invoke('notify', {
-            body: { title: c.title, body: c.body, dedupe_key: c.dedupeKey, local_date: date, push: true, ...(ownToken ? { exclude_token: ownToken } : {}) },
+            body: { category: c.category, dedupe_key: c.dedupeKey, local_date: date, push: true, ...(ownToken ? { exclude_token: ownToken } : {}) },
           });
           if (!error && data && data.allowed === false) continue;
         } catch (e) {
@@ -233,7 +241,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     } finally {
       coaching.current = false;
     }
-  }, [scopeReady]);
+  }, [scopeReady, dispatch]);
 
   // Content signatures (count + newest edit per collection), so edits re-trigger too, not just additions.
   const engineKey = useMemo(() => `${contentSignature(state, ENGINE_KEYS)}|${today}`, [state, today]);
@@ -268,43 +276,68 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     return () => { active = false; data.subscription.unsubscribe(); };
   }, [supabaseIdentity, integrationsLoaded]);
 
+  // A signed-in device with no local profile waits (splash) for its first sync, at most
+  // FIRST_SYNC_WAIT_MS, before the app decides it needs onboarding. See `hydrated` below.
+  const [firstSyncSettled, setFirstSyncSettled] = useState<string>();
+  useEffect(() => {
+    if (!configured || !userId || !scopeReady) return;
+    const t = setTimeout(() => setFirstSyncSettled(userId), FIRST_SYNC_WAIT_MS);
+    return () => clearTimeout(t);
+  }, [configured, userId, scopeReady]);
+  const awaitingAccountData = configured && !!userId && scopeReady && !state.profile && firstSyncSettled !== userId;
+
   const doSync = useCallback(async () => {
-    if (!session || !scopeReady || syncing.current === session.user.id) return;
-    const userId = session.user.id;
+    if (!userId || !scopeReady || syncing.current === userId) return;
     syncing.current = userId;
     setSyncStatus('syncing');
+    const stillSignedIn = () => sessionRef.current?.user.id === userId;
+    // Sync reads and updates the LIVE state (uploads take a while; see syncNow), and stops
+    // touching it if the user signs out or switches accounts meanwhile.
+    const store: SyncStore = {
+      get: () => {
+        if (!stillSignedIn()) throw new Error('Signed out during sync.');
+        return stateRef.current;
+      },
+      dispatch: (action) => {
+        if (stillSignedIn()) dispatch(action);
+      },
+    };
     try {
       const cursorKey = `${CURSOR_KEY}:${userId}`;
-      const result = await syncNow(stateRef.current, userId, await loadCursor(userId));
-      if (sessionRef.current?.user.id !== userId) return;
-      // Merged into the current state, so edits made during the network call are kept.
+      const result = await syncNow(store, userId, await loadCursor(userId));
+      if (!stillSignedIn()) return;
+      // Merged into the current state, so edits made during the network calls are kept.
       dispatch({ type: 'MERGE_REMOTE', rows: result.rows });
+      cursorRef.current = result.cursor;
       await AsyncStorage.setItem(cursorKey, JSON.stringify(result.cursor));
       setLastSyncAt(nowISO());
-      setSyncError(undefined);
-      setSyncStatus('idle');
+      setSyncError(result.pushError);
+      setSyncStatus(result.pushError ? 'error' : 'idle');
     } catch (e) {
       log.warn('sync', 'Sync failed.', e);
-      if (sessionRef.current?.user.id === userId) {
+      if (stillSignedIn()) {
         setSyncError(e instanceof Error ? e.message : String(e));
         setSyncStatus('error');
       }
     } finally {
       if (syncing.current === userId) syncing.current = null;
+      setFirstSyncSettled(userId);
     }
-  }, [session, scopeReady]);
+  }, [userId, scopeReady, dispatch]);
 
   const importLocalData = useCallback(async () => {
-    if (!session || !scopeReady || stateRef.current.profile) throw new Error('This account already has data.');
+    if (!userId || !scopeReady || stateRef.current.profile) throw new Error('This account already has data.');
     const legacy = await loadState('local');
     if (!legacy?.profile) throw new Error('No earlier device data was found.');
-    dispatch({ type: 'REPLACE_STATE', state: legacy });
+    // Merged into what was already pulled for the account, and re-stamped so it all uploads.
+    dispatch({ type: 'IMPORT_LEGACY', legacy, now: nowISO() });
     setLegacyAvailable(false);
-  }, [session, scopeReady]);
+  }, [userId, scopeReady, dispatch]);
 
   useEffect(() => {
-    if (!configured || !session || !scopeReady) return;
-    const first = setTimeout(() => void doSync(), 0); // sync right after sign-in
+    if (!configured || !userId || !scopeReady) return;
+    // First sync for this account, in the background right after hydration (or sign-in).
+    const first = setTimeout(() => void doSync(), 0);
     const i = setInterval(() => void doSync(), 120_000);
     const sub = RNAppState.addEventListener('change', (s) => s === 'active' && void doSync());
     return () => {
@@ -312,12 +345,11 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       clearInterval(i);
       sub.remove();
     };
-  }, [configured, session, scopeReady, doSync]);
+  }, [configured, userId, scopeReady, doSync]);
 
   // ---- remote push: register this device's Expo push token (native builds only) ----
   useEffect(() => {
     const sb = supabase();
-    const userId = session?.user.id;
     if (!sb || !userId) return;
     let active = true;
     const register = () => { if (active) void registerPushToken(sb, userId); };
@@ -332,26 +364,30 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       appState.remove();
       offTokenChange();
     };
-  }, [session?.user.id, supabaseIdentity]);
+  }, [userId, supabaseIdentity]);
 
-  // push soon after local edits to ANY synced collection or singleton (see SYNCED_* in state.ts)
+  // Push soon after local edits to ANY synced collection or singleton (see SYNCED_* in
+  // state.ts). Only when there is something to push: rows merged in by a sync change the
+  // signature too, and must not trigger another sync right after it.
   useEffect(() => {
-    if (!session || !scopeReady) return;
-    const t = setTimeout(() => void doSync(), 5000);
+    if (!userId || !scopeReady) return;
+    const t = setTimeout(() => {
+      if (localChanges(stateRef.current, cursorRef.current.lastPushedAt).length) void doSync();
+    }, 5000);
     return () => clearTimeout(t);
-  }, [syncKey, session, scopeReady, doSync]);
+  }, [syncKey, userId, scopeReady, doSync]);
 
   const value = useMemo<StoreValue>(
     () => ({
       state,
-      hydrated: scopeReady,
+      hydrated: scopeReady && !awaitingAccountData,
       today,
       act,
       storageError,
       // status is derived so it can't go stale when the user signs out
       sync: { configured, session, status: !configured ? 'local_only' : !session ? 'signed_out' : syncStatus, lastSyncAt, error: syncError, syncNow: doSync, legacyAvailable, importLocalData },
     }),
-    [state, scopeReady, today, act, storageError, session, syncStatus, lastSyncAt, syncError, doSync, configured, legacyAvailable, importLocalData],
+    [state, scopeReady, awaitingAccountData, today, act, storageError, session, syncStatus, lastSyncAt, syncError, doSync, configured, legacyAvailable, importLocalData],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

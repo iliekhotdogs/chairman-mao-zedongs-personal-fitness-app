@@ -5,7 +5,10 @@ import type {
 } from './types';
 import { mergeActivity } from './activity/activity';
 import { newId } from './id';
-import { mergeRemote, type RemoteRecord } from './sync/merge';
+import {
+  applyPhotoUploads, clearStorageRemovals, deletePhotoRecord, importLegacyState, mergeRemote,
+  type PhotoUpload, type RemoteRecord, type StorageRemoval,
+} from './sync/merge';
 
 export type Action =
   | { type: 'HYDRATE'; state: AppState }
@@ -44,7 +47,13 @@ export type Action =
   | { type: 'RECORD_NOTIFICATION'; record: NotificationRecord }
   | { type: 'UPDATE_SETTINGS'; patch: Partial<Omit<Settings, 'updatedAt'>>; now: string }
   | { type: 'REPLACE_STATE'; state: AppState }
-  | { type: 'MERGE_REMOTE'; rows: RemoteRecord[] };
+  | { type: 'MERGE_REMOTE'; rows: RemoteRecord[] }
+  /** Sync uploaded local photos; points the CURRENT records at their cloud copies. */
+  | { type: 'PHOTOS_UPLOADED'; uploads: PhotoUpload[]; now: string }
+  /** Sync removed these deleted photos from cloud Storage. */
+  | { type: 'STORAGE_REMOVED'; removed: StorageRemoval[] }
+  /** Merge data saved on this device before sign-in into the account (see importLegacyState). */
+  | { type: 'IMPORT_LEGACY'; legacy: AppState; now: string };
 
 export class RuleViolation extends Error {}
 
@@ -152,6 +161,12 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'MERGE_REMOTE':
       return mergeRemote(state, action.rows);
+    case 'PHOTOS_UPLOADED':
+      return applyPhotoUploads(state, action.uploads, action.now);
+    case 'STORAGE_REMOVED':
+      return clearStorageRemovals(state, action.removed);
+    case 'IMPORT_LEGACY':
+      return importLegacyState(state, action.legacy, action.now);
 
     case 'COMPLETE_ONBOARDING':
       return {
@@ -177,7 +192,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'UPDATE_FOOD':
       return { ...state, foodLog: upsert(state.foodLog, action.entry) };
     case 'DELETE_FOOD':
-      return { ...state, foodLog: tombstone(state.foodLog, action.id, action.now) };
+      return { ...state, foodLog: deletePhotoRecord(state.foodLog, 'foodLog', action.id, action.now) };
 
     case 'LOG_WEIGHT': {
       // one weigh-in per day: replace an existing entry for the same date
@@ -191,7 +206,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'ADD_PROGRESS_PHOTO':
       return { ...state, progressPhotos: upsert(state.progressPhotos, action.photo) };
     case 'DELETE_PROGRESS_PHOTO':
-      return { ...state, progressPhotos: tombstone(state.progressPhotos, action.id, action.now) };
+      return { ...state, progressPhotos: deletePhotoRecord(state.progressPhotos, 'progressPhotos', action.id, action.now) };
 
     case 'SET_PLAN':
       return { ...state, plan: action.plan };
