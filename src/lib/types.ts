@@ -97,7 +97,6 @@ export interface FoodItem {
   source: NutritionSource;
   confidence?: Confidence;
   portionAssumption?: string;
-  /** AI item must be edited or replaced before it can be logged. */
   reviewRequired?: boolean;
 }
 
@@ -209,7 +208,7 @@ export interface WorkoutSession extends SyncMeta {
   finishedAt?: ISODateTime;
   sets: LoggedSet[];
   notes?: string;
-  effort?: number; // 1–10, optional post-workout check-in
+  effort?: number;
   pain?: boolean;
   painNote?: string;
 }

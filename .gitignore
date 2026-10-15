@@ -45,6 +45,7 @@ yarn-error.*
 .env
 supabase/.env
 supabase/.temp/
+pilot/private/
 
 # Claude Code agent worktrees
 .claude/worktrees/

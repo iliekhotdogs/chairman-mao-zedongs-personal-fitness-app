@@ -251,7 +251,13 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'ADD_PROPOSALS': {
       const live = new Set(state.proposals.filter((p) => !p.deleted).map((p) => p.dedupeKey));
-      const fresh = action.proposals.filter((p) => !live.has(p.dedupeKey));
+      const floor = calorieFloor(state.profile?.sex ?? 'unspecified');
+      const fresh = action.proposals.filter((p) => {
+        if (live.has(p.dedupeKey)) return false;
+        if (p.change.type === 'target_change' || p.change.type === 'goal_change') return Number.isFinite(p.change.next.calories) && p.change.next.calories >= floor;
+        if (p.change.type === 'day_calorie_adjustment') return Boolean(state.targets) && Number.isFinite(p.change.calorieDelta) && state.targets!.calories + p.change.calorieDelta >= floor;
+        return true;
+      });
       return fresh.length ? { ...state, proposals: [...state.proposals, ...fresh] } : state;
     }
     case 'REJECT_PROPOSAL':

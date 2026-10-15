@@ -14,6 +14,7 @@ import { activeSession, activityForDay, hasActivitySource, latestWeight, pending
 import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { dayMinutes } from '@/lib/workouts/generator';
 import { displayWeight } from '@/lib/units';
+import { formatDateLabel } from '@/lib/dates';
 
 function greeting() {
   const h = new Date().getHours();
@@ -190,7 +191,7 @@ function ActivityCard({ onLogWeight }: { onLogWeight: () => void }) {
         <Stack gap={0} style={{ flex: 1 }}>
           <Muted variant="caption">BODY WEIGHT</Muted>
           <Text variant="bodyStrong">{w ? displayWeight(w.weightKg, state.settings.units) : 'Not logged'}</Text>
-          {w ? <Muted variant="small">{w.date === today ? 'Today' : `Last: ${w.date}`}</Muted> : null}
+          {w ? <Muted variant="small">{formatDateLabel(w.date, today)}</Muted> : null}
         </Stack>
         <Button title={w?.date === today ? 'Update' : 'Log weight'} kind="secondary" size="sm" icon="scale-outline" onPress={onLogWeight} />
       </Row>

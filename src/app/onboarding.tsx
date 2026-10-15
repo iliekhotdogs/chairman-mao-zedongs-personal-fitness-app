@@ -283,6 +283,10 @@ export default function Onboarding() {
         <Stack gap={Space.md}>
           <Text variant="h1">Here&apos;s your starting plan</Text>
           <Muted>These are starting estimates. Your coach will suggest adjustments as your real weight trend comes in, and you approve each one.</Muted>
+          <Card tone="muted" style={{ gap: Space.sm }}>
+            <Muted variant="small">Based on age {age}, {Math.round(heightCm ?? 0)} cm, {Math.round(weightKg ?? 0)} kg, {sex.replace('_', ' ')}, and {activity.replace('_', ' ')}.</Muted>
+            <Button title="Edit body stats" kind="ghost" size="sm" onPress={() => setStep(2)} />
+          </Card>
           <Card tone="pending" style={{ gap: Space.md }}>
             <Row wrap gap={6}>
               <Badge kind="suggestion" label="Proposed" />

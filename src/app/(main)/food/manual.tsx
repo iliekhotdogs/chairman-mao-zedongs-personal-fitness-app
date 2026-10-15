@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/lib/nav';
 
@@ -12,6 +12,9 @@ import { sumItems } from '@/lib/nutrition/lookup';
 import { nowISO, formatDateLabel } from '@/lib/dates';
 import type { FoodItem, MealType } from '@/lib/types';
 import { live } from '@/lib/selectors';
+import { persistPhoto } from '@/lib/photo';
+import { newId } from '@/lib/id';
+import { clearManualDraft, getManualDraft } from '@/lib/nutrition/manualDraft';
 
 const MEALS: { value: MealType; label: string }[] = [
   { value: 'breakfast', label: 'Breakfast' }, { value: 'lunch', label: 'Lunch' }, { value: 'dinner', label: 'Dinner' }, { value: 'snack', label: 'Snack' },
@@ -21,10 +24,12 @@ export default function ManualEntry() {
   const { state, today } = useStore();
   const doAct = useAct();
   const { id, date: dateParam } = useLocalSearchParams<{ id?: string; date?: string }>();
+  const [draft] = useState(getManualDraft);
+  useEffect(() => { clearManualDraft(); }, []);
   const existing = id ? live(state.foodLog).find((e) => e.id === id) : undefined;
   const date = existing?.date ?? dateParam ?? today;
   const [items, setItems] = useState<FoodItem[]>(existing?.items ?? []);
-  const [meal, setMeal] = useState<MealType>(existing?.meal ?? defaultMealForTime());
+  const [meal, setMeal] = useState<MealType>(existing?.meal ?? draft?.meal ?? defaultMealForTime());
   const total = sumItems(items);
 
   if (id && !existing) {
@@ -35,14 +40,14 @@ export default function ManualEntry() {
     );
   }
 
-  const save = () => {
+  const save = async () => {
     if (existing) {
       const ok = doAct({ type: 'UPDATE_FOOD', entry: { ...existing, items, meal, confirmedAt: nowISO(), updatedAt: nowISO() } }, 'Meal updated');
       if (ok) goBack('/food');
       return;
     }
     try {
-      const entry = manualEntry({ items, meal, date });
+      const entry = manualEntry({ items, meal, date, hint: draft?.hint || undefined, photoUri: await persistPhoto(draft?.photoUri, newId()) });
       if (doAct({ type: 'LOG_FOOD', entry }, `Logged ${Math.round(total.calories)} kcal`)) router.replace('/food');
     } catch {
       /* button is disabled when there are no items */
@@ -52,6 +57,7 @@ export default function ManualEntry() {
   return (
     <Screen size="medium">
       <PageHeader title={existing ? 'Edit meal' : 'Add food'} subtitle={formatDateLabel(date, today)} right={<Button title="Cancel" kind="ghost" onPress={() => goBack('/food')} />} />
+      {draft?.hint || draft?.photoUri ? <Card tone="muted"><Muted variant="small">{draft?.hint ? `Your hint: ${draft.hint}` : 'Your meal photo is kept with this entry.'}{draft?.photoUri ? ' Photo attached.' : ''}</Muted></Card> : null}
       <Columns ratio={[1, 1]}>
         {[
           <Stack key="search" gap={Space.md}>

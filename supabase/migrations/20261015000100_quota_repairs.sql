@@ -10,6 +10,7 @@ end;
 $$;
 revoke all on function public.release_food_search(uuid, date) from public, anon, authenticated;
 grant execute on function public.release_food_search(uuid, date) to service_role;
+
 create or replace function public.admin_reset_ai_quota(p_user uuid, p_day date)
 returns void language plpgsql security invoker set search_path = '' as $$
 declare previous_count integer;

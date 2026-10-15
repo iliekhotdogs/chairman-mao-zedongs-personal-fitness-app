@@ -221,7 +221,7 @@ export function Button({ title, kind = 'primary', icon, loading, disabled, size 
           opacity: isDisabled ? 0.45 : pressed ? 0.8 : 1,
           transform: [{ scale: pressed && !isDisabled ? 0.98 : 1 }],
           alignSelf: full ? 'stretch' : 'flex-start',
-          minHeight: size === 'sm' ? 34 : size === 'lg' ? 52 : 44,
+          minHeight: size === 'lg' ? 52 : 44,
         },
         style,
       ]}>
@@ -233,9 +233,9 @@ export function Button({ title, kind = 'primary', icon, loading, disabled, size 
   );
 }
 
-export function IconButton({ icon, label, onPress, color = C.text, size = 22, style }: { icon: IconName; label: string; onPress?: () => void; color?: string; size?: number; style?: StyleProp<ViewStyle> }) {
+export function IconButton({ icon, label, onPress, color = C.text, size = 22, style, disabled }: { icon: IconName; label: string; onPress?: () => void; color?: string; size?: number; style?: StyleProp<ViewStyle>; disabled?: boolean }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onPress} hitSlop={8} style={({ pressed, hovered }: PState) => [{ padding: 8, borderRadius: Radius.pill, opacity: pressed ? 0.6 : 1 }, style, hovered ? { backgroundColor: C.surfaceRaised } : null]}>
+    <Pressable accessibilityRole="button" accessibilityState={{ disabled }} accessibilityLabel={label} onPress={onPress} disabled={disabled} hitSlop={8} style={({ pressed, hovered }: PState) => [{ padding: 8, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: Radius.pill, opacity: disabled ? 0.45 : pressed ? 0.6 : 1 }, style, hovered ? { backgroundColor: C.surfaceRaised } : null]}>
       <Ionicons name={icon} size={size} color={color} />
     </Pressable>
   );
@@ -416,14 +416,15 @@ export function NumberField({ value, onChange, ...rest }: Omit<React.ComponentPr
   );
 }
 
-export function Chip({ label, selected, onPress, icon, asButton }: { label: string; selected?: boolean; onPress?: () => void; icon?: IconName; asButton?: boolean }) {
+export function Chip({ label, selected, onPress, icon, asButton, disabled }: { label: string; selected?: boolean; onPress?: () => void; icon?: IconName; asButton?: boolean; disabled?: boolean }) {
   return (
     <Pressable
       onPress={onPress}
+      disabled={disabled}
       accessibilityRole={asButton ? 'button' : 'checkbox'}
-      accessibilityState={asButton ? undefined : { checked: !!selected }}
+      accessibilityState={asButton ? { disabled } : { checked: !!selected, disabled }}
       accessibilityLabel={label}
-      style={({ pressed, hovered }: PState) => [styles.chip, hovered && !selected ? { borderColor: C.borderStrong, backgroundColor: C.surfaceRaised } : null, selected ? { backgroundColor: C.primarySoft, borderColor: C.primaryBorder } : null, pressed ? { opacity: 0.8 } : null]}>
+      style={({ pressed, hovered }: PState) => [styles.chip, hovered && !selected && !disabled ? { borderColor: C.borderStrong, backgroundColor: C.surfaceRaised } : null, selected ? { backgroundColor: C.primarySoft, borderColor: C.primaryBorder } : null, disabled ? { opacity: 0.45 } : pressed ? { opacity: 0.8 } : null]}>
       {icon ? <Ionicons name={icon} size={15} color={selected ? C.primary : C.textSecondary} /> : null}
       <Text variant="smallStrong" color={selected ? C.primary : C.text}>
         {label}
@@ -610,9 +611,9 @@ const styles = StyleSheet.create({
   emptyIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
   inputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: C.borderStrong, borderRadius: Radius.md, backgroundColor: C.bgDeep, minHeight: 44 },
   input: { flex: 1, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: C.text, minHeight: 44 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.pill, borderWidth: 1, borderColor: C.border, backgroundColor: C.surfaceAlt, minHeight: 36 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.pill, borderWidth: 1, borderColor: C.border, backgroundColor: C.surfaceAlt, minHeight: 44 },
   segment: { flexDirection: 'row', backgroundColor: C.bgDeep, borderRadius: Radius.md, borderWidth: 1, borderColor: C.border, padding: 3, gap: 2 },
-  segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 10, borderRadius: Radius.sm, minHeight: 36 },
+  segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 10, borderRadius: Radius.sm, minHeight: 44 },
   segmentItemSel: { backgroundColor: C.surfaceRaised },
   stepBtn: { backgroundColor: C.surfaceAlt },
   switchTrack: { width: 46, height: 28, borderRadius: 14, padding: 3, borderWidth: 1 },

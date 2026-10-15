@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pressable } from 'react-native';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
 import { Badge, Button, Card, EmptyState, Expandable, Menu, Muted, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, IconButton, Ionicons } from '@/components/ui';
@@ -23,12 +23,20 @@ export default function Workouts() {
   const [tab, setTab] = useState<Tab>('plan');
   const [preview, setPreview] = useState<WorkoutPlan | null>(null);
   const [toDelete, setToDelete] = useState<WorkoutPlan | null>(null);
+  const { preview: previewParam } = useLocalSearchParams<{ preview?: string }>();
+  const openedFromSettings = useRef(false);
   const units = state.settings.units;
   const active = activeSession(state);
   const [openDay, setOpenDay] = useState<string | null>(null);
   const todayDayId = workoutForDay(state, today).day?.sourceDayId ?? workoutForDay(state, today).day?.id;
 
   const proposeNewPlan = () => state.profile && setPreview(generatePlan(state.profile, today));
+  useEffect(() => {
+    if (previewParam === '1' && state.profile && !openedFromSettings.current) {
+      openedFromSettings.current = true;
+      setPreview(generatePlan(state.profile, today));
+    }
+  }, [previewParam, state.profile, today]);
 
   return (
     <Screen>

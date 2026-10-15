@@ -22,15 +22,15 @@ Deno.serve(async (request) => {
     return error instanceof BodyError ? json({ error: error.message }, error.status) : json({ error: 'Invalid request.' }, 400);
   }
 
-  // Keyed hash, never the raw address (see clientIpHash); 'unknown' shares one bucket.
-  const ipKey = (await clientIpHash(request)) ?? 'unknown';
-  const { data: allowed, error: limitError } = await admin.rpc('claim_signup_attempt', { p_ip: ipKey, p_day: utcDay(), p_limit: ATTEMPTS_PER_IP });
-  if (limitError) return json({ error: 'Signup is not ready. Apply the latest SQL migration first.' }, 503);
-  if (!allowed) return json({ error: 'Too many signup attempts from this network today. Try again tomorrow.' }, 429);
-
   const check = validateSignup(body);
   if (!check.ok) return json({ error: check.error }, 400);
   const { email, password, code } = check.value;
+  const ipKey = await clientIpHash(request);
+  if (ipKey) {
+    const { data: allowed, error: limitError } = await admin.rpc('claim_signup_attempt', { p_ip: ipKey, p_day: utcDay(), p_limit: ATTEMPTS_PER_IP });
+    if (limitError) return json({ error: 'Signup is not ready. Apply the latest SQL migration first.' }, 503);
+    if (!allowed) return json({ error: 'Too many signup attempts from this network today. Try again tomorrow.' }, 429);
+  }
 
   // Atomic: only one request can claim an unused, unexpired code.
   const { data: claimed, error: claimError } = await admin.rpc('claim_invite', { p_code: code, p_email: email });

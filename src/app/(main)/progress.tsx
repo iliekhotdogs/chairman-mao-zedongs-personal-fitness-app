@@ -12,7 +12,7 @@ import { ProgressPhotosSection } from '@/components/ProgressPhotos';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
 import { dayTargets, hasActivitySource, live, totalsForDay } from '@/lib/selectors';
-import { addDays, lastNDates, nowISO, parseISODate } from '@/lib/dates';
+import { addDays, formatDateLabel, lastNDates, nowISO, parseISODate } from '@/lib/dates';
 import { displayWeight, weightValue, weightUnit } from '@/lib/units';
 import { weightSlopePerDay } from '@/lib/coaching/adaptive';
 import { progressionSeries } from '@/lib/workouts/progression';
@@ -136,7 +136,7 @@ function Weight() {
       </Card>
       <Columns>
         {[
-          <Card key="a"><Stat label="Latest" value={last ? weightValue(last.weightKg, units) : '—'} unit={weightUnit(units)} sub={last?.date} /></Card>,
+          <Card key="a"><Stat label="Latest" value={last ? weightValue(last.weightKg, units) : '—'} unit={weightUnit(units)} sub={last ? formatDateLabel(last.date, today) : undefined} /></Card>,
           <Card key="b"><Stat label="3-week trend" value={perWeek !== undefined ? `${perWeek >= 0 ? '+' : ''}${weightValue(perWeek, units, 2)}` : '—'} unit={`${weightUnit(units)}/wk`} sub={perWeek === undefined ? 'Needs 4+ weigh-ins' : undefined} /></Card>,
           <Card key="c"><Stat label="Change (60 days)" value={first && last ? `${last.weightKg - first.weightKg >= 0 ? '+' : ''}${weightValue(last.weightKg - first.weightKg, units)}` : '—'} unit={weightUnit(units)} /></Card>,
         ]}

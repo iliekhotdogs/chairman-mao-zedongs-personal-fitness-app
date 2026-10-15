@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/lib/nav';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, EmptyState, Expandable, Field, Menu, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Stepper, Text, Ionicons, Columns, IconButton } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, EmptyState, Expandable, Field, IconButton, Menu, Muted, NumberField, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Ionicons, Columns } from '@/components/ui';
 import { ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
@@ -150,9 +150,9 @@ function SessionView({ session }: { session: WorkoutSession }) {
 
   const finish = () => {
     const now = nowISO();
-    if (!doAct({ type: 'FINISH_SESSION', sessionId: session.id, now, effort, pain, painNote: pain ? painNote.trim() : undefined }, 'Workout saved')) return;
+    if (!doAct({ type: 'FINISH_SESSION', sessionId: session.id, now, effort, pain, painNote: painNote.trim() || undefined }, 'Workout saved')) return;
     rest.skip();
-    const completed = { ...session, finishedAt: now, effort, pain, painNote: pain ? painNote.trim() : undefined };
+    const completed = { ...session, finishedAt: now, effort, pain, painNote: painNote.trim() || undefined };
     const after: AppState = { ...state, sessions: state.sessions.map((s) => (s.id === session.id ? completed : s)) };
     const p = progressionProposal(after, completed);
     if (p) doAct({ type: 'ADD_PROPOSALS', proposals: [p] });
@@ -214,10 +214,12 @@ function SessionView({ session }: { session: WorkoutSession }) {
             <Button title="Finish & save" icon="checkmark" onPress={finish} style={{ flex: 1 }} disabled={totalSets === 0} />
           </Row>
         }>
-        <Stack gap={Space.sm}>
-          <Muted>{totalSets === 0 ? 'Log at least one set before finishing, or discard this workout.' : `${totalSets} sets logged. A check-in helps the coach suggest next-session targets. You choose whether to apply them.`}</Muted>
-          <NumberField label="Effort (optional)" suffix="/10" value={effort} onChange={setEffort} hint="1 = easy, 10 = maximum effort" />
-        </Stack>
+        <Muted>{totalSets === 0 ? 'Log at least one set before finishing, or discard this workout.' : `${totalSets} sets logged. The coach will suggest next-session targets, and you choose whether to apply them.`}</Muted>
+        <Text variant="smallStrong">Effort (1–10, optional)</Text>
+        <Row wrap gap={6}>{Array.from({ length: 10 }, (_, i) => i + 1).map((value) => <Chip key={value} label={String(value)} selected={effort === value} onPress={() => setEffort(effort === value ? undefined : value)} />)}</Row>
+        <Segmented label="Pain during workout" value={pain ? 'yes' : 'no'} onChange={(value) => setPain(value === 'yes')} options={[{ value: 'no', label: 'No pain' }, { value: 'yes', label: 'Pain' }]} />
+        {pain ? <Field label="Where and what did you feel?" value={painNote} onChangeText={setPainNote} placeholder="Describe the pain" /> : null}
+        {pain ? <Banner kind="warning">The coach will not suggest a heavier workout when pain is reported.</Banner> : null}
       </Sheet>
       <Sheet
         visible={confirmDiscard}

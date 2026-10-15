@@ -8,9 +8,11 @@ create table public.user_ai_prefs (
 alter table public.user_ai_prefs enable row level security;
 revoke all on public.user_ai_prefs from anon, authenticated;
 grant select, insert, update, delete on public.user_ai_prefs to service_role;
+
 alter table public.app_config
   add column allowed_providers text[] not null default array['groq','gemini']::text[],
   add column allow_user_choice boolean not null default true;
+
 create table public.admin_bootstrap_emails (
   email text primary key check (email = lower(email)),
   created_at timestamptz not null default now()
@@ -19,6 +21,7 @@ alter table public.admin_bootstrap_emails enable row level security;
 revoke all on public.admin_bootstrap_emails from anon, authenticated;
 grant select, insert, update, delete on public.admin_bootstrap_emails to service_role;
 insert into public.admin_bootstrap_emails(email) values ('wesley.pang1@gmail.com') on conflict do nothing;
+
 create table public.admin_audit (
   id bigint generated always as identity primary key,
   actor uuid references auth.users(id) on delete set null,
@@ -29,6 +32,7 @@ create table public.admin_audit (
 alter table public.admin_audit enable row level security;
 revoke all on public.admin_audit from anon, authenticated;
 grant select, insert on public.admin_audit to service_role;
+
 -- Called on insert and confirmation updates. An unconfirmed email never gains a role.
 create or replace function public.handle_new_user_profile()
 returns trigger language plpgsql security definer set search_path = '' as $$
@@ -48,6 +52,7 @@ create trigger on_auth_user_created_profile after insert or update of email_conf
   for each row execute function public.handle_new_user_profile();
 update public.profiles set role = 'admin'
 where user_id in (select id from auth.users where lower(email) = 'wesley.pang1@gmail.com' and email_confirmed_at is not null);
+
 -- Row lock serializes role changes, including simultaneous last-admin demotions.
 create or replace function public.admin_set_role(p_actor uuid, p_target uuid, p_role text, p_owner uuid)
 returns text language plpgsql security invoker set search_path = '' as $$
@@ -69,6 +74,7 @@ end;
 $$;
 revoke all on function public.admin_set_role(uuid, uuid, text, uuid) from public, anon, authenticated;
 grant execute on function public.admin_set_role(uuid, uuid, text, uuid) to service_role;
+
 drop function if exists public.admin_list_users(integer, integer);
 create function public.admin_list_users(p_limit integer default 200, p_offset integer default 0)
 returns table (
