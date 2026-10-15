@@ -1,5 +1,13 @@
 # Change log
 
+## 2026-10-15 00:43 PDT — Codex
+
+- Replaced the user-selectable Gemini gateway with OpenRouter and added GLM 5.3 Flash, Nemotron 3.5 Lightning, and DeepSeek V4.1 Flash choices, with image-capable meal models and short DeepSeek responses.
+- Made Groq GPT-OSS 20B the lower-cost default and raised the daily allowance to 25 per user, 250 shared, and 250 per network.
+- Added a database migration for existing preferences and limits, and updated settings, tests, security checks, and provider documentation.
+
+Signed off: Codex
+
 ## 2026-10-14 15:43 PDT — Codex
 
 - Added a direct regression test for profile database failures returning the fail-closed 503 gate result, shared by AI and notifications.

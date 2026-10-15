@@ -31,8 +31,8 @@ export function AiSettings() {
       : <Badge kind="info" label="Shared AI via Supabase" />;
   const selected = info?.options?.find((option) => option.id === provider);
   const modelHint = (id: string) => ({
-    'openai/gpt-oss-120b': 'Best quality', 'openai/gpt-oss-20b': 'Faster, lower cost', 'qwen/qwen3.8-27b': 'Vision preview',
-    'gemini-3.5-flash-lite': 'Fast, low cost', 'gemini-3.8-flash': 'Higher quality', 'gemini-3.1-flash-lite': 'Fast alternative',
+    'openai/gpt-oss-20b': 'Fastest, lowest cost', 'openai/gpt-oss-120b': 'Stronger reasoning', 'qwen/qwen3.8-27b': 'Reads meal photos',
+    'z-ai/glm-5.3-flash': 'Fast, reads photos', 'nvidia/nemotron-3.5-lightning': 'Fast text chat', 'deepseek/deepseek-v4.1-flash': 'Stronger, reads photos',
   } as Record<string, string>)[id] ?? '';
   const save = async () => {
     setSaving(true); setError('');
@@ -63,6 +63,7 @@ export function AiSettings() {
               <Text variant="smallStrong">Chat model</Text>
               <Stack gap={Space.sm}>{selected.models.map((choice) => <Chip key={choice.id} label={`${choice.label} · ${modelHint(choice.id)}`} selected={model === choice.id} onPress={() => setModel(choice.id)} />)}</Stack>
               {provider === 'groq' ? <Muted variant="small">Meal photos use Qwen3.8 27B on Groq.</Muted> : null}
+              {provider === 'openrouter' && model === 'nvidia/nemotron-3.5-lightning' ? <Muted variant="small">Meal photos use GLM 5.3 Flash on OpenRouter.</Muted> : null}
               <Button title="Save AI choice" loading={saving} disabled={provider === info.provider && model === info.chatModel} onPress={save} />
             </> : null}
           </> : null}

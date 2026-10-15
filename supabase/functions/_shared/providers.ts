@@ -2,7 +2,7 @@
 // Deno or npm imports, so Jest can test it (src/lib/__tests__/aiRegistry.test.ts).
 // This is the single source of truth for provider URLs and model allowlists.
 
-export type ProviderId = 'groq' | 'gemini' | 'nvidia';
+export type ProviderId = 'groq' | 'openrouter' | 'nvidia';
 
 export interface ModelInfo {
   id: string;
@@ -35,38 +35,32 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     keyEnv: 'GROQ_API_KEY',
     // Verified 2026-10 against console.groq.com/docs/models and /docs/vision.
     chatModels: [
-      { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B' },
       { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B' },
+      { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B' },
       { id: 'qwen/qwen3.8-27b', label: 'Qwen3.8 27B' },
     ],
     // The only Groq model that accepts images (preview tier; max 3 images, 20 MB per request).
     visionModels: [{ id: 'qwen/qwen3.8-27b', label: 'Qwen3.8 27B' }],
     visionMaxTokens: 900,
   },
-  gemini: {
-    id: 'gemini',
-    label: 'Gemini',
+  openrouter: {
+    id: 'openrouter',
+    label: 'OpenRouter',
     userSelectable: true,
-    // Google's OpenAI-compatible endpoint; same request shape as Groq.
-    url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions',
-    keyEnv: 'GEMINI_API_KEY',
-    // Verified 2026-10 against ai.google.dev/gemini-api/docs/models and /pricing.
-    // gemini-2.5-pro was dropped: Google now limits the 2.5 family to existing users.
+    url: 'https://openrouter.ai/api/v1/chat/completions',
+    keyEnv: 'OPENROUTER_API_KEY',
+    // Verified against OpenRouter's live /api/v1/models catalog on 2026-10-15.
     chatModels: [
-      { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
-      { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-      { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite' },
+      { id: 'z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash' },
+      { id: 'nvidia/nemotron-3.5-lightning', label: 'Nemotron 3.5 Lightning' },
+      { id: 'deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash', extra: { reasoning: { enabled: false } } },
     ],
-    // Every Gemini model reads images; the OpenAI-compatible endpoint accepts base64 data URIs.
+    // Nemotron is text-only. GLM is the fallback for its meal photos.
     visionModels: [
-      { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash-Lite' },
-      { id: 'gemini-3.8-flash', label: 'Gemini 3.8 Flash' },
-      { id: 'gemini-3.1-flash-lite', label: 'Gemini 3.1 Flash-Lite' },
+      { id: 'z-ai/glm-5.3-flash', label: 'GLM 5.3 Flash' },
+      { id: 'deepseek/deepseek-v4.1-flash', label: 'DeepSeek V4.1 Flash', extra: { reasoning: { enabled: false } } },
     ],
     visionMaxTokens: 4096,
-    // Keeps "thinking" short so it does not eat the reply allowance. The OpenAI-compatible
-    // endpoint maps reasoning_effort to thinking_level (3.x); thinking cannot be fully off on 3.x.
-    extra: { reasoning_effort: 'low' },
   },
   nvidia: {
     id: 'nvidia',
@@ -110,11 +104,11 @@ export const DEFAULT_CONFIG: AiConfig = {
   provider: 'groq',
   chat_model: PROVIDERS.groq.chatModels[0].id,
   vision_model: PROVIDERS.groq.visionModels[0].id,
-  per_user_daily_limit: 5,
-  global_daily_limit: 40,
-  per_ip_daily_limit: 100,
+  per_user_daily_limit: 25,
+  global_daily_limit: 250,
+  per_ip_daily_limit: 250,
   ai_enabled: true,
-  allowed_providers: ['groq', 'gemini'],
+  allowed_providers: ['groq', 'openrouter'],
   allow_user_choice: true,
 };
 
@@ -195,7 +189,7 @@ export function validateConfigUpdate(current: AiConfig, patch: Record<string, un
     next.ai_enabled = patch.ai_enabled;
   }
   if (patch.allowed_providers !== undefined) {
-    if (!Array.isArray(patch.allowed_providers) || patch.allowed_providers.some((id) => !isProviderId(id) || !PROVIDERS[id].userSelectable)) return { ok: false, error: 'Allowed providers must be Groq and/or Gemini.' };
+    if (!Array.isArray(patch.allowed_providers) || patch.allowed_providers.some((id) => !isProviderId(id) || !PROVIDERS[id].userSelectable)) return { ok: false, error: 'Allowed providers must be Groq and/or OpenRouter.' };
     next.allowed_providers = [...new Set(patch.allowed_providers)];
   }
   if (patch.allow_user_choice !== undefined) {

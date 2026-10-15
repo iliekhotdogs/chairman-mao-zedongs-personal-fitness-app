@@ -1,7 +1,7 @@
 // Shared AI gateway. Deploy with JWT verification enabled.
 // The admin sets defaults, allowed providers, limits and kill switch in app_config.
 // User choices are resolved server-side. Keys are Edge Function secrets only: GROQ_API_KEY,
-// GEMINI_API_KEY, NVIDIA_API_KEY; optional FDC_API_KEY. Never place them in Expo env vars.
+// OPENROUTER_API_KEY, NVIDIA_API_KEY; optional FDC_API_KEY. Never place them in Expo env vars.
 import type { User } from 'npm:@supabase/supabase-js@2.117.2';
 import { admin, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, clientIpHash, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';

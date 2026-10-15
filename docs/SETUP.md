@@ -22,6 +22,7 @@ Apply the migrations in order (Supabase **SQL Editor**, or `supabase db push` af
 8. `supabase/migrations/20261015000000_security_hardening.sql`: security hardening. Apply it **before** redeploying the Edge Functions (step 5); the updated functions depend on it.
 9. `supabase/migrations/20261015000100_quota_repairs.sql`: atomic food-search refunds and admin quota reset.
 10. `supabase/migrations/20261015000200_user_ai_preference_admin.sql`: server-only user AI preferences, provider-choice controls, admin role audit and confirmed-email bootstrap.
+11. `supabase/migrations/20261015000300_openrouter_provider.sql`: replace Gemini with OpenRouter as a user choice, migrate saved choices, and set 25 requests per user, 250 shared and 250 per network per UTC day.
 
 Apply all migrations before redeploying `ai` and `admin-stats`; the functions now depend on the preference and quota RPCs.
 
@@ -52,7 +53,7 @@ In **Edge Functions → Secrets** (or `supabase secrets set NAME=value --project
 | Secret | Needed | Purpose |
 | --- | --- | --- |
 | `GROQ_API_KEY` | if provider is Groq (the default) | Groq key |
-| `GEMINI_API_KEY` | if provider is Gemini | Google AI Studio key (needs billing/credits) |
+| `OPENROUTER_API_KEY` | if provider is OpenRouter | OpenRouter API key (requires available credits) |
 | `NVIDIA_API_KEY` | if provider is NVIDIA | NVIDIA API catalog key (`nvapi-…`) |
 | `FDC_API_KEY` | recommended | USDA FoodData Central key; otherwise the restricted `DEMO_KEY` |
 | `ADMIN_USER_ID` | recommended | Set to Wesley's Auth UUID as the break-glass owner; it protects that role from removal |
@@ -60,7 +61,7 @@ In **Edge Functions → Secrets** (or `supabase secrets set NAME=value --project
 | `ALLOWED_ORIGINS` | for launch | Comma-separated web origins allowed by CORS, e.g. `https://fitcoach.vercel.app,http://localhost:8081`. Unset means `*`. |
 | `EXPO_ACCESS_TOKEN` | only with EAS "enhanced push security" | Expo access token the `notify` function sends to Expo's push API. Not needed otherwise. |
 
-`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided automatically. Never put any secret in `.env.local`, Expo public variables, Git or app settings. The old `OPENROUTER_API_KEY`, `AI_DAILY_LIMIT` and `AI_GLOBAL_DAILY_LIMIT` secrets are no longer read and can be deleted; limits now live in `app_config`.
+`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are provided automatically. Never put any secret in `.env.local`, Expo public variables, Git or app settings. The old `GEMINI_API_KEY`, `AI_DAILY_LIMIT` and `AI_GLOBAL_DAILY_LIMIT` secrets are no longer read and can be deleted; limits now live in `app_config`.
 
 ## 5. Deploy order
 

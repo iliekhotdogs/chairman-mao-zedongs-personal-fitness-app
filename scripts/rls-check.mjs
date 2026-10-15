@@ -182,7 +182,7 @@ async function main() {
   check(denied(prefRead), 'B cannot read A\'s AI preference', describe(prefRead));
   const prefWrite = await b.client.from('user_ai_prefs').insert({ user_id: a.id, provider: 'groq', chat_model: 'openai/gpt-oss-120b' });
   check(Boolean(prefWrite.error), 'B cannot write A\'s AI preference');
-  for (const choice of [{ provider: 'nvidia', chat_model: 'moonshotai/kimi-k2.6' }, { provider: 'groq', chat_model: 'gemini-3.8-flash' }]) {
+  for (const choice of [{ provider: 'nvidia', chat_model: 'moonshotai/kimi-k2.6' }, { provider: 'groq', chat_model: 'z-ai/glm-5.3-flash' }]) {
     const response = await b.client.functions.invoke('ai', { body: { action: 'set_preference', ...choice } });
     check(response.error?.context?.status === 400, `AI rejects unlisted choice ${choice.provider}/${choice.chat_model}`);
     const unchanged = await admin.from('user_ai_prefs').select('user_id').eq('user_id', b.id);
