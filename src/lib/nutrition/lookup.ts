@@ -140,12 +140,13 @@ export interface FdcResult {
  * production this call should go through the server so the key and rate limit are shared.
  */
 export async function searchFdc(query: string, apiKey: string, signal?: AbortSignal): Promise<FdcResult[]> {
-  const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(apiKey.trim())}`;
+  const url = 'https://api.nal.usda.gov/fdc/v1/foods/search';
   // USDA documents dataType as a JSON array. A comma-separated GET parameter can be
   // rejected with HTTP 400 even though DEMO_KEY happens to accept it.
+  // The key goes in the api.data.gov `X-Api-Key` header so it never lands in URLs/logs.
   const res = await fetch(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Api-Key': apiKey.trim() },
     body: JSON.stringify({ query, pageSize: 8, dataType: ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'] }),
     signal,
   });

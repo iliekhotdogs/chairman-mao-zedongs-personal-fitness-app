@@ -1,9 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, Pressable, ScrollView, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C, Radius, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, EmptyState, IconButton, Menu, Muted, Row, Sheet, Stack, Text, ErrorState } from '@/components/ui';
+import { AccentRule, Badge, Banner, Button, Card, Chip, EmptyState, IconButton, Menu, Muted, Row, Sheet, Stack, Text, ErrorState } from '@/components/ui';
 import { InsightCard, ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
@@ -119,7 +119,7 @@ export default function Coach() {
         ) : null}
         {error ? <ErrorState title="No reply" body={error.msg} onRetry={() => send(error.retry)} /> : null}
       </ScrollView>
-      <View style={{ borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.surface, padding: Space.md, gap: Space.sm }}>
+      <View style={styles.composer}>
         {!simulated ? <PrivacyNotice kind="chat" dismissSignal={sent} /> : null}
         <Row wrap gap={6}>
           {(moreIdeas ? PROMPTS : PROMPTS.slice(0, 2)).map((p) => (
@@ -136,7 +136,7 @@ export default function Coach() {
             onSubmitEditing={() => send(text)}
             returnKeyType="send"
             accessibilityLabel="Message your coach"
-            style={[{ flex: 1, borderWidth: 1, borderColor: C.borderStrong, borderRadius: Radius.pill, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, color: C.text, minHeight: 44 }, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
+            style={[styles.input, Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null]}
           />
           <IconButton icon="send" label="Send" color={text.trim() ? C.primary : C.borderStrong} onPress={() => send(text)} />
         </Row>
@@ -146,10 +146,11 @@ export default function Coach() {
 
   return (
     <KeyboardAvoidingView style={{ flex: 1, backgroundColor: C.bg }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <View style={{ paddingTop: isPhone ? Math.max(insets.top, 12) + 8 : Space.xl, paddingHorizontal: isPhone ? Space.lg : Space.xl, paddingBottom: Space.md, gap: Space.md, borderBottomWidth: 1, borderBottomColor: C.border, backgroundColor: C.surface }}>
+      <View style={[styles.header, { paddingTop: isPhone ? Math.max(insets.top, 12) + 8 : Space.xl, paddingHorizontal: isPhone ? Space.lg : Space.xl }]}>
         <Row>
           <Stack gap={0} style={{ flex: 1 }}>
             <Text variant="h1" accessibilityRole="header">Coach</Text>
+            <AccentRule style={{ marginVertical: 6 }} />
             <Muted variant="small">Suggestions are never applied without your OK.</Muted>
           </Stack>
           {!isDesktop ? (
@@ -201,7 +202,7 @@ function Bubble({ m }: { m: ChatMessage }) {
   const proposals = (m.proposalIds ?? []).map((id) => state.proposals.find((p) => p.id === id)).filter(Boolean);
   return (
     <Stack gap={Space.sm} style={{ alignItems: mine ? 'flex-end' : 'flex-start' }}>
-      <View style={{ maxWidth: '88%', backgroundColor: mine ? C.primary : C.surface, borderRadius: Radius.lg, borderWidth: mine ? 0 : 1, borderColor: C.border, paddingHorizontal: 14, paddingVertical: 10, gap: 6 }}>
+      <View style={[styles.bubble, mine ? styles.bubbleMine : null]}>
         {!mine && (m.simulated || m.safety) ? (
           <Row wrap gap={4}>
             {m.safety ? <Badge kind="danger" label="Safety guidance, not medical advice" icon="medkit-outline" /> : null}
@@ -209,7 +210,7 @@ function Bubble({ m }: { m: ChatMessage }) {
           </Row>
         ) : null}
         <Text color={mine ? C.onPrimary : C.text}>{m.text}</Text>
-        <Text variant="caption" color={mine ? '#D1FADF' : C.textMuted}>{formatTime(m.createdAt)}</Text>
+        <Text variant="caption" color={mine ? C.onPrimary : C.textMuted} style={mine ? { opacity: 0.65 } : undefined}>{formatTime(m.createdAt)}</Text>
       </View>
       {proposals.map((p) => (
         <View key={p!.id} style={{ width: '100%', maxWidth: 560 }}>
@@ -219,3 +220,11 @@ function Bubble({ m }: { m: ChatMessage }) {
     </Stack>
   );
 }
+
+const styles = StyleSheet.create({
+  header: { paddingBottom: Space.md, gap: Space.md, borderBottomWidth: 1, borderBottomColor: C.border, backgroundColor: C.bgDeep },
+  composer: { borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bgDeep, padding: Space.md, gap: Space.sm },
+  input: { flex: 1, borderWidth: 1, borderColor: C.borderStrong, borderRadius: Radius.pill, backgroundColor: C.surface, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, color: C.text, minHeight: 44 },
+  bubble: { maxWidth: '88%', backgroundColor: C.surface, borderRadius: Radius.lg, borderWidth: 1, borderColor: C.border, paddingHorizontal: 14, paddingVertical: 10, gap: 6 },
+  bubbleMine: { backgroundColor: C.primary, borderWidth: 0, borderBottomRightRadius: Radius.sm },
+});

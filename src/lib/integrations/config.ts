@@ -2,6 +2,8 @@ import { useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { log } from '@/lib/log';
+
 type IntegrationConfig = { supabaseUrl: string; supabaseKey: string; usdaKey: string };
 const EMPTY: IntegrationConfig = { supabaseUrl: '', supabaseKey: '', usdaKey: '' };
 const STORAGE_KEY = 'fitapp.integrations.v1';
@@ -39,7 +41,8 @@ export async function loadIntegrationConfig(): Promise<void> {
         usdaKey: typeof parsed.usdaKey === 'string' ? parsed.usdaKey : '',
       };
     }
-  } catch {
+  } catch (e) {
+    log.warn('config', 'Saved integration settings were unreadable; using defaults.', e);
     saved = EMPTY;
   }
   loaded = true;
@@ -48,9 +51,14 @@ export async function loadIntegrationConfig(): Promise<void> {
 
 export function getIntegrationConfig(): IntegrationConfig { return saved; }
 
+// Build-time values are often pasted into hosting dashboards with quotes or a trailing newline.
+function cleanEnv(value: string | undefined): string {
+  return (value ?? '').trim().replace(/^(['"])(.*)\1$/, '$2').trim();
+}
+
 export function getSupabaseConfig() {
-  const builtUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
-  const builtKey = process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+  const builtUrl = cleanEnv(process.env.EXPO_PUBLIC_SUPABASE_URL).replace(/\/$/, '');
+  const builtKey = cleanEnv(process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY) || cleanEnv(process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY);
   return {
     url: builtUrl && builtKey ? builtUrl : saved.supabaseUrl,
     key: builtUrl && builtKey ? builtKey : saved.supabaseKey,

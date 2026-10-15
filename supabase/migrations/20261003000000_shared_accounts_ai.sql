@@ -1,5 +1,5 @@
 -- Run after 0001_init.sql. Public clients get only their own rows; the shared
--- OpenRouter key and aggregate usage are available to Edge Functions only.
+-- AI provider keys and aggregate usage are available to Edge Functions only.
 
 grant select, insert, update, delete on public.records to authenticated;
 grant select, insert, update, delete on public.push_tokens to authenticated;

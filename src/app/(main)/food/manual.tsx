@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
+import { goBack } from '@/lib/nav';
 
 import { Space } from '@/constants/theme';
 import { Button, Card, Columns, EmptyState, Muted, PageHeader, Row, Screen, Segmented, Stack, Text } from '@/components/ui';
@@ -28,7 +29,7 @@ export default function ManualEntry() {
 
   if (id && !existing) {
     return (
-      <Screen maxWidth={720}>
+      <Screen size="narrow">
         <EmptyState icon="search-outline" title="Entry not found" body="It may have been deleted on another device." action={<Button title="Back to food log" onPress={() => router.replace('/food')} />} />
       </Screen>
     );
@@ -37,7 +38,7 @@ export default function ManualEntry() {
   const save = () => {
     if (existing) {
       const ok = doAct({ type: 'UPDATE_FOOD', entry: { ...existing, items, meal, confirmedAt: nowISO(), updatedAt: nowISO() } }, 'Meal updated');
-      if (ok) router.back();
+      if (ok) goBack('/food');
       return;
     }
     try {
@@ -49,12 +50,15 @@ export default function ManualEntry() {
   };
 
   return (
-    <Screen maxWidth={980}>
-      <PageHeader title={existing ? 'Edit meal' : 'Add food'} subtitle={formatDateLabel(date, today)} right={<Button title="Cancel" kind="ghost" onPress={() => router.back()} />} />
+    <Screen size="medium">
+      <PageHeader title={existing ? 'Edit meal' : 'Add food'} subtitle={formatDateLabel(date, today)} right={<Button title="Cancel" kind="ghost" onPress={() => goBack('/food')} />} />
       <Columns ratio={[1, 1]}>
         {[
           <Stack key="search" gap={Space.md}>
-            <Text variant="h3">Find a food</Text>
+            <Row>
+              <Text variant="h3" style={{ flex: 1 }}>Find a food</Text>
+              {!existing ? <Button title="Scan barcode" kind="secondary" size="sm" icon="barcode-outline" onPress={() => router.replace({ pathname: '/food/barcode', params: { date } })} /> : null}
+            </Row>
             <FoodSearch onPick={(item) => setItems([...items, item])} />
           </Stack>,
           <Stack key="items" gap={Space.md}>

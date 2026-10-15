@@ -12,3 +12,7 @@ verify_jwt = true
 
 [functions.notify]
 verify_jwt = true
+
+# No account exists yet when an invite is redeemed.
+[functions.redeem-invite]
+verify_jwt = false

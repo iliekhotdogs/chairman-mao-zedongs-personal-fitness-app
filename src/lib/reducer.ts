@@ -1,11 +1,14 @@
 import type { AppState, WorkoutOverride } from './state';
 import type {
   ActivityRecord, ChatMessage, FoodEntry, GoalPriority, Insight, IntegrationState, LoggedSet, NotificationRecord,
-  NutritionTargets, Profile, Proposal, Settings, WeightEntry, WorkoutPlan, WorkoutSession, ISODate,
+  NutritionTargets, Profile, ProgressPhoto, Proposal, Settings, WeightEntry, WorkoutPlan, WorkoutSession, ISODate,
 } from './types';
 import { mergeActivity } from './activity/activity';
 import { newId } from './id';
-import { mergeRemote, type RemoteRecord } from './sync/merge';
+import {
+  applyPhotoUploads, clearStorageRemovals, deletePhotoRecord, importLegacyState, mergeRemote,
+  type PhotoUpload, type RemoteRecord, type StorageRemoval,
+} from './sync/merge';
 import { calorieFloor } from './nutrition/targets';
 
 export type Action =
@@ -19,6 +22,8 @@ export type Action =
   | { type: 'DELETE_FOOD'; id: string; now: string }
   | { type: 'LOG_WEIGHT'; entry: WeightEntry }
   | { type: 'DELETE_WEIGHT'; id: string; now: string }
+  | { type: 'ADD_PROGRESS_PHOTO'; photo: ProgressPhoto }
+  | { type: 'DELETE_PROGRESS_PHOTO'; id: string; now: string }
   | { type: 'SET_PLAN'; plan: WorkoutPlan; confirmed: boolean }
   | { type: 'SAVE_ROUTINE'; routine: WorkoutPlan }
   | { type: 'DELETE_ROUTINE'; id: string; now: string }
@@ -43,7 +48,13 @@ export type Action =
   | { type: 'RECORD_NOTIFICATION'; record: NotificationRecord }
   | { type: 'UPDATE_SETTINGS'; patch: Partial<Omit<Settings, 'updatedAt'>>; now: string }
   | { type: 'REPLACE_STATE'; state: AppState }
-  | { type: 'MERGE_REMOTE'; rows: RemoteRecord[] };
+  | { type: 'MERGE_REMOTE'; rows: RemoteRecord[] }
+  /** Sync uploaded local photos; points the CURRENT records at their cloud copies. */
+  | { type: 'PHOTOS_UPLOADED'; uploads: PhotoUpload[]; now: string }
+  /** Sync removed these deleted photos from cloud Storage. */
+  | { type: 'STORAGE_REMOVED'; removed: StorageRemoval[] }
+  /** Merge data saved on this device before sign-in into the account (see importLegacyState). */
+  | { type: 'IMPORT_LEGACY'; legacy: AppState; now: string };
 
 export class RuleViolation extends Error {}
 
@@ -98,6 +109,17 @@ export function checkAction(state: AppState, action: Action): void {
     case 'FINISH_SESSION':
       if (action.effort !== undefined && (!Number.isInteger(action.effort) || action.effort < 1 || action.effort > 10)) throw new RuleViolation('Effort must be between 1 and 10.');
       return;
+    case 'ADD_PROGRESS_PHOTO': {
+      const p = action.photo;
+      if (!p.uri) throw new RuleViolation('The photo could not be saved. Try again.');
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(p.date)) throw new RuleViolation('Pick a date for this photo.');
+      if (p.weightKg !== undefined && !(p.weightKg > 20 && p.weightKg < 400)) throw new RuleViolation('That body weight looks out of range.');
+      if (p.note !== undefined && p.note.length > 280) throw new RuleViolation('Keep the note under 280 characters.');
+      return;
+    }
+    case 'DELETE_PROGRESS_PHOTO':
+      if (!state.progressPhotos.some((p) => p.id === action.id && !p.deleted)) throw new RuleViolation('Photo not found. It may have been deleted on another device.');
+      return;
     default:
       return;
   }
@@ -118,11 +140,26 @@ function updateSession(state: AppState, id: string, fn: (s: WorkoutSession) => W
   return { ...state, sessions: state.sessions.map((s) => (s.id === id ? fn(s) : s)) };
 }
 
+/** Actions that `checkedAction` already validated, so the reducer doesn't check them twice. */
+const prechecked = new WeakSet<Action>();
+
+/**
+ * Validate an action once (throwing RuleViolation for the caller to show) and mark it so
+ * the reducer skips its own check. The reducer still guards anything it applies.
+ */
+export function checkedAction<A extends Action>(state: AppState, action: A): A {
+  checkAction(state, action);
+  prechecked.add(action);
+  return action;
+}
+
 export function reducer(state: AppState, action: Action): AppState {
-  try {
-    checkAction(state, action);
-  } catch {
-    return state;
+  if (!prechecked.has(action)) {
+    try {
+      checkAction(state, action);
+    } catch {
+      return state;
+    }
   }
   switch (action.type) {
     case 'HYDRATE':
@@ -131,6 +168,12 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'MERGE_REMOTE':
       return mergeRemote(state, action.rows);
+    case 'PHOTOS_UPLOADED':
+      return applyPhotoUploads(state, action.uploads, action.now);
+    case 'STORAGE_REMOVED':
+      return clearStorageRemovals(state, action.removed);
+    case 'IMPORT_LEGACY':
+      return importLegacyState(state, action.legacy, action.now);
 
     case 'COMPLETE_ONBOARDING':
       return {
@@ -156,7 +199,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'UPDATE_FOOD':
       return { ...state, foodLog: upsert(state.foodLog, action.entry) };
     case 'DELETE_FOOD':
-      return { ...state, foodLog: tombstone(state.foodLog, action.id, action.now) };
+      return { ...state, foodLog: deletePhotoRecord(state.foodLog, 'foodLog', action.id, action.now) };
 
     case 'LOG_WEIGHT': {
       // one weigh-in per day: replace an existing entry for the same date
@@ -166,6 +209,11 @@ export function reducer(state: AppState, action: Action): AppState {
     }
     case 'DELETE_WEIGHT':
       return { ...state, weights: tombstone(state.weights, action.id, action.now) };
+
+    case 'ADD_PROGRESS_PHOTO':
+      return { ...state, progressPhotos: upsert(state.progressPhotos, action.photo) };
+    case 'DELETE_PROGRESS_PHOTO':
+      return { ...state, progressPhotos: deletePhotoRecord(state.progressPhotos, 'progressPhotos', action.id, action.now) };
 
     case 'SET_PLAN':
       return { ...state, plan: action.plan };
@@ -245,7 +293,9 @@ export function reducer(state: AppState, action: Action): AppState {
 
 /** Apply an accepted proposal. This is the only code path that changes plans/targets from a suggestion. */
 function applyProposal(state: AppState, id: string, now: string): AppState {
-  const p = state.proposals.find((x) => x.id === id)!;
+  const p = state.proposals.find((x) => x.id === id);
+  // The action may have been checked against an earlier state; never apply a stale proposal.
+  if (!p || p.status !== 'pending') return state;
   const proposals = state.proposals.map((x) => (x.id === id ? { ...x, status: 'accepted' as const, decidedAt: now, updatedAt: now } : x));
   const c = p.change;
   switch (c.type) {
@@ -258,7 +308,8 @@ function applyProposal(state: AppState, id: string, now: string): AppState {
       };
     }
     case 'target_change':
-      return { ...state, proposals, targets: { ...state.targets!, ...c.next, updatedAt: now, method: `${state.targets!.method} · adjusted from your progress (${now.slice(0, 10)})` } };
+      if (!state.targets) return state;
+      return { ...state, proposals, targets: { ...state.targets, ...c.next, updatedAt: now, method: `${state.targets.method} · adjusted from your progress (${now.slice(0, 10)})` } };
     case 'goal_change':
       return {
         ...state,

@@ -36,7 +36,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
         <View pointerEvents="none" style={[styles.wrap, { bottom: Math.max(insets.bottom, 12) + 76 }]}>
           <Animated.View style={[styles.toast, { opacity }]} accessibilityLiveRegion="polite" accessibilityRole={toast.kind === 'error' ? 'alert' : undefined}>
             <Ionicons name={toast.kind === 'error' ? 'alert-circle' : toast.kind === 'info' ? 'information-circle' : 'checkmark-circle'} size={18} color={color} />
-            <Text variant="smallStrong" color="#fff" style={{ flexShrink: 1 }}>
+            <Text variant="smallStrong" color={C.text} style={{ flexShrink: 1 }}>
               {toast.msg}
             </Text>
           </Animated.View>
@@ -69,5 +69,5 @@ export function useAct() {
 
 const styles = StyleSheet.create({
   wrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', paddingHorizontal: Space.lg },
-  toast: { flexDirection: 'row', alignItems: 'center', gap: Space.sm, backgroundColor: '#1D2939', paddingHorizontal: Space.lg, paddingVertical: Space.md, borderRadius: Radius.md, maxWidth: 520 },
+  toast: { flexDirection: 'row', alignItems: 'center', gap: Space.sm, backgroundColor: C.toast, borderWidth: 1, borderColor: C.borderStrong, paddingHorizontal: Space.lg, paddingVertical: Space.md, borderRadius: Radius.md, maxWidth: 520 },
 });

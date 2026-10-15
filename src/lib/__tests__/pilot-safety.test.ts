@@ -3,12 +3,8 @@ import { checkAction, reducer } from '../reducer';
 import { calorieFloor } from '../nutrition/targets';
 import { hasInjuryRedFlag, isUrgentSymptom, simulateCoachReply } from '../coaching/coachSim';
 import { migrateState, STATE_VERSION } from '../state';
-import { photoObjectForDeletion, syncNow } from '../sync/sync';
-import { supabase } from '../sync/supabase';
 import { matchingFood, validateVisionItem } from '../../../supabase/functions/ai/foodValidation';
 import type { Proposal } from '../types';
-
-jest.mock('../sync/supabase', () => ({ supabase: jest.fn() }));
 
 const date = '2026-10-02';
 const now = `${date}T12:00:00.000Z`;
@@ -62,29 +58,4 @@ it('migrates old photo and session data with safe defaults', () => {
   expect(next.version).toBe(STATE_VERSION);
   expect(next.foodLog.find((e) => e.origin === 'photo')?.estimateQuality?.overallConfidence).toBe('low');
   expect(next.sessions[0].pain).toBeUndefined();
-});
-
-it('only permits deletion of an object in the signed-in folder', () => {
-  expect(photoObjectForDeletion('storage:food-photos/user-1/meal-1.jpg', 'user-1')).toBe('user-1/meal-1.jpg');
-  expect(photoObjectForDeletion('storage:food-photos/user-2/meal-1.jpg', 'user-1')).toBeNull();
-});
-
-it('keeps a photo tombstone for retry when Storage removal fails', async () => {
-  const entry = { ...state().foodLog[0], id: 'meal-1', photoUri: 'storage:food-photos/user-1/meal-1.jpg', deleted: true, updatedAt: now };
-  const s = { ...state(), foodLog: [entry] };
-  let fail = true;
-  const remove = jest.fn(async () => fail ? { error: new Error('offline') } : { error: null });
-  const upsert = jest.fn(async () => ({ error: null }));
-  const row = { collection: 'foodLog', id: entry.id, data: entry, updated_at: now, deleted: true, synced_at: now };
-  const query = { eq: () => query, gt: () => query, order: () => query, limit: async () => ({ data: [row], error: null }) };
-  (supabase as jest.Mock).mockReturnValue({ storage: { from: () => ({ remove }) }, from: () => ({ upsert, select: () => query }) });
-  const cursor = { lastPulledAt: '1970-01-01T00:00:00.000Z', lastPushedAt: '1970-01-01T00:00:00.000Z' };
-  const first = await syncNow(s, 'user-1', cursor);
-  expect(remove).toHaveBeenCalledTimes(1);
-  expect(first.rows.find((r) => r.id === entry.id)?.data).toHaveProperty('photoUri', entry.photoUri);
-  fail = false;
-  const second = await syncNow(s, 'user-1', cursor);
-  expect(remove).toHaveBeenCalledTimes(2);
-  expect(second.rows.at(-1)?.data).toHaveProperty('photoUri', undefined);
-  expect(upsert).toHaveBeenCalled();
 });

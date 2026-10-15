@@ -3,11 +3,14 @@
   "main": "expo-router/entry",
   "version": "1.0.0",
   "dependencies": {
+    "@expo-google-fonts/barlow-condensed": "^0.4.1",
     "@expo/ui": "~57.0.21",
     "@expo/vector-icons": "^15.0.2",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@sentry/react-native": "~7.11.0",
     "@supabase/supabase-js": "^2.117.2",
     "expo": "~57.0.26",
+    "expo-camera": "~57.0.6",
     "expo-constants": "~57.0.20",
     "expo-crypto": "~57.0.3",
     "expo-dev-client": "~57.0.19",
@@ -15,6 +18,7 @@
     "expo-file-system": "~57.0.7",
     "expo-font": "~57.0.4",
     "expo-glass-effect": "~57.0.4",
+    "expo-haptics": "~57.0.3",
     "expo-image": "~57.0.5",
     "expo-image-manipulator": "~57.0.20",
     "expo-image-picker": "~57.0.20",
@@ -22,6 +26,7 @@
     "expo-notifications": "~57.0.21",
     "expo-router": "~57.0.24",
     "expo-secure-store": "~57.0.4",
+    "expo-sharing": "~57.0.23",
     "expo-splash-screen": "~57.0.9",
     "expo-status-bar": "~57.0.1",
     "expo-symbols": "~57.0.3",
@@ -36,7 +41,8 @@
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",
     "react-native-web": "~0.21.0",
-    "react-native-worklets": "0.10.1"
+    "react-native-worklets": "0.10.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/jest": "^29.5.14",
@@ -49,17 +55,22 @@
   },
   "scripts": {
     "start": "expo start",
-    "reset-project": "node ./scripts/reset-project.js",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
+    "build:web": "expo export --platform web",
     "lint": "expo lint",
     "test": "jest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:rls": "node scripts/rls-check.mjs"
   },
   "private": true,
+  "engines": {
+    "node": ">=20"
+  },
   "jest": {
     "preset": "jest-expo",
+    "globalSetup": "<rootDir>/jest.global-setup.js",
     "moduleNameMapper": {
       "^@/(.*)$": "<rootDir>/src/$1"
     },

@@ -5,6 +5,7 @@ import { C, Radius, Space } from '@/constants/theme';
 import { Badge, Muted, ProgressBar, Row, Stack, Text, Ionicons } from './ui';
 import { Ring } from './charts';
 import { signedPhotoUrl } from '@/lib/sync/sync';
+import { safeSourceUrl } from '@/lib/navLinks';
 
 export function sourceBadge(s: NutritionSource) {
   if (s.kind === 'official_restaurant') return <Badge kind="sourced" label="Official restaurant data" />;
@@ -15,12 +16,13 @@ export function sourceBadge(s: NutritionSource) {
 }
 
 export function SourceLine({ source }: { source: NutritionSource }) {
+  const url = safeSourceUrl(source.url);
   return (
     <Stack gap={2}>
       <Row wrap gap={6}>{sourceBadge(source)}</Row>
       <Muted variant="small">{source.label}</Muted>
-      {source.url ? (
-        <Pressable onPress={() => Linking.openURL(source.url!)} accessibilityRole="link">
+      {url ? (
+        <Pressable onPress={() => void Linking.openURL(url)} accessibilityRole="link" accessibilityHint="Opens the nutrition database in your browser">
           <Text variant="small" color={C.info} style={{ textDecorationLine: 'underline' }}>
             View source
           </Text>
@@ -42,7 +44,7 @@ export function CaloriesRing({ eaten, target, size = 156 }: { eaten: number; tar
   const remaining = Math.round(target - eaten);
   return (
     <Ring value={eaten} max={target} size={size} stroke={size > 140 ? 13 : 10}>
-      <Text variant={size > 140 ? 'number' : 'h2'}>{Math.abs(remaining).toLocaleString()}</Text>
+      <Text variant={size > 140 ? 'number' : 'numberSm'}>{Math.abs(remaining).toLocaleString()}</Text>
       <Muted variant="small">{remaining >= 0 ? 'kcal left' : 'kcal over'}</Muted>
     </Ring>
   );
