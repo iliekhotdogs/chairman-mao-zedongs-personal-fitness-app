@@ -464,6 +464,34 @@ export function Sheet({ visible, onClose, title, children, footer }: { visible: 
   );
 }
 
+/** Overflow / action menu: a trigger (icon or labelled button) that opens a sheet of actions. */
+export function Menu({ title = 'Options', label = 'More options', trigger, items }: { title?: string; label?: string; trigger?: string; items: { label: string; icon?: IconName; danger?: boolean; onPress: () => void }[] }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      {trigger ? <Button title={trigger} kind="secondary" size="sm" icon="ellipsis-horizontal" onPress={() => setOpen(true)} /> : <IconButton icon="ellipsis-horizontal" label={label} color={C.textSecondary} onPress={() => setOpen(true)} />}
+      <Sheet visible={open} onClose={() => setOpen(false)} title={title}>
+        {items.map((it) => (
+          <Button key={it.label} title={it.label} icon={it.icon} kind={it.danger ? 'danger' : 'secondary'} full onPress={() => { setOpen(false); it.onPress(); }} />
+        ))}
+      </Sheet>
+    </>
+  );
+}
+
+/** Small "i" icon that explains a chart legend or term in a sheet. */
+export function InfoTip({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <IconButton icon="information-circle-outline" label={`About: ${title}`} size={18} color={C.textSecondary} onPress={() => setOpen(true)} />
+      <Sheet visible={open} onClose={() => setOpen(false)} title={title}>
+        {typeof children === 'string' ? <Muted>{children}</Muted> : children}
+      </Sheet>
+    </>
+  );
+}
+
 const styles = StyleSheet.create({
   card: { borderRadius: Radius.lg, borderWidth: 1, padding: Space.lg, gap: Space.sm },
   button: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Space.sm, borderRadius: Radius.md, borderWidth: 1 },

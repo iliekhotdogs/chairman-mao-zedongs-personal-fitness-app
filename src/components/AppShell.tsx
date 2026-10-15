@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C, Radius, Space } from '@/constants/theme';
 import { useLayout } from '@/hooks/useLayout';
-import { Badge, Ionicons, Muted, Row, Stack, Text, type IconName } from './ui';
+import { Badge, IconButton, Ionicons, Muted, Row, Stack, Text, type IconName } from './ui';
 import { useStore } from '@/store/AppStore';
 import { pendingProposals } from '@/lib/selectors';
 
@@ -42,7 +42,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ))}
           </Stack>
           <View style={{ flex: 1 }} />
-          <SideItem item={SETTINGS} active={SETTINGS.match(path)} />
+          <SideItem item={{ ...SETTINGS, label: 'Account & settings', icon: 'person-circle-outline', iconActive: 'person-circle' }} active={SETTINGS.match(path)} />
           <View style={{ paddingHorizontal: Space.sm, paddingTop: Space.md }}>
             <Muted variant="caption">{sync.configured ? (sync.session ? `Synced account · ${sync.status === 'syncing' ? 'syncing…' : sync.status === 'error' ? 'sync error' : 'up to date'}` : 'Not signed in · this device only') : 'Local mode · this device only'}</Muted>
           </View>
@@ -54,6 +54,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <View style={[styles.topbar, { paddingTop: Math.max(insets.top, 4) }]}>
+        <IconButton icon="person-circle-outline" label="Account and settings" onPress={() => router.navigate('/settings' as never)} />
+      </View>
       <View style={{ flex: 1 }}>{children}</View>
       <View style={[styles.tabbar, { paddingBottom: Math.max(insets.bottom, 8) }]} accessibilityRole="tablist">
         {NAV.map((n) => {
@@ -96,6 +99,7 @@ const styles = StyleSheet.create({
   sidebar: { width: 240, backgroundColor: C.surface, borderRightWidth: 1, borderRightColor: C.border, paddingHorizontal: Space.md, paddingVertical: Space.xl },
   logo: { width: 32, height: 32, borderRadius: 10, backgroundColor: C.primary, alignItems: 'center', justifyContent: 'center' },
   sideItem: { flexDirection: 'row', alignItems: 'center', gap: Space.md, paddingHorizontal: Space.md, paddingVertical: 10, borderRadius: Radius.md },
+  topbar: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: Space.sm, backgroundColor: C.bg },
   tabbar: { flexDirection: 'row', backgroundColor: C.surface, borderTopWidth: 1, borderTopColor: C.border, paddingTop: 8 },
   tab: { flex: 1, alignItems: 'center', gap: 3, minHeight: 48, justifyContent: 'center' },
   dot: { position: 'absolute', top: -2, right: -4, width: 9, height: 9, borderRadius: 5, backgroundColor: C.warning, borderWidth: 1.5, borderColor: C.surface },

@@ -74,3 +74,8 @@ export function activityForDay(state: AppState, date: ISODate) {
 export function visibleChat(state: AppState) {
   return live(state.chat);
 }
+
+/** Activity UI is hidden until some step source exists (records, or a connected integration). Dev builds always show it. */
+export function hasActivitySource(state: AppState): boolean {
+  return __DEV__ || live(state.activity).length > 0 || state.integrations.some((i) => i.status === 'connected');
+}

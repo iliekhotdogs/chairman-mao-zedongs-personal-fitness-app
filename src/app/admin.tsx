@@ -18,10 +18,11 @@ export default function AdminStats() {
     setBusy(true);
     setError('');
     const sb = supabase();
-    if (!sb) { setError('Supabase is not connected.'); setBusy(false); return; }
+    if (!sb) { setError('Not connected to the server.'); setBusy(false); return; }
     try {
       const { data, error: invokeError } = await sb.functions.invoke('admin-stats', { body: { action: 'stats' } });
-      if (invokeError || !data || typeof data.accounts !== 'number') throw new Error('Admin access is unavailable. Sign in as the owner and check the Edge Function setup.');
+      if (invokeError) { router.replace('/'); return; } // non-admins (403) never see this screen
+      if (!data || typeof data.accounts !== 'number') throw new Error('Admin access is unavailable. Sign in as the owner and check the Edge Function setup.');
       setStats(data as Stats);
     } catch (e) { setError(e instanceof Error ? e.message : 'Could not load stats.'); setStats(undefined); }
     finally { setBusy(false); }

@@ -120,7 +120,9 @@ export function confirmEstimate(args: {
   const { estimate, items, meal, date, userAccepted } = args;
   if (userAccepted !== true) throw new FoodConfirmationError('The calorie estimate must be explicitly accepted before logging.');
   if (!items.length) throw new FoodConfirmationError('Add at least one food item before logging.');
+  if (estimate.rejectedItems && items.length === estimate.items.length && items.every((item, index) => item === estimate.items[index])) throw new FoodConfirmationError('The AI left out an invalid food item. Review and correct the meal before logging.');
   for (const i of items) {
+    if (i.reviewRequired) throw new FoodConfirmationError(`Review or replace "${i.name}" before logging.`);
     if (!Number.isFinite(i.calories) || i.calories < 0 || i.calories > 5000) throw new FoodConfirmationError(`"${i.name}" has an invalid calorie value.`);
     if ([i.proteinG, i.carbsG, i.fatG].some((v) => !Number.isFinite(v) || v < 0)) throw new FoodConfirmationError(`"${i.name}" has an invalid macro value.`);
   }
@@ -130,6 +132,7 @@ export function confirmEstimate(args: {
     date,
     meal,
     items: items.map(stripEstimateFields),
+    estimateQuality: { provider: estimate.provider, overallConfidence: estimate.overallConfidence, corrected: items.some((item, index) => item.source.kind === 'user_entered' || item !== estimate.items[index]), notes: estimate.notes },
     origin: 'photo',
     photoUri: estimate.photoUri,
     hint: estimate.hint,
@@ -140,8 +143,8 @@ export function confirmEstimate(args: {
 }
 
 function stripEstimateFields(i: FoodItem): FoodItem {
-  const { name, portionLabel, grams, calories, proteinG, carbsG, fatG, source } = i;
-  return { name, portionLabel, grams, calories, proteinG, carbsG, fatG, source };
+  const { name, portionLabel, grams, calories, proteinG, carbsG, fatG, source, confidence, portionAssumption } = i;
+  return { name, portionLabel, grams, calories, proteinG, carbsG, fatG, source, confidence, portionAssumption };
 }
 
 export function manualEntry(args: { items: FoodItem[]; meal: MealType; date: ISODate }): FoodEntry {
@@ -152,13 +155,17 @@ export function manualEntry(args: { items: FoodItem[]; meal: MealType; date: ISO
 
 /** Mark an item as user-edited so it is no longer presented as sourced data. */
 export function markEdited(original: FoodItem, next: FoodItem): FoodItem {
-  const changed = original.calories !== next.calories || original.proteinG !== next.proteinG || original.carbsG !== next.carbsG || original.fatG !== next.fatG;
+  const changed = original.name !== next.name || original.portionLabel !== next.portionLabel || original.grams !== next.grams || original.calories !== next.calories || original.proteinG !== next.proteinG || original.carbsG !== next.carbsG || original.fatG !== next.fatG;
   if (!changed) return next;
+  const amountChanged = original.grams !== next.grams || original.calories !== next.calories || original.proteinG !== next.proteinG || original.carbsG !== next.carbsG || original.fatG !== next.fatG;
+  const kcalFromMacros = next.proteinG * 4 + next.carbsG * 4 + next.fatG * 9;
+  const plausible = next.grams !== undefined && next.grams > 0 && next.grams <= 2000 && next.calories <= 3500 && next.calories / next.grams <= 10 && kcalFromMacros <= next.calories * 2.5 && (next.calories <= 100 || kcalFromMacros >= next.calories * 0.15);
+  const reviewRequired = original.reviewRequired ? !(amountChanged && plausible) : false;
   if (original.grams && next.grams && original.grams !== next.grams) {
     // portion change only: nutrition density is still from the source
-    return next;
+    return { ...next, reviewRequired };
   }
-  return { ...next, source: { kind: 'user_entered', sourced: false, label: `Edited by you (was ${original.calories} kcal from: ${original.source.label})` } };
+  return { ...next, reviewRequired, source: { kind: 'user_entered', sourced: false, label: `Edited by you (was ${original.calories} kcal from: ${original.source.label})` } };
 }
 
 export function defaultMealForTime(d = new Date()): MealType {

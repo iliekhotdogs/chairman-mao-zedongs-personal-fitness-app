@@ -1,7 +1,7 @@
 import type { AppState } from '../state';
 import type { Confidence, EstimateItem, FoodEstimate, ISODate, Proposal } from '../types';
 import { simulateFoodEstimate } from '../nutrition/estimate';
-import { isUrgentSymptom, simulateCoachReply, type CoachReply } from '../coaching/coachSim';
+import { hasInjuryRedFlag, isUrgentSymptom, simulateCoachReply, type CoachReply } from '../coaching/coachSim';
 import { isSupabaseConfigured, supabase } from '../sync/supabase';
 import { newId } from '../id';
 import { nowISO, addDays } from '../dates';
@@ -9,7 +9,7 @@ import { remainingForDay, workoutForDay, latestWeight, live } from '../selectors
 import { exerciseName, formatPrescription } from '../workouts/exercises';
 import { getApiKey, getGeminiKey } from './apiKey';
 import { GEMINI_DEFAULT_MODEL } from './gemini';
-import { prepareImageForAI } from './image';
+import { prepareImageForAI, type ImageSetting } from './image';
 import { GROQ_VISION_MODEL, selectedChatModel } from './groqModels';
 
 /** Signed-in accounts use the owner's server-side Groq key for chat and meal photos.
@@ -17,14 +17,21 @@ import { GROQ_VISION_MODEL, selectedChatModel } from './groqModels';
 
 export class AIUnavailableError extends Error {}
 
+export const SIGNED_OUT = 'Sign in to use the AI coach.';
+export const UNAVAILABLE = 'Coach is unavailable right now. Try again.';
+export type AiNoticeKind = 'signed_out' | 'unavailable' | 'other';
+
 /** supabase-js reports any non-2xx as a generic message; the gateway's own reason is in the body. */
 async function functionErrorMessage(error: unknown, fallback: string): Promise<string> {
+  // Transport failures (CORS, offline, outage) carry developer jargon the user must never see.
+  if ((error as { name?: string } | null)?.name === 'FunctionsFetchError') return UNAVAILABLE;
   const context = (error as { context?: unknown } | null)?.context;
   if (context instanceof Response) {
     const body = await context.clone().json().catch(() => null) as { error?: unknown } | null;
-    if (typeof body?.error === 'string' && body.error) return body.error;
+    if (typeof body?.error === 'string' && body.error) return /supabase|edge function|api_key/i.test(body.error) ? UNAVAILABLE : body.error;
   }
-  return error instanceof Error ? error.message : fallback;
+  const m = error instanceof Error ? error.message : fallback;
+  return /supabase|edge function/i.test(m) ? UNAVAILABLE : m;
 }
 
 export type AIEngine = 'nvidia' | 'gemini' | 'server' | 'simulated';
@@ -44,7 +51,7 @@ export function geminiModel(settings: AppState['settings']): string {
   return settings.geminiModel || GEMINI_DEFAULT_MODEL;
 }
 
-type FoodInput = { hint?: string; photoUri?: string; photoSize?: { width?: number; height?: number }; followUpAnswered?: boolean };
+type FoodInput = { hint?: string; photoUri?: string; photoSize?: { width?: number; height?: number }; followUpAnswered?: boolean; imageSetting?: ImageSetting };
 
 export async function estimateFood(state: AppState, input: FoodInput): Promise<FoodEstimate> {
   const engine = aiEngine(state.settings);
@@ -55,7 +62,7 @@ export async function estimateFood(state: AppState, input: FoodInput): Promise<F
   const sb = supabase();
   if (!sb) throw new AIUnavailableError('Server AI is not configured. Switch to simulated mode in Settings.');
   try {
-    const image = input.photoUri ? await prepareImageForAI(input.photoUri, input.photoSize) : undefined;
+    const image = input.photoUri ? await prepareImageForAI(input.photoUri, input.photoSize, input.imageSetting) : undefined;
     const { data, error } = await sb.functions.invoke('ai', {
       body: { action: 'estimate_food', hint: input.hint ?? '', image: image ? { data: image.base64, mediaType: image.mediaType } : undefined, units: state.settings.units, model: GROQ_VISION_MODEL },
     });
@@ -69,15 +76,20 @@ export async function estimateFood(state: AppState, input: FoodInput): Promise<F
 interface ServerEstimate {
   items: {
     name: string; portion: string; grams: number; calories: number; protein_g: number; carbs_g: number; fat_g: number;
-    confidence: Confidence; portion_assumption: string; source_kind: EstimateItem['source']['kind']; source_label: string; source_url?: string | null;
+    confidence: Confidence; portion_assumption: string; review_required?: boolean; source_kind: EstimateItem['source']['kind']; source_label: string; source_url?: string | null;
   }[];
   overall_confidence: Confidence;
   follow_up_question?: string | null;
   notes: string[];
+  rejected_items?: number;
   model: string;
 }
 
-function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: string }): FoodEstimate {
+export function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: string }): FoodEstimate {
+  if (!Array.isArray(data?.items) || !data.items.length) throw new Error('The image service returned no usable food items.');
+  for (const item of data.items) {
+    if (!item.name || !Number.isFinite(item.grams) || item.grams <= 0 || [item.calories, item.protein_g, item.carbs_g, item.fat_g].some((n) => !Number.isFinite(n) || n < 0)) throw new Error('The image service returned invalid food amounts.');
+  }
   return {
     id: newId(),
     createdAt: nowISO(),
@@ -88,6 +100,7 @@ function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: str
     overallConfidence: data.overall_confidence,
     followUpQuestion: data.follow_up_question ?? undefined,
     notes: data.notes ?? [],
+    rejectedItems: data.rejected_items,
     items: (data.items ?? []).map((i) => ({
       name: i.name,
       portionLabel: i.portion,
@@ -98,6 +111,7 @@ function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: str
       fatG: i.fat_g,
       confidence: i.confidence,
       portionAssumption: i.portion_assumption,
+      reviewRequired: i.review_required,
       source: { kind: i.source_kind, label: i.source_label, url: i.source_url ?? undefined, sourced: i.source_kind !== 'visual_estimate' },
     })),
   };
@@ -152,16 +166,18 @@ export function coachContext(state: AppState, today: ISODate) {
   };
 }
 
-export async function coachReply(state: AppState, message: string, today: ISODate): Promise<CoachReply & { simulated: boolean; aiNotice?: string }> {
+export async function coachReply(state: AppState, message: string, today: ISODate): Promise<CoachReply & { simulated: boolean; aiNotice?: string; aiNoticeKind?: AiNoticeKind }> {
   const engine = chatEngine(state.settings);
   if (engine === 'simulated') {
     await delay(500);
     return { ...simulateCoachReply(state, message, today), simulated: true };
   }
   // Emergencies always get the fixed safety text, never a model's improvisation.
-  if (isUrgentSymptom(message)) return { ...simulateCoachReply(state, message, today), simulated: false };
+  if (isUrgentSymptom(message) || hasInjuryRedFlag(message)) return { ...simulateCoachReply(state, message, today), simulated: false };
   const sb = supabase();
   if (!sb) throw new AIUnavailableError('Server AI is not configured. Switch to simulated mode in Settings.');
+  const { data: session } = await sb.auth.getSession();
+  if (!session.session) return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice: SIGNED_OUT, aiNoticeKind: 'signed_out' };
   const history = live(state.chat).slice(-12).map((m) => ({ role: m.role === 'coach' ? 'assistant' : 'user', content: m.text }));
   try {
     const { data, error } = await sb.functions.invoke('ai', { body: { action: 'coach', message, history, context: coachContext(state, today), model: selectedChatModel(state.settings.chatModel) } });
@@ -170,7 +186,8 @@ export async function coachReply(state: AppState, message: string, today: ISODat
     if (!d || typeof d.reply !== 'string') throw new Error('The coach returned an invalid reply.');
     return { text: d.reply, safety: d.safety, proposals: proposalsForIntents(state, d.intents ?? [], today), simulated: false };
   } catch (error) {
-    return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice: await functionErrorMessage(error, 'The chat service is unavailable.') };
+    const aiNotice = await functionErrorMessage(error, UNAVAILABLE);
+    return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice, aiNoticeKind: aiNotice === UNAVAILABLE ? 'unavailable' : 'other' };
   }
 }
 

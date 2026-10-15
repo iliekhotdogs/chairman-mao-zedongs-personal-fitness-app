@@ -2,13 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Button, Card, Field, Muted, Row, Text } from './ui';
+import { Badge, Button, Card, Field, Muted, Row, Sheet, Text } from './ui';
 import { useStore } from '@/store/AppStore';
 import { useToast } from './Toast';
 import { supabase } from '@/lib/sync/supabase';
 
 /** Sign in / create account / sync status. Used in Settings and on the welcome screen. */
-export function AccountCard({ intro }: { intro?: string }) {
+export function AccountCard({ intro, flat }: { intro?: string; flat?: boolean }) {
   const { state, sync } = useStore();
   const toast = useToast();
   const [email, setEmail] = useState('');
@@ -16,6 +16,8 @@ export function AccountCard({ intro }: { intro?: string }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
   const [adminUserId, setAdminUserId] = useState('');
+  const [confirmOut, setConfirmOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -43,13 +45,42 @@ export function AccountCard({ intro }: { intro?: string }) {
     }
   };
 
+  const forgot = async () => {
+    if (!email.trim()) { setErr('Enter your email above first.'); return; }
+    const { error } = (await supabase()?.auth.resetPasswordForEmail(email.trim())) ?? {};
+    if (error) setErr(error.message);
+    else { setErr(undefined); toast('If that email has an account, a reset link is on its way.'); }
+  };
+
+  const doSignOut = async () => {
+    setSigningOut(true);
+    const { remoteOk } = await sync.signOut();
+    setSigningOut(false);
+    setConfirmOut(false);
+    router.replace('/onboarding');
+    if (!remoteOk) toast('Signed out on this device. We could not reach the server, so unsynced changes may not be saved.', 'error');
+  };
+
   return (
-    <Card style={{ gap: Space.sm }}>
-      <Text variant="h3">Account &amp; sync</Text>
+    <Card style={[{ gap: Space.sm }, flat ? { borderWidth: 0, padding: 0, backgroundColor: 'transparent' } : null]}>
+      {flat ? null : <Text variant="h3">Account &amp; sync</Text>}
+      {sync.session ? <Button title="Sign out" kind="secondary" size="sm" icon="log-out-outline" onPress={() => setConfirmOut(true)} /> : null}
+      <Sheet
+        visible={confirmOut}
+        onClose={() => !signingOut && setConfirmOut(false)}
+        title="Sign out?"
+        footer={
+          <Row gap={Space.sm}>
+            <Button title="Cancel" kind="secondary" style={{ flex: 1 }} disabled={signingOut} onPress={() => setConfirmOut(false)} />
+            <Button title="Sign out" kind="danger" style={{ flex: 1 }} loading={signingOut} onPress={doSignOut} />
+          </Row>
+        }>
+        <Muted>Your changes are synced first, then data for this account is removed from this device. Sign in again to get it back.</Muted>
+      </Sheet>
       {!sync.configured ? (
         <>
           <Badge kind="neutral" label="This device only" icon="phone-portrait-outline" />
-          <Muted variant="small">Cloud accounts aren&apos;t set up yet, so your data is saved only on this device/browser. Once the Supabase backend is configured (see docs/SETUP.md), you can sign in here and your data syncs between Android and the website.</Muted>
+          <Muted variant="small">Accounts aren&apos;t available in this version, so your data is saved only on this device.</Muted>
         </>
       ) : sync.session ? (
         <>
@@ -67,7 +98,6 @@ export function AccountCard({ intro }: { intro?: string }) {
           <Row gap={Space.sm}>
             <Button title="Sync now" kind="secondary" size="sm" icon="refresh" onPress={() => sync.syncNow()} />
             {adminUserId === sync.session.user.id ? <Button title="Admin stats" kind="secondary" size="sm" onPress={() => router.push('/admin')} /> : null}
-            <Button title="Sign out" kind="ghost" size="sm" onPress={() => supabase()?.auth.signOut()} />
           </Row>
         </>
       ) : (
@@ -75,7 +105,9 @@ export function AccountCard({ intro }: { intro?: string }) {
           <Muted variant="small">{intro ?? 'Sign in to sync your data between your phone and computer.'}</Muted>
           <Field label="Email" value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email" />
           <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry autoComplete="password" />
+          <Muted variant="small">Password must be at least 8 characters.</Muted>
           {err ? <Text variant="small" color={C.danger}>{err}</Text> : null}
+          <Button title="Forgot password?" kind="ghost" size="sm" onPress={forgot} />
           <Row gap={Space.sm}>
             <Button title="Sign in" loading={busy} onPress={() => auth('in')} disabled={!email || password.length < 8} />
             <Button title="Create account" kind="secondary" onPress={() => auth('up')} disabled={!email || password.length < 8 || busy} />

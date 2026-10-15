@@ -105,12 +105,20 @@ describe('food confirmation rule', () => {
     expect(() => confirmEstimate({ estimate, items: [], meal: 'lunch', date: '2026-10-02', userAccepted: true })).toThrow();
     expect(() => confirmEstimate({ estimate, items: [{ ...estimate.items[0], calories: -5 }], meal: 'lunch', date: '2026-10-02', userAccepted: true })).toThrow();
   });
+  it('requires correction of implausible and omitted AI items', () => {
+    const item = { ...estimate.items[0], reviewRequired: true };
+    expect(() => confirmEstimate({ estimate, items: [item], meal: 'lunch', date: '2026-10-02', userAccepted: true })).toThrow(/Review or replace/);
+    const incomplete = { ...estimate, rejectedItems: 1 };
+    expect(() => confirmEstimate({ estimate: incomplete, items: incomplete.items, meal: 'lunch', date: '2026-10-02', userAccepted: true })).toThrow(/left out/);
+    expect(markEdited(item, { ...item, name: 'Renamed only' }).reviewRequired).toBe(true);
+  });
 
-  it('logs accepted estimates with a confirmation timestamp and no AI-only fields', () => {
+  it('logs accepted estimates with a confirmation timestamp and quality metadata', () => {
     const entry = confirmEstimate({ estimate, items: estimate.items, meal: 'lunch', date: '2026-10-02', userAccepted: true });
     expect(entry.confirmedAt).toBeTruthy();
     expect(entry.origin).toBe('photo');
-    expect('confidence' in entry.items[0]).toBe(false);
+    expect(entry.items[0].confidence).toBeDefined();
+    expect(entry.estimateQuality?.provider).toBe(estimate.provider);
   });
 
   it('marks macro edits as user-entered', () => {

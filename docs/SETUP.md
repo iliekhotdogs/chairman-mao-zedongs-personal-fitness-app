@@ -1,6 +1,6 @@
 # FitCoach account setup (fitdih)
 
-This repository is configured locally for the `fitdih` Supabase project. As of 3 October 2026, `ADMIN_USER_ID` is saved in fitdih for the existing Wesley account; the migration and both `ai` and `admin-stats` functions are deployed with JWT verification; the owner admin screen has been verified. As of 4 October 2026, coach chat and meal photos use `GROQ_API_KEY`. The `OPENROUTER_API_KEY`, `NVIDIA_API_KEY` and `GEMINI_API_KEY` secrets are still set but unused (the Gemini project has no prepaid credits). Every person creates an email/password account; Supabase Auth assigns a unique user ID. The app stores each account's browser/device cache under that ID and synchronizes only rows owned by that ID. RLS in `0001_init.sql` enforces the boundary in Postgres.
+This repository is configured locally for the `fitdih` Supabase project. As of 3 October 2026, `ADMIN_USER_ID` is saved in fitdih for the existing Wesley account; the migration and both `ai` and `admin-stats` functions are deployed with JWT verification; the owner admin screen has been verified. As of 4 October 2026, coach chat and meal photos use `GROQ_API_KEY`. Older provider secrets can be removed from the project; they are unused. Every person creates an email/password account; Supabase Auth assigns a unique user ID. The app stores each account's browser/device cache under that ID and synchronizes only rows owned by that ID. RLS in `0001_init.sql` enforces the boundary in Postgres.
 
 ## 1. Database
 
@@ -33,6 +33,7 @@ The `ai` and `admin-stats` functions are already deployed to fitdih with JWT ver
 
 ```sh
 supabase functions deploy ai --project-ref nmovowhobqeaokzdspfp
+supabase functions deploy delete-account --project-ref nmovowhobqeaokzdspfp
 supabase functions deploy admin-stats --project-ref nmovowhobqeaokzdspfp
 ```
 

@@ -54,6 +54,13 @@ describe('weight trend adjustment', () => {
     const next = (r.proposal!.change as { type: 'target_change'; next: { calories: number } }).next.calories;
     expect(next).toBe(s.targets!.calories - 150);
   });
+  it('does not create a target change below the configured floor', () => {
+    const s = sample();
+    const floor = 1500;
+    const ratio = floor / s.targets!.calories;
+    const low = { ...s, targets: { ...s.targets!, calories: floor }, foodLog: s.foodLog.map((entry) => ({ ...entry, items: entry.items.map((item) => ({ ...item, calories: Math.round(item.calories * ratio) })) })) };
+    expect(trendAdjustment(low, TODAY).proposal).toBeUndefined();
+  });
 
   it('does not change targets without enough weigh-ins', () => {
     const s = { ...sample(), weights: sample().weights.slice(-3) };
@@ -99,6 +106,11 @@ describe('progression proposal', () => {
       expect(p.kind).toBe('plan_weight_update');
       expect(p.status).toBe('pending');
     }
+  });
+  it('withholds progression after a pain check-in', () => {
+    const s = sample();
+    const last = s.sessions[s.sessions.length - 1];
+    expect(progressionProposal(s, { ...last, pain: true, painNote: 'knee' })).toBeUndefined();
   });
 });
 
@@ -181,7 +193,7 @@ describe('plan generator', () => {
     expect(ids).not.toContain('back_squat');
     expect(ids).not.toContain('deadlift');
     expect(ids).not.toContain('leg_extension');
-    expect(s.version).toBe(1);
+    expect(s.version).toBe(2);
   });
 
   it('only uses available equipment', () => {

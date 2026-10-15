@@ -2,6 +2,7 @@
 // Secrets: GROQ_API_KEY, optional FDC_API_KEY, AI_DAILY_LIMIT, AI_GLOBAL_DAILY_LIMIT.
 // Never place the Groq key in Expo env vars.
 import { createClient } from 'npm:@supabase/supabase-js@2';
+import { matchingFood, validateVisionItem, type VisionItem } from './foodValidation.ts';
 
 const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 // Must match src/lib/ai/groqModels.ts.
@@ -77,6 +78,13 @@ async function coach(body: Record<string, unknown>) {
   const model = CHAT_MODELS.includes(requested) ? requested : CHAT_MODELS[0];
   const message = text(body.message, 2000);
   if (!message.trim()) throw new Error('Enter a message first.');
+  const lower = message.toLowerCase();
+  if (/\b(chest (pain|tightness|pressure)|can'?t breathe|cannot breathe|trouble breathing|difficulty breathing|short(ness)? of breath|faint|passed out|black(ed)? out|dizz)/.test(lower)) {
+    return { result: { reply: 'Stop exercising now. Chest pain, trouble breathing, or feeling faint can be serious. Seek emergency care if symptoms are severe or persist; otherwise contact a doctor today before training again.', safety: true, intents: [] }, tokens: { input: 0, output: 0 } };
+  }
+  if (/\b(swell|swollen|numb|tingl|sharp|pop(ped)?|snap|can'?t (walk|bear|put weight|move)|cannot (walk|bear|put weight|move)|unable to (walk|bear weight|move)|fell|fall|bruis|locked|gave way|giving way|worse at night|radiat)/.test(lower)) {
+    return { result: { reply: 'Stop movements that hurt. Swelling, numbness, sharp pain, a pop, or trouble bearing weight should be checked by a doctor or physiotherapist before training that area again. I cannot assess an injury here.', safety: true, intents: [] }, tokens: { input: 0, output: 0 } };
+  }
   const context = body.context && typeof body.context === 'object' ? JSON.stringify(body.context).slice(0, 6000) : '{}';
   const history = Array.isArray(body.history) ? body.history.slice(-12).map((turn) => ({
     role: turn?.role === 'assistant' ? 'assistant' : 'user', content: text(turn?.content, 2000),
@@ -96,7 +104,6 @@ async function coach(body: Record<string, unknown>) {
   return { result: { reply, safety: value.safety === true, intents: validatedIntents(value.intents) }, tokens: response };
 }
 
-type VisionItem = { name: string; portion: string; grams: number; calories: number; protein_g: number; carbs_g: number; fat_g: number; confidence: string; portion_assumption: string; usda_search_query: string };
 async function searchUsda(query: string, pageSize: number) {
   const key = Deno.env.get('FDC_API_KEY') || 'DEMO_KEY';
   const response = await fetch(`https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(key)}`, {
@@ -108,7 +115,7 @@ async function searchUsda(query: string, pageSize: number) {
 }
 
 async function usdaItem(item: VisionItem) {
-  const food = (await searchUsda(item.usda_search_query || item.name, 1))[0];
+  const food = matchingFood(item, await searchUsda(item.usda_search_query || item.name, 8));
   if (!food) return null;
   const nutrient = (numbers: string[]) => food.foodNutrients?.find((n: { nutrientNumber?: string }) => numbers.includes(n.nutrientNumber ?? ''))?.value ?? 0;
   const kcal = nutrient(['208', '957', '958']) * item.grams / 100;
@@ -119,6 +126,7 @@ async function usdaItem(item: VisionItem) {
     carbs_g: Math.round(nutrient(['205']) * item.grams / 10) / 10,
     fat_g: Math.round(nutrient(['204']) * item.grams / 10) / 10,
     confidence: item.confidence, portion_assumption: item.portion_assumption,
+    review_required: false,
     source_kind: 'database', source_label: `USDA FoodData Central #${food.fdcId}: ${food.description}`,
     source_url: `https://fdc.nal.usda.gov/food-details/${food.fdcId}/nutrients`,
   };
@@ -143,24 +151,24 @@ async function estimateFood(body: Record<string, unknown>) {
     throw error;
   }
   if (!Array.isArray(value.items)) throw new Error('The model returned an invalid meal estimate.');
-  const items = await Promise.all(value.items.slice(0, 8).map(async (raw: Record<string, unknown>) => {
-    const item: VisionItem = {
-      name: text(raw.name, 100) || 'Unknown food', portion: text(raw.portion, 80) || 'Estimated serving',
-      grams: safeNumber(raw.grams, 5000), calories: safeNumber(raw.calories, 10000),
-      protein_g: safeNumber(raw.protein_g, 1000), carbs_g: safeNumber(raw.carbs_g, 2000), fat_g: safeNumber(raw.fat_g, 1000),
-      confidence: ['high', 'medium', 'low'].includes(String(raw.confidence)) ? String(raw.confidence) : 'low',
-      portion_assumption: text(raw.portion_assumption, 200), usda_search_query: text(raw.usda_search_query, 100),
-    };
-    const sourced = item.grams ? await usdaItem(item).catch(() => null) : null;
+  const validated = value.items.slice(0, 8).map(validateVisionItem);
+  const rejected = validated.filter((item) => item === null).length;
+  if (validated.every((item) => item === null)) throw new Error('The model returned no usable food portions. Please correct the meal manually.');
+  const items = await Promise.all(validated.filter((item): item is VisionItem => item !== null).map(async (item) => {
+    const sourced = item.review_required ? null : await usdaItem(item).catch(() => null);
     return sourced ?? {
       name: item.name, portion: item.portion, grams: item.grams, calories: item.calories,
       protein_g: item.protein_g, carbs_g: item.carbs_g, fat_g: item.fat_g,
       confidence: item.confidence === 'high' ? 'medium' : item.confidence,
       portion_assumption: item.portion_assumption,
+      review_required: Boolean(item.review_required),
       source_kind: 'visual_estimate', source_label: 'Visual estimate (no matching USDA value)', source_url: null,
     };
   }));
-  return { result: { items, overall_confidence: ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes: Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [], model: VISION_MODEL }, tokens: response };
+  const notes = Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [];
+  if (rejected) notes.unshift(`${rejected} food item(s) had invalid portions or nutrition and were left out. Add them manually.`);
+  if (items.some((item) => item.review_required)) notes.unshift('An implausible item needs correction before logging.');
+  return { result: { items, rejected_items: rejected, overall_confidence: rejected || items.some((item) => item.review_required) ? 'low' : ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes, model: VISION_MODEL }, tokens: response };
 }
 
 Deno.serve(async (request) => {
@@ -199,11 +207,11 @@ Deno.serve(async (request) => {
   const day = new Date().toISOString().slice(0, 10);
   const { data: claim, error: claimError } = await admin.rpc('claim_ai_request', {
     p_user: auth.user.id, p_day: day,
-    p_user_limit: Number(Deno.env.get('AI_DAILY_LIMIT') || 5),
-    p_global_limit: Number(Deno.env.get('AI_GLOBAL_DAILY_LIMIT') || 40),
+    p_user_limit: Number(Deno.env.get('AI_DAILY_LIMIT') || 30),
+    p_global_limit: Number(Deno.env.get('AI_GLOBAL_DAILY_LIMIT') || 500),
   });
   if (claimError) return json({ error: 'AI metering is not ready. Apply the account SQL setup first.' }, 503);
-  if (claim !== 'ok') return json({ error: claim === 'user_limit' ? 'Your daily AI limit is reached.' : 'The shared free AI allowance is used up today. Try tomorrow.' }, 429);
+  if (claim !== 'ok') return json({ error: claim === 'user_limit' ? "You have used today's AI coach allowance. It resets tomorrow." : 'The AI coach has hit its daily limit. Please try again tomorrow.' }, 429);
   try {
     const { result, tokens } = body.action === 'coach' ? await coach(body) : await estimateFood(body);
     await admin.rpc('record_ai_tokens', { p_user: auth.user.id, p_day: day, p_input: tokens.input, p_output: tokens.output });

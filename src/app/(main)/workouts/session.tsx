@@ -3,7 +3,7 @@ import { Platform, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, EmptyState, Field, IconButton, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Stepper, Text, Ionicons, Columns } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, EmptyState, Expandable, Field, Menu, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Stepper, Text, Ionicons, Columns, IconButton } from '@/components/ui';
 import { ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
@@ -18,6 +18,9 @@ import { formatDateLabel, formatTime, nowISO } from '@/lib/dates';
 import { displayWeight, toKg, weightUnit, weightValue } from '@/lib/units';
 import type { LoggedSet, PlannedExercise, WorkoutDay, WorkoutSession } from '@/lib/types';
 import type { AppState } from '@/lib/state';
+
+// Hidden to keep the set row to one primary action; the weight field accepts typed values.
+const SHOW_WEIGHT_NUDGE = false;
 
 export default function SessionScreen() {
   const { state } = useStore();
@@ -68,7 +71,7 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
 
   return (
     <Screen maxWidth={820}>
-      <PageHeader title="Start a workout" subtitle={formatDateLabel(today, today)} right={<Button title="Back" kind="ghost" onPress={() => router.back()} />} />
+      <PageHeader title="Start a workout" subtitle={formatDateLabel(today, today)} right={<Row gap={Space.sm}><Button title="Back" kind="ghost" onPress={() => router.back()} /><Menu title="Other options" items={[{ label: 'Freestyle workout (no plan)', icon: 'add', onPress: () => start(undefined) }]} /></Row>} />
       {first ? (
         <Card tone={overridden && !preferred ? 'saved' : 'default'} style={{ gap: Space.sm }}>
           <Row wrap gap={6}>
@@ -90,8 +93,7 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
         </Card>
       )}
       {state.plan ? (
-        <Stack gap={Space.sm}>
-          <Text variant="h3">Other days in your plan</Text>
+        <Expandable title="Other days in your plan">
           {state.plan.days
             .filter((d) => d.id !== first?.id)
             .map((d) => (
@@ -105,9 +107,8 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
                 </Row>
               </Card>
             ))}
-        </Stack>
+        </Expandable>
       ) : null}
-      <Button title="Freestyle workout (no plan)" kind="ghost" icon="add" onPress={() => start(undefined)} />
     </Screen>
   );
 }
@@ -121,6 +122,9 @@ function SessionView({ session }: { session: WorkoutSession }) {
   const [extra, setExtra] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const [effort, setEffort] = useState<number | undefined>();
+  const [pain, setPain] = useState(false);
+  const [painNote, setPainNote] = useState('');
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [focusEx, setFocusEx] = useState<string | undefined>();
 
@@ -139,9 +143,10 @@ function SessionView({ session }: { session: WorkoutSession }) {
 
   const finish = () => {
     const now = nowISO();
-    if (!doAct({ type: 'FINISH_SESSION', sessionId: session.id, now }, 'Workout saved')) return;
-    const after: AppState = { ...state, sessions: state.sessions.map((s) => (s.id === session.id ? { ...s, finishedAt: now } : s)) };
-    const p = progressionProposal(after, { ...session, finishedAt: now });
+    if (!doAct({ type: 'FINISH_SESSION', sessionId: session.id, now, effort, pain, painNote: pain ? painNote.trim() : undefined }, 'Workout saved')) return;
+    const completed = { ...session, finishedAt: now, effort, pain, painNote: pain ? painNote.trim() : undefined };
+    const after: AppState = { ...state, sessions: state.sessions.map((s) => (s.id === session.id ? completed : s)) };
+    const p = progressionProposal(after, completed);
     if (p) doAct({ type: 'ADD_PROPOSALS', proposals: [p] });
     setConfirmFinish(false);
     router.replace({ pathname: '/workouts/session', params: { id: session.id } });
@@ -155,7 +160,12 @@ function SessionView({ session }: { session: WorkoutSession }) {
       <PageHeader
         title={session.name}
         subtitle={finished ? `${formatDateLabel(session.date)} · ${totalSets} sets · ${displayWeight(volume, units, 0)} volume` : `Started ${formatTime(session.startedAt)} · ${totalSets} sets logged`}
-        right={finished ? <Button title="Done" kind="ghost" onPress={() => router.replace('/workouts')} /> : <Button title="Finish" icon="flag" onPress={() => setConfirmFinish(true)} />}
+        right={
+          <Row gap={Space.sm}>
+            {finished ? <Button title="Done" kind="ghost" onPress={() => router.replace('/workouts')} /> : <Button title="Finish" icon="flag" onPress={() => setConfirmFinish(true)} />}
+            <Menu title="Workout options" items={[{ label: finished ? 'Delete workout' : 'Discard workout', icon: 'trash-outline', danger: true, onPress: () => setConfirmDiscard(true) }]} />
+          </Row>
+        }
       />
       {finished ? <Banner kind="success" title="Workout saved">You can still correct sets below.</Banner> : null}
       {progression ? <ProposalCard proposal={progression} /> : null}
@@ -170,12 +180,16 @@ function SessionView({ session }: { session: WorkoutSession }) {
             <Button title="Add exercise" kind="secondary" icon="add" onPress={() => setPickerOpen(true)} />
           </Stack>,
           <Stack key="voice" gap={Space.md}>
-            <VoiceLogger session={session} currentExerciseId={currentEx} />
-            {!finished ? (
-              <Button title="Discard workout" kind="danger" size="sm" icon="trash-outline" onPress={() => setConfirmDiscard(true)} />
-            ) : (
-              <Button title="Delete workout" kind="danger" size="sm" icon="trash-outline" onPress={() => setConfirmDiscard(true)} />
-            )}
+            <Expandable title="More" icon="ellipsis-horizontal">
+              <VoiceLogger session={session} currentExerciseId={currentEx} />
+              {!finished ? (
+                <Card style={{ gap: Space.sm }}>
+                  <Button title={pain ? 'Pain during workout: yes' : 'Pain during workout'} kind={pain ? 'danger' : 'secondary'} onPress={() => setPain(!pain)} />
+                  {pain ? <Field label="Where or when did it hurt? (optional)" value={painNote} onChangeText={setPainNote} /> : null}
+                  {pain ? <Banner kind="warning">Skip movements that hurt. No automatic progression will be suggested from this session.</Banner> : null}
+                </Card>
+              ) : null}
+            </Expandable>
           </Stack>,
         ]}
       </Columns>
@@ -192,7 +206,10 @@ function SessionView({ session }: { session: WorkoutSession }) {
             <Button title="Finish & save" icon="checkmark" onPress={finish} style={{ flex: 1 }} disabled={totalSets === 0} />
           </Row>
         }>
-        <Muted>{totalSets === 0 ? 'Log at least one set before finishing, or discard this workout.' : `${totalSets} sets logged. The coach will suggest next-session targets, and you choose whether to apply them.`}</Muted>
+        <Stack gap={Space.sm}>
+          <Muted>{totalSets === 0 ? 'Log at least one set before finishing, or discard this workout.' : `${totalSets} sets logged. A check-in helps the coach suggest next-session targets. You choose whether to apply them.`}</Muted>
+          <NumberField label="Effort (optional)" suffix="/10" value={effort} onChange={setEffort} hint="1 = easy, 10 = maximum effort" />
+        </Stack>
       </Sheet>
       <Sheet
         visible={confirmDiscard}
@@ -276,8 +293,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: {
             {bodyweight && s.weightKg === 0 ? 'Bodyweight' : displayWeight(s.weightKg, units)} × {s.reps}{timed ? ' s' : ''}
           </Text>
           {s.via === 'voice' ? <Ionicons name="mic-outline" size={14} color={C.textMuted} accessibilityLabel="Logged by voice" /> : null}
-          <IconButton icon="create-outline" label={`Edit set ${i + 1}`} size={17} color={C.textSecondary} onPress={() => setEditing(s)} />
-          <IconButton icon="close" label={`Delete set ${i + 1}`} size={17} color={C.textSecondary} onPress={() => doAct({ type: 'DELETE_SET', sessionId: session.id, setId: s.id, now: nowISO() })} />
+          <Menu title={`Set ${i + 1}`} label={`Options for set ${i + 1}`} items={[{ label: 'Edit set', icon: 'create-outline', onPress: () => setEditing(s) }, { label: 'Delete set', icon: 'close', danger: true, onPress: () => doAct({ type: 'DELETE_SET', sessionId: session.id, setId: s.id, now: nowISO() }) }]} />
         </Row>
       ))}
       <Row wrap gap={Space.md} style={{ marginTop: 4 }}>
@@ -288,8 +304,8 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus }: {
         </Stack>
         <View style={{ justifyContent: 'flex-end', paddingBottom: bodyweight ? 22 : 0 }}>
           <Row gap={4}>
-            {!bodyweight ? <IconButton icon="remove-circle-outline" label={`Decrease weight by ${step}`} onPress={() => setWeight(Math.max(0, (weight ?? 0) - step))} /> : null}
-            {!bodyweight ? <IconButton icon="add-circle-outline" label={`Increase weight by ${step}`} onPress={() => setWeight((weight ?? 0) + step)} /> : null}
+            {SHOW_WEIGHT_NUDGE && !bodyweight ? <IconButton icon="remove-circle-outline" label={`Decrease weight by ${step}`} onPress={() => setWeight(Math.max(0, (weight ?? 0) - step))} /> : null}
+            {SHOW_WEIGHT_NUDGE && !bodyweight ? <IconButton icon="add-circle-outline" label={`Increase weight by ${step}`} onPress={() => setWeight((weight ?? 0) + step)} /> : null}
             <Button title="Log set" icon="checkmark" onPress={log} disabled={weight === undefined} />
           </Row>
         </View>

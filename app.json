@@ -20,8 +20,7 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.fitcoach.app",
       "permissions": [
-        "CAMERA",
-        "RECORD_AUDIO"
+        "CAMERA"
       ]
     },
     "web": {

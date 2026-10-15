@@ -9,6 +9,14 @@ export interface SyncCursor {
 
 export const EMPTY_CURSOR: SyncCursor = { lastPulledAt: '1970-01-01T00:00:00.000Z', lastPushedAt: '1970-01-01T00:00:00.000Z' };
 
+/** Only delete objects in the signed-in user's private folder. */
+export function photoObjectForDeletion(uri: string | undefined, userId: string): string | null {
+  const prefix = `storage:food-photos/${userId}/`;
+  if (!uri?.startsWith(prefix)) return null;
+  const path = uri.slice('storage:food-photos/'.length);
+  return /^[a-zA-Z0-9-]+\/[a-zA-Z0-9-]+\.jpg$/.test(path) ? path : null;
+}
+
 const isLocalPhoto = (uri?: string) => Boolean(uri && !uri.startsWith('storage:'));
 
 /** Upload local food photos to the user's private folder, returning the updated state. */
@@ -61,12 +69,31 @@ export async function syncNow(state: AppState, userId: string, cursor: SyncCurso
     .order('synced_at', { ascending: true })
     .limit(5000);
   if (error) throw new Error(`Download failed: ${error.message}`);
+  // The tombstone is on the server before removing its object. Failed removals keep
+  // photoUri on the tombstone, so any later sync (including another device) retries.
+  const tombstones = new Map<string, AppState['foodLog'][number]>();
+  for (const entry of withPhotos.foodLog) if (entry.deleted) tombstones.set(entry.id, entry);
+  for (const row of data ?? []) if (row.collection === 'foodLog' && row.deleted) {
+    const entry = row.data as AppState['foodLog'][number];
+    tombstones.set(row.id, entry);
+  }
+  const cleaned: RemoteRecord[] = [];
+  for (const entry of tombstones.values()) {
+    const path = photoObjectForDeletion(entry.photoUri, userId);
+    if (!path) continue;
+    const { error: removeError } = await sb.storage.from('food-photos').remove([path]);
+    if (removeError) continue;
+    const updatedAt = new Date().toISOString();
+    const next = { ...entry, photoUri: undefined, updatedAt };
+    const { error: markError } = await sb.from('records').upsert({ user_id: userId, collection: 'foodLog', id: entry.id, data: next, updated_at: updatedAt, deleted: true }, { onConflict: 'user_id,collection,id' });
+    if (!markError) cleaned.push({ collection: 'foodLog', id: entry.id, data: next, updated_at: updatedAt, deleted: true });
+  }
   // Local photo uploads are returned as rows too, so the caller merges everything into the
   // CURRENT state (edits made during the network call are not lost).
   const photoRows = localChanges({ ...withPhotos, foodLog: withPhotos.foodLog.filter((e, i) => e !== state.foodLog[i]) }, cursor.lastPushedAt).filter((r) => r.collection === 'foodLog');
   // Pull cursor uses the SERVER timestamp so device clock differences can't skip rows.
   const maxSynced = (data ?? []).reduce((m: string, r: { synced_at: string }) => (r.synced_at > m ? r.synced_at : m), cursor.lastPulledAt);
-  return { rows: [...photoRows, ...((data ?? []) as RemoteRecord[])], cursor: { lastPulledAt: maxSynced, lastPushedAt: startedAt }, pushed: rows.length, pulled: data?.length ?? 0 };
+  return { rows: [...photoRows, ...((data ?? []) as RemoteRecord[]), ...cleaned], cursor: { lastPulledAt: maxSynced, lastPushedAt: startedAt }, pushed: rows.length, pulled: data?.length ?? 0 };
 }
 
 export async function signedPhotoUrl(uri: string): Promise<string | undefined> {
@@ -83,8 +110,13 @@ export async function signedPhotoUrl(uri: string): Promise<string | undefined> {
 export async function deleteCloudData(userId: string): Promise<void> {
   const sb = supabase();
   if (!sb) return;
-  const { data: files } = await sb.storage.from('food-photos').list(userId, { limit: 1000 });
-  if (files?.length) await sb.storage.from('food-photos').remove(files.map((f) => `${userId}/${f.name}`));
+  for (;;) {
+    const { data: files, error: listError } = await sb.storage.from('food-photos').list(userId, { limit: 1000 });
+    if (listError) throw new Error(`Photo listing failed: ${listError.message}`);
+    if (!files?.length) break;
+    const { error: removeError } = await sb.storage.from('food-photos').remove(files.map((f) => `${userId}/${f.name}`));
+    if (removeError) throw new Error(`Photo deletion failed: ${removeError.message}`);
+  }
   const { error } = await sb.from('records').delete().eq('user_id', userId);
   if (error) throw new Error(error.message);
 }

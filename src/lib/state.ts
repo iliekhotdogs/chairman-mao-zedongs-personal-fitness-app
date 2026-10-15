@@ -3,7 +3,7 @@ import type {
   NutritionTargets, Profile, Proposal, Settings, SyncMeta, WeightEntry, WorkoutDay, WorkoutPlan, WorkoutSession,
 } from './types';
 
-export const STATE_VERSION = 1;
+export const STATE_VERSION = 2;
 
 /** An approved one-day workout replacement (e.g. a 20-minute version). */
 export interface WorkoutOverride extends SyncMeta {
@@ -66,6 +66,19 @@ export function emptyState(deviceId: string, now: string): AppState {
     notifications: [],
     settings: defaultSettings(),
     deviceId,
+  };
+}
+
+export function migrateState(saved: AppState): AppState {
+  const base = emptyState(saved.deviceId ?? 'unknown', new Date().toISOString());
+  return {
+    ...base, ...saved, version: STATE_VERSION,
+    foodLog: (saved.foodLog ?? []).map((entry) => ({
+      ...entry,
+      items: (entry.items ?? []).map((item) => ({ ...item, reviewRequired: item.reviewRequired ?? false })),
+      estimateQuality: entry.estimateQuality ?? (entry.origin === 'photo' ? { provider: 'Earlier estimate', overallConfidence: 'low' as const, corrected: false, notes: ['Estimate quality was not recorded in this version.'] } : undefined),
+    })),
+    sessions: (saved.sessions ?? []).map((session) => ({ ...session, effort: session.effort ?? undefined, pain: session.pain ?? undefined })),
   };
 }
 

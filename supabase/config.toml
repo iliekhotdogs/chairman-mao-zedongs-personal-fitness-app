@@ -1,0 +1,14 @@
+project_id = "nmovowhobqeaokzdspfp"
+
+[functions.ai]
+verify_jwt = true
+
+# admin-stats and notify check the bearer token themselves via auth.getUser.
+[functions.admin-stats]
+verify_jwt = true
+
+[functions.delete-account]
+verify_jwt = true
+
+[functions.notify]
+verify_jwt = true

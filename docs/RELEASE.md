@@ -5,10 +5,10 @@
 - [ ] Final app name, icon (512×512) and adaptive icon. "FitCoach" is a placeholder, so check trademark availability.
 - [ ] Unique Android package (currently `com.fitcoach.app` in `app.json`). **It cannot change after the first upload.**
 - [ ] Supabase project in production mode, email confirmation on, SMTP configured.
-- [ ] Set shared NVIDIA and OpenRouter secrets, choose daily limits, and deploy the `ai` and `admin-stats` functions (docs/SETUP.md).
+- [ ] Set the shared `GROQ_API_KEY` secret, choose daily limits, and deploy the `ai` and `admin-stats` functions (docs/SETUP.md).
 - [ ] Replace simulated Health Connect with the real integration (docs/WEARABLES.md), or hide that card for v1.
 - [ ] Push notifications: configure FCM credentials in EAS, register Expo push tokens into `push_tokens`.
-- [ ] Privacy policy URL (required). It must cover health and fitness data, photos, AI processing by OpenRouter model providers and NVIDIA, account deletion, and data retention.
+- [ ] Privacy policy URL (required). It must cover health and fitness data, photos, AI processing by Groq, account deletion, and data retention.
 - [ ] In-app account deletion exists (Settings → Delete my cloud data). Play also requires a **web link** for deletion requests.
 - [ ] Medical disclaimer reviewed (the coach avoids diagnosis; check wording with a professional).
 - [ ] The business model is decided before adding any paywall (none exist now).

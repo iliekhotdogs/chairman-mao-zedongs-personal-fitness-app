@@ -3,7 +3,7 @@ import { AppState as RNAppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
 
-import { emptyState, STATE_VERSION, type AppState } from '@/lib/state';
+import { emptyState, migrateState, type AppState } from '@/lib/state';
 import { checkAction, reducer, type Action } from '@/lib/reducer';
 import { newId } from '@/lib/id';
 import { nowISO, toISODate } from '@/lib/dates';
@@ -13,6 +13,7 @@ import { showSystemNotification } from '@/lib/notifications/deliver';
 import { isSupabaseConfigured, supabase } from '@/lib/sync/supabase';
 import { EMPTY_CURSOR, syncNow, type SyncCursor } from '@/lib/sync/sync';
 import { mergeRemote } from '@/lib/sync/merge';
+import { signOutAndWipe } from '@/lib/sync/signOut';
 import type { Proposal } from '@/lib/types';
 import { loadApiKey, loadGeminiKey } from '@/lib/ai/apiKey';
 import { loadIntegrationConfig, useIntegrationConfig } from '@/lib/integrations/config';
@@ -38,6 +39,8 @@ interface StoreValue {
     syncNow: () => Promise<void>;
     legacyAvailable: boolean;
     importLocalData: () => Promise<void>;
+    /** Flush, sign out, wipe local data. Never throws; remoteOk=false if the server was unreachable. */
+    signOut: () => Promise<{ remoteOk: boolean }>;
   };
   storageError?: string;
 }
@@ -48,8 +51,7 @@ async function loadState(owner: string): Promise<AppState | null> {
   const raw = await AsyncStorage.getItem(stateKey(owner));
   if (!raw) return null;
   const parsed = JSON.parse(raw) as AppState;
-  if (parsed.version !== STATE_VERSION) return { ...emptyState(parsed.deviceId ?? newId(), nowISO()), ...parsed, version: STATE_VERSION };
-  return { ...emptyState(parsed.deviceId, nowISO()), ...parsed };
+  return migrateState(parsed);
 }
 
 function proposalCandidate(p: Proposal): Candidate {
@@ -264,6 +266,27 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     setLegacyAvailable(false);
   }, [session, scopeReady]);
 
+  const signOut = useCallback(() => {
+    const uid = session?.user.id;
+    return signOutAndWipe({
+      flush: doSync,
+      signOut: async () => {
+        const sb = supabase();
+        const { error } = (await sb?.auth.signOut()) ?? {};
+        if (error) { await sb?.auth.signOut({ scope: 'local' }); throw error; }
+      },
+      reset: () => {
+        sessionRef.current = null;
+        setSession(null);
+        dispatch({ type: 'REPLACE_STATE', state: emptyState(newId(), nowISO()) });
+      },
+      clear: async () => {
+        // includes the pre-account 'local' copy so the next person on a shared device can't import it
+        await AsyncStorage.multiRemove([STORAGE_KEY, ...(uid ? [stateKey(uid), `${CURSOR_KEY}:${uid}`] : [])]);
+      },
+    });
+  }, [session, doSync]);
+
   useEffect(() => {
     if (!configured || !session || !scopeReady) return;
     const first = setTimeout(() => void doSync(), 0); // sync right after sign-in
@@ -291,9 +314,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       act,
       storageError,
       // status is derived so it can't go stale when the user signs out
-      sync: { configured, session, status: !configured ? 'local_only' : !session ? 'signed_out' : syncStatus, lastSyncAt, error: syncError, syncNow: doSync, legacyAvailable, importLocalData },
+      sync: { configured, session, status: !configured ? 'local_only' : !session ? 'signed_out' : syncStatus, lastSyncAt, error: syncError, syncNow: doSync, legacyAvailable, importLocalData, signOut },
     }),
-    [state, scopeReady, today, act, storageError, session, syncStatus, lastSyncAt, syncError, doSync, configured, legacyAvailable, importLocalData],
+    [state, scopeReady, today, act, storageError, session, syncStatus, lastSyncAt, syncError, doSync, configured, legacyAvailable, importLocalData, signOut],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
