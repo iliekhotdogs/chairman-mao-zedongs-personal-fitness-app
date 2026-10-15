@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { AppState as RNAppState } from 'react-native';
+import { AppState as RNAppState, Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Session } from '@supabase/supabase-js';
 
@@ -65,13 +65,6 @@ async function loadState(owner: string): Promise<AppState | null> {
 async function loadCursor(owner: string): Promise<SyncCursor> {
   return parseCursor(await AsyncStorage.getItem(`${CURSOR_KEY}:${owner}`));
 }
-
-/**
- * How long a signed-in device with no local profile waits (behind the splash screen) for
- * the account's data before showing onboarding. Without the wait, a fresh device would
- * offer onboarding and could stamp a new profile over the one on the server.
- */
-const FIRST_SYNC_WAIT_MS = 4000;
 
 /** Collections whose changes should re-run the coaching engine. */
 const ENGINE_KEYS = ['foodLog', 'weights', 'activity', 'sessions', 'proposals', 'dayAdjustments', 'targets', 'profile', 'plan'] as const;
@@ -276,14 +269,8 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     return () => { active = false; data.subscription.unsubscribe(); };
   }, [supabaseIdentity, integrationsLoaded]);
 
-  // A signed-in device with no local profile waits (splash) for its first sync, at most
-  // FIRST_SYNC_WAIT_MS, before the app decides it needs onboarding. See `hydrated` below.
+  // A signed-in device with no local profile waits for a completed first pull.
   const [firstSyncSettled, setFirstSyncSettled] = useState<string>();
-  useEffect(() => {
-    if (!configured || !userId || !scopeReady) return;
-    const t = setTimeout(() => setFirstSyncSettled(userId), FIRST_SYNC_WAIT_MS);
-    return () => clearTimeout(t);
-  }, [configured, userId, scopeReady]);
   const awaitingAccountData = configured && !!userId && scopeReady && !state.profile && firstSyncSettled !== userId;
 
   const doSync = useCallback(async () => {
@@ -308,6 +295,7 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       if (!stillSignedIn()) return;
       // Merged into the current state, so edits made during the network calls are kept.
       dispatch({ type: 'MERGE_REMOTE', rows: result.rows });
+      setFirstSyncSettled(userId);
       cursorRef.current = result.cursor;
       await AsyncStorage.setItem(cursorKey, JSON.stringify(result.cursor));
       setLastSyncAt(nowISO());
@@ -317,13 +305,22 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       log.warn('sync', 'Sync failed.', e);
       if (stillSignedIn()) {
         setSyncError(e instanceof Error ? e.message : String(e));
-        setSyncStatus('error');
+        setSyncStatus(Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
       }
     } finally {
       if (syncing.current === userId) syncing.current = null;
-      setFirstSyncSettled(userId);
     }
   }, [userId, scopeReady, dispatch]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    const offline = () => setSyncStatus('offline');
+    const online = () => void doSync();
+    window.addEventListener('offline', offline);
+    window.addEventListener('online', online);
+    if (!navigator.onLine) offline();
+    return () => { window.removeEventListener('offline', offline); window.removeEventListener('online', online); };
+  }, [doSync]);
 
   const importLocalData = useCallback(async () => {
     if (!userId || !scopeReady || stateRef.current.profile) throw new Error('This account already has data.');
@@ -338,14 +335,14 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     if (!configured || !userId || !scopeReady) return;
     // First sync for this account, in the background right after hydration (or sign-in).
     const first = setTimeout(() => void doSync(), 0);
-    const i = setInterval(() => void doSync(), 120_000);
+    const i = setInterval(() => void doSync(), firstSyncSettled === userId ? 120_000 : 10_000);
     const sub = RNAppState.addEventListener('change', (s) => s === 'active' && void doSync());
     return () => {
       clearTimeout(first);
       clearInterval(i);
       sub.remove();
     };
-  }, [configured, userId, scopeReady, doSync]);
+  }, [configured, userId, scopeReady, firstSyncSettled, doSync]);
 
   // ---- remote push: register this device's Expo push token (native builds only) ----
   useEffect(() => {

@@ -5,6 +5,7 @@ import type {
 } from './types';
 import { mergeActivity } from './activity/activity';
 import { newId } from './id';
+import { calorieFloor } from './nutrition/targets';
 import {
   applyPhotoUploads, clearStorageRemovals, deletePhotoRecord, importLegacyState, mergeRemote,
   type PhotoUpload, type RemoteRecord, type StorageRemoval,
@@ -30,7 +31,7 @@ export type Action =
   | { type: 'ADD_SETS'; sessionId: string; sets: LoggedSet[]; now: string }
   | { type: 'UPDATE_SET'; sessionId: string; set: LoggedSet; now: string }
   | { type: 'DELETE_SET'; sessionId: string; setId: string; now: string }
-  | { type: 'FINISH_SESSION'; sessionId: string; now: string; notes?: string }
+  | { type: 'FINISH_SESSION'; sessionId: string; now: string; notes?: string; effort?: number; pain?: boolean; painNote?: string }
   | { type: 'DISCARD_SESSION'; sessionId: string; now: string }
   | { type: 'DELETE_SESSION'; sessionId: string; now: string }
   | { type: 'MERGE_ACTIVITY'; records: ActivityRecord[] }
@@ -69,7 +70,7 @@ export function checkAction(state: AppState, action: Action): void {
       const e = action.entry;
       if (!e.confirmedAt) throw new RuleViolation('Food can only be logged after you confirm it.');
       if (!e.items.length) throw new RuleViolation('A meal needs at least one item.');
-      if (e.items.some((i) => !Number.isFinite(i.calories) || i.calories < 0)) throw new RuleViolation('Calories must be a positive number.');
+      if (e.items.some((i) => i.reviewRequired || !Number.isFinite(i.calories) || i.calories < 0 || [i.proteinG, i.carbsG, i.fatG].some((n) => !Number.isFinite(n) || n < 0) || (i.grams !== undefined && (!Number.isFinite(i.grams) || i.grams <= 0)))) throw new RuleViolation('Review invalid food amounts before logging.');
       return;
     }
     case 'SET_GOAL':
@@ -84,6 +85,9 @@ export function checkAction(state: AppState, action: Action): void {
       if (p.expiresOn && p.expiresOn < action.today) throw new RuleViolation('This suggestion has expired.');
       if (p.change.type === 'plan_weight_update' && state.plan?.id !== p.change.planId) throw new RuleViolation('Your plan changed since this suggestion was made.');
       if ((p.change.type === 'target_change' || p.change.type === 'day_calorie_adjustment') && !state.targets) throw new RuleViolation('Set up nutrition targets first.');
+      const floor = calorieFloor(state.profile?.sex ?? 'unspecified');
+      if ((p.change.type === 'target_change' || p.change.type === 'goal_change') && (!Number.isFinite(p.change.next.calories) || p.change.next.calories < floor)) throw new RuleViolation(`Daily calories cannot be below ${floor}.`);
+      if (p.change.type === 'day_calorie_adjustment' && (!Number.isFinite(p.change.calorieDelta) || state.targets!.calories + p.change.calorieDelta < floor)) throw new RuleViolation(`Daily calories cannot be below ${floor}.`);
       return;
     }
     case 'REJECT_PROPOSAL': {
@@ -101,6 +105,9 @@ export function checkAction(state: AppState, action: Action): void {
     }
     case 'LOG_WEIGHT':
       if (!(action.entry.weightKg > 20 && action.entry.weightKg < 400)) throw new RuleViolation('That body weight looks out of range.');
+      return;
+    case 'FINISH_SESSION':
+      if (action.effort !== undefined && (!Number.isInteger(action.effort) || action.effort < 1 || action.effort > 10)) throw new RuleViolation('Effort must be between 1 and 10.');
       return;
     case 'ADD_PROGRESS_PHOTO': {
       const p = action.photo;
@@ -224,7 +231,7 @@ export function reducer(state: AppState, action: Action): AppState {
     case 'DELETE_SET':
       return updateSession(state, action.sessionId, (s) => ({ ...s, sets: s.sets.filter((x) => x.id !== action.setId), updatedAt: action.now }));
     case 'FINISH_SESSION': {
-      const next = updateSession(state, action.sessionId, (s) => ({ ...s, finishedAt: action.now, notes: action.notes ?? s.notes, updatedAt: action.now }));
+      const next = updateSession(state, action.sessionId, (s) => ({ ...s, finishedAt: action.now, notes: action.notes ?? s.notes, effort: action.effort, pain: action.pain, painNote: action.painNote, updatedAt: action.now }));
       return { ...next, activeSessionId: state.activeSessionId === action.sessionId ? undefined : state.activeSessionId };
     }
     case 'DISCARD_SESSION':
@@ -244,7 +251,13 @@ export function reducer(state: AppState, action: Action): AppState {
 
     case 'ADD_PROPOSALS': {
       const live = new Set(state.proposals.filter((p) => !p.deleted).map((p) => p.dedupeKey));
-      const fresh = action.proposals.filter((p) => !live.has(p.dedupeKey));
+      const floor = calorieFloor(state.profile?.sex ?? 'unspecified');
+      const fresh = action.proposals.filter((p) => {
+        if (live.has(p.dedupeKey)) return false;
+        if (p.change.type === 'target_change' || p.change.type === 'goal_change') return Number.isFinite(p.change.next.calories) && p.change.next.calories >= floor;
+        if (p.change.type === 'day_calorie_adjustment') return Boolean(state.targets) && Number.isFinite(p.change.calorieDelta) && state.targets!.calories + p.change.calorieDelta >= floor;
+        return true;
+      });
       return fresh.length ? { ...state, proposals: [...state.proposals, ...fresh] } : state;
     }
     case 'REJECT_PROPOSAL':

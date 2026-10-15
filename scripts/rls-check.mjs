@@ -158,9 +158,15 @@ async function main() {
   check(Boolean(listA.error), 'B cannot call user_storage_objects for A', listA.error ? '' : describe(listA));
   const revoke = await b.client.rpc('admin_revoke_sessions', { p_user: a.id });
   check(Boolean(revoke.error), 'B cannot call admin_revoke_sessions', revoke.error ? '' : 'RPC ran');
+  for (const action of ['check', 'stats', 'list_users', 'create_invite', 'list_invites', 'revoke_invite', 'set_disabled', 'reset_quota', 'get_config', 'set_config', 'set_role']) {
+    const result = await b.client.functions.invoke('admin-stats', { body: { action } });
+    check(result.error?.context?.status === 403, `B gets 403 for admin action ${action}`);
+  }
+  const roleRpc = await b.client.rpc('admin_set_role', { p_actor: b.id, p_target: a.id, p_role: 'admin', p_owner: null });
+  check(Boolean(roleRpc.error), 'B cannot call admin_set_role directly', roleRpc.error ? '' : 'RPC ran');
 
   console.log('\nServer-only tables are closed to B');
-  for (const table of ['app_config', 'invites', 'ai_global_usage', 'signup_attempts', 'ai_ip_usage', 'food_search_global_usage']) {
+  for (const table of ['app_config', 'invites', 'ai_global_usage', 'signup_attempts', 'ai_ip_usage', 'food_search_global_usage', 'user_ai_prefs', 'admin_audit', 'admin_bootstrap_emails']) {
     const result = await b.client.from(table).select('*').limit(5);
     check(denied(result), `B cannot read ${table}`, describe(result));
   }
@@ -172,6 +178,18 @@ async function main() {
   check(ownProfile.data?.role === 'user', 'B reads its own profile with role "user"', describe(ownProfile));
   const promote = await b.client.from('profiles').update({ role: 'admin' }).eq('user_id', b.id).select('role');
   check(denied(promote), 'B cannot make itself admin', describe(promote));
+  const prefRead = await b.client.from('user_ai_prefs').select('*').eq('user_id', a.id);
+  check(denied(prefRead), 'B cannot read A\'s AI preference', describe(prefRead));
+  const prefWrite = await b.client.from('user_ai_prefs').insert({ user_id: a.id, provider: 'groq', chat_model: 'openai/gpt-oss-120b' });
+  check(Boolean(prefWrite.error), 'B cannot write A\'s AI preference');
+  for (const choice of [{ provider: 'nvidia', chat_model: 'moonshotai/kimi-k2.6' }, { provider: 'groq', chat_model: 'z-ai/glm-5.3-flash' }]) {
+    const response = await b.client.functions.invoke('ai', { body: { action: 'set_preference', ...choice } });
+    check(response.error?.context?.status === 400, `AI rejects unlisted choice ${choice.provider}/${choice.chat_model}`);
+    const unchanged = await admin.from('user_ai_prefs').select('user_id').eq('user_id', b.id);
+    check(!unchanged.error && (unchanged.data ?? []).length === 0, 'Invalid choice changes no preference');
+  }
+  const roleWrite = await b.client.from('profiles').update({ role: 'admin' }).eq('user_id', a.id).select('role');
+  check(denied(roleWrite), 'B cannot change A\'s role', describe(roleWrite));
   const configWrite = await b.client.from('app_config').update({ ai_enabled: false }).eq('id', 1).select('id');
   check(denied(configWrite), 'B cannot change app_config', describe(configWrite));
 

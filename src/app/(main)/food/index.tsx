@@ -50,7 +50,7 @@ export default function FoodLog() {
       <Row>
         <IconButton icon="chevron-back" label="Previous day" onPress={() => setDate(addDays(date, -1))} />
         <Text variant="h3" style={{ flex: 1, textAlign: 'center' }}>{formatDateLabel(date, today)}</Text>
-        <IconButton icon="chevron-forward" label="Next day" onPress={() => date < today && setDate(addDays(date, 1))} color={date >= today ? C.borderStrong : C.text} style={date >= today ? { opacity: 0.4 } : undefined} />
+        <IconButton icon="chevron-forward" label="Next day" onPress={() => setDate(addDays(date, 1))} disabled={date >= today} color={date >= today ? C.borderStrong : C.text} />
       </Row>
 
       <Columns ratio={[2, 3]}>

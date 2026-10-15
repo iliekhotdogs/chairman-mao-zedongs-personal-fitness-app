@@ -8,6 +8,8 @@ import { remainingForDay, workoutForDay, latestWeight, loggedDays, live } from '
 import { computeTargets } from '../nutrition/targets';
 import { weightSlopePerDay } from './adaptive';
 import { displayWeight } from '../units';
+import { hasInjuryRedFlag, isUrgentSymptom } from '../../../supabase/functions/_shared/coachSafety';
+export { hasInjuryRedFlag, isUrgentSymptom } from '../../../supabase/functions/_shared/coachSafety';
 
 /**
  * SIMULATED coach used until a real AI provider is connected. It recognises common
@@ -31,13 +33,6 @@ const AREAS: { area: BodyArea; re: RegExp }[] = [
   { area: 'neck', re: /\bneck\b/ },
 ];
 
-const URGENT = /\b(chest pain|chest tight|can'?t breathe|short of breath|faint|passed out|dizz)/;
-const RED_FLAGS = /\b(swell|swollen|numb|tingl|sharp|pop(ped)?|snap|can'?t (walk|bear|put weight|move)|fell|fall|bruis|locked|gave way|giving way|worse at night|radiat)/;
-
-/** Chest pain, fainting, trouble breathing: always answered by fixed safety text, never by an AI model. */
-export function isUrgentSymptom(message: string): boolean {
-  return URGENT.test(message.toLowerCase());
-}
 
 function tone(t: CoachTone, supportive: string, direct: string) {
   return t === 'supportive' ? supportive : direct;
@@ -56,7 +51,7 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
   const profile = state.profile;
 
   // 1. Safety first: pain, injury, urgent symptoms
-  if (URGENT.test(t)) {
+  if (isUrgentSymptom(t)) {
     return {
       safety: true,
       proposals: [],
@@ -64,9 +59,9 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
         'Please stop exercising now. Chest pain, trouble breathing, or feeling faint can be serious. If it is severe or does not settle quickly, call your local emergency number. Otherwise, contact a doctor today before training again.\n\nI can\'t assess medical symptoms, but I\'ll adjust your training once you have been cleared.',
     };
   }
-  if (/\b(hurt|hurts|pain|painful|sore|injur|ache|aching|tweak|strain|sprain)/.test(t)) {
+  if (hasInjuryRedFlag(t) || /\b(?:hurt|hurts|pain|painful|sore|injur(?:y|ed|ies)?|ache|aching|tweak(?:ed)?|strain(?:ed)?|sprain(?:ed)?)\b/.test(t)) {
     const area = AREAS.find((a) => a.re.test(t))?.area;
-    const redFlag = RED_FLAGS.test(t);
+    const redFlag = hasInjuryRedFlag(t);
     const proposals: Proposal[] = [];
     const lines: string[] = [];
     lines.push(tone(tn, "Sorry to hear that. Let's work around it.", 'Understood. We work around it, not through it.'));
@@ -77,6 +72,7 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
     } else {
       lines.push("• If it doesn't improve within a week or two, or gets worse, see a physiotherapist or doctor.");
     }
+    if (redFlag) return { safety: true, proposals: [], text: lines.join('\n') };
     if (area && profile) {
       if (day) {
         const swapped = swapForArea(day, area, profile.equipment);

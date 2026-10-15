@@ -3,7 +3,7 @@
 // Actions: check, stats, list_users, create_invite, list_invites, revoke_invite,
 // set_disabled, reset_quota, get_config, set_config.
 // No health data, records or chat content leave this function.
-import { admin, isAdmin, isOwner, profileOf, requestUser } from '../_shared/auth.ts';
+import { admin, isAdmin, isOwner, ownerId, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
 import { describeRegistry, resolveConfig, validateConfigUpdate } from '../_shared/providers.ts';
 import { generateInviteCode, inviteExpiry, normalizeInviteCode } from '../_shared/invite.ts';
@@ -17,7 +17,9 @@ Deno.serve(async (request) => {
   const json = (value: unknown, status = 200) => jsonFor(request, value, status);
   const user = await requestUser(request);
   if (!user) return json({ error: 'Sign in first' }, 401);
-  if (!(await isAdmin(user))) return json({ error: 'Admin access required' }, 403);
+  let authorized;
+  try { authorized = await isAdmin(user); } catch { return json({ error: 'Account status is unavailable.' }, 503); }
+  if (!authorized) return json({ error: 'Admin access required' }, 403);
 
   let input: Record<string, unknown>;
   try { input = await readJsonBody(request, 16_000, true); } catch (error) {
@@ -78,7 +80,9 @@ Deno.serve(async (request) => {
       // the owner may disable or re-enable another admin. Otherwise one admin could lock
       // out every other admin, or a compromised admin account could lock out the owner.
       if (isOwner(input.userId)) return json({ error: 'The app owner account cannot be disabled.' }, 403);
-      const target = await profileOf(input.userId);
+      let target;
+      try { target = await profileOf(input.userId); } catch { return json({ error: 'Account status is unavailable.' }, 503); }
+      if (!target) return json({ error: 'Account profile is missing.' }, 404);
       if (target.role === 'admin' && !isOwner(user.id)) return json({ error: 'Only the app owner can disable or enable an admin.' }, 403);
       const { error } = await admin.from('profiles').upsert({ user_id: input.userId, disabled: input.disabled }, { onConflict: 'user_id' });
       if (error) return json({ error: 'Could not update the account.' }, 502);
@@ -101,8 +105,21 @@ Deno.serve(async (request) => {
 
     case 'reset_quota': {
       if (!isUuid(input.userId)) return json({ error: 'userId is required.' }, 400);
-      const { error } = await admin.from('ai_usage').update({ requests: 0 }).eq('user_id', input.userId).eq('day', utcDay());
+      const { error } = await admin.rpc('admin_reset_ai_quota', { p_user: input.userId, p_day: utcDay() });
       if (error) return json({ error: 'Could not reset the quota.' }, 502);
+      return json({ ok: true });
+    }
+
+    case 'set_role': {
+      if (!isUuid(input.userId) || !['admin', 'user'].includes(String(input.role))) return json({ error: 'userId and role are required.' }, 400);
+      const { data, error } = await admin.rpc('admin_set_role', {
+        p_actor: user.id, p_target: input.userId, p_role: input.role,
+        p_owner: isUuid(ownerId()) ? ownerId() : null,
+      });
+      if (error) return json({ error: 'Could not change the role.' }, 503);
+      if (data === 'missing') return json({ error: 'Account profile is missing.' }, 404);
+      if (data === 'protected' || data === 'last_admin') return json({ error: 'That admin role is protected.' }, 403);
+      if (data !== 'ok') return json({ error: 'Could not change the role.' }, 400);
       return json({ ok: true });
     }
 

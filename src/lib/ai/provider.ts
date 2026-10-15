@@ -1,16 +1,16 @@
 import type { AppState } from '../state';
 import type { Confidence, EstimateItem, FoodEstimate, ISODate, Proposal } from '../types';
 import { simulateFoodEstimate } from '../nutrition/estimate';
-import { isUrgentSymptom, simulateCoachReply, type CoachReply } from '../coaching/coachSim';
+import { hasInjuryRedFlag, isUrgentSymptom, simulateCoachReply, type CoachReply } from '../coaching/coachSim';
 import { isSupabaseConfigured, supabase } from '../sync/supabase';
 import { newId } from '../id';
 import { nowISO, addDays } from '../dates';
 import { remainingForDay, workoutForDay, latestWeight, live } from '../selectors';
 import { exerciseName, formatPrescription } from '../workouts/exercises';
-import { prepareImageForAI } from './image';
+import { prepareImageForAI, type ImageSetting } from './image';
 
 /** Signed-in accounts use the server-side AI gateway (supabase/functions/ai). The
- * admin picks the provider and models there; the client never sends a model.
+ * gateway resolves each user's saved choice; model ids never accompany coach calls.
  * Without Supabase, the app offers built-in answers. AI only proposes changes. */
 
 export class AIUnavailableError extends Error {}
@@ -43,6 +43,9 @@ export interface AiInfo {
   visionModelLabel: string;
   perUserDailyLimit: number;
   usedToday: number;
+  allowUserChoice: boolean;
+  isDefault: boolean;
+  options: { id: string; label: string; keyConfigured: boolean; models: { id: string; label: string; vision: boolean }[] }[];
 }
 
 export async function fetchAiInfo(): Promise<AiInfo> {
@@ -54,7 +57,16 @@ export async function fetchAiInfo(): Promise<AiInfo> {
   return data as AiInfo;
 }
 
-type FoodInput = { hint?: string; photoUri?: string; photoSize?: { width?: number; height?: number }; followUpAnswered?: boolean };
+export async function saveAiPreference(provider: string, chat_model: string): Promise<AiInfo> {
+  const sb = supabase();
+  if (!sb) throw new AIUnavailableError('Server AI is not configured.');
+  const { data, error } = await sb.functions.invoke('ai', { body: { action: 'set_preference', provider, chat_model } });
+  if (error) throw new Error(await functionErrorMessage(error, 'Could not save AI choice.'));
+  if (!data?.info || typeof data.info.provider !== 'string') throw new Error('Could not confirm AI choice.');
+  return data.info as AiInfo;
+}
+
+type FoodInput = { hint?: string; photoUri?: string; photoSize?: { width?: number; height?: number }; followUpAnswered?: boolean; imageSetting?: ImageSetting };
 
 export async function estimateFood(state: AppState, input: FoodInput): Promise<FoodEstimate> {
   const engine = aiEngine();
@@ -65,7 +77,7 @@ export async function estimateFood(state: AppState, input: FoodInput): Promise<F
   const sb = supabase();
   if (!sb) throw new AIUnavailableError('Server AI is not configured. Switch to simulated mode in Settings.');
   try {
-    const image = input.photoUri ? await prepareImageForAI(input.photoUri, input.photoSize) : undefined;
+    const image = input.photoUri ? await prepareImageForAI(input.photoUri, input.photoSize, input.imageSetting) : undefined;
     const { data, error } = await sb.functions.invoke('ai', {
       body: { action: 'estimate_food', hint: input.hint ?? '', image: image ? { data: image.base64, mediaType: image.mediaType } : undefined, units: state.settings.units },
     });
@@ -79,16 +91,21 @@ export async function estimateFood(state: AppState, input: FoodInput): Promise<F
 interface ServerEstimate {
   items: {
     name: string; portion: string; grams: number; calories: number; protein_g: number; carbs_g: number; fat_g: number;
-    confidence: Confidence; portion_assumption: string; source_kind: EstimateItem['source']['kind']; source_label: string; source_url?: string | null;
+    confidence: Confidence; portion_assumption: string; review_required?: boolean; source_kind: EstimateItem['source']['kind']; source_label: string; source_url?: string | null;
   }[];
   overall_confidence: Confidence;
   follow_up_question?: string | null;
   notes: string[];
+  rejected_items?: number;
   model: string;
   provider?: string;
 }
 
-function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: string }): FoodEstimate {
+export function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: string }): FoodEstimate {
+  if (!Array.isArray(data?.items) || !data.items.length) throw new Error('The image service returned no usable food items.');
+  for (const item of data.items) {
+    if (!item.name || !Number.isFinite(item.grams) || item.grams <= 0 || [item.calories, item.protein_g, item.carbs_g, item.fat_g].some((n) => !Number.isFinite(n) || n < 0)) throw new Error('The image service returned invalid food amounts.');
+  }
   return {
     id: newId(),
     createdAt: nowISO(),
@@ -99,6 +116,7 @@ function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: str
     overallConfidence: data.overall_confidence,
     followUpQuestion: data.follow_up_question ?? undefined,
     notes: data.notes ?? [],
+    rejectedItems: data.rejected_items,
     items: (data.items ?? []).map((i) => ({
       name: i.name,
       portionLabel: i.portion,
@@ -109,6 +127,7 @@ function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: str
       fatG: i.fat_g,
       confidence: i.confidence,
       portionAssumption: i.portion_assumption,
+      reviewRequired: i.review_required,
       source: { kind: i.source_kind, label: i.source_label, url: i.source_url ?? undefined, sourced: i.source_kind !== 'visual_estimate' },
     })),
   };
@@ -170,7 +189,7 @@ export async function coachReply(state: AppState, message: string, today: ISODat
     return { ...simulateCoachReply(state, message, today), simulated: true };
   }
   // Emergencies always get the fixed safety text, never a model's improvisation.
-  if (isUrgentSymptom(message)) return { ...simulateCoachReply(state, message, today), simulated: false };
+  if (isUrgentSymptom(message) || hasInjuryRedFlag(message)) return { ...simulateCoachReply(state, message, today), simulated: false };
   const sb = supabase();
   if (!sb) throw new AIUnavailableError('Server AI is not configured. Switch to simulated mode in Settings.');
   const history = live(state.chat).slice(-12).map((m) => ({ role: m.role === 'coach' ? 'assistant' : 'user', content: m.text }));

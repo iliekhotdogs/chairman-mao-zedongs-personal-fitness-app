@@ -1,11 +1,14 @@
 // Shared AI gateway. Deploy with JWT verification enabled.
-// The admin picks the provider, models, limits and kill switch in app_config
-// (see the admin screen). Keys are Edge Function secrets only: GROQ_API_KEY,
-// GEMINI_API_KEY, NVIDIA_API_KEY; optional FDC_API_KEY. Never place them in Expo env vars.
+// The admin sets defaults, allowed providers, limits and kill switch in app_config.
+// User choices are resolved server-side. Keys are Edge Function secrets only: GROQ_API_KEY,
+// OPENROUTER_API_KEY, NVIDIA_API_KEY; optional FDC_API_KEY. Never place them in Expo env vars.
 import type { User } from 'npm:@supabase/supabase-js@2.117.2';
 import { admin, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, clientIpHash, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
-import { findModel, modelLabel, PROVIDERS, resolveConfig, type AiConfig } from '../_shared/providers.ts';
+import { effectiveConfig, findModel, modelLabel, PROVIDERS, resolveConfig, validPreference, type AiConfig } from '../_shared/providers.ts';
+import { matchingFood, validateVisionItem, type VisionItem } from './foodValidation.ts';
+import { hasInjuryRedFlag, isUrgentSymptom } from '../_shared/coachSafety.ts';
+import { profileGate } from '../_shared/profile.ts';
 
 const safeNumber = (value: unknown, max: number) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max ? value : 0;
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.slice(0, max) : '';
@@ -21,7 +24,7 @@ const AI_UNUSABLE = 'Coach AI sent an answer that could not be used. Try again, 
 
 /** A failure with a safe message for the client. `status` is the HTTP status to return. */
 class AiError extends Error {
-  constructor(message: string, readonly status = 502) { super(message); }
+  constructor(message: string, readonly status = 502, readonly refundable = false) { super(message); }
 }
 
 /** `counted`: the request reached the provider in a way that keeps the quota claim.
@@ -35,6 +38,13 @@ async function loadConfig(): Promise<AiConfig> {
   const { data, error } = await admin.from('app_config').select('*').eq('id', 1).maybeSingle();
   if (error) throw new AiError('AI configuration is not ready. Apply the latest SQL migration first.', 503);
   return resolveConfig(data);
+}
+
+async function resolvedForUser(userId: string, config: AiConfig) {
+  if (!config.allow_user_choice) return { config, isDefault: true };
+  const { data, error } = await admin.from('user_ai_prefs').select('provider, chat_model').eq('user_id', userId).maybeSingle();
+  if (error) throw new AiError('AI preferences are unavailable right now.', 503);
+  return effectiveConfig(config, data, (keyEnv) => Boolean(Deno.env.get(keyEnv)));
 }
 
 type Completion = { text: string; input: number; output: number };
@@ -68,10 +78,10 @@ async function complete(config: AiConfig, meter: Meter, kind: 'chat' | 'vision',
     // the provider without limit.
     const ourFault = response.status === 429 || response.status >= 500 || [401, 403, 404, 408].includes(response.status);
     if (!ourFault) meter.counted = true;
-    const detail = (await response.text().catch(() => '')).slice(0, 300);
+    await response.text().catch(() => '');
     const hint = response.status === 401 || response.status === 403 ? ` (check the ${info.keyEnv} secret)`
       : response.status === 404 ? ` (model "${model}" not offered to this key)` : '';
-    console.error(`${info.label} ${response.status} for ${model}${hint}: ${detail}`);
+    console.error(`${info.label} ${response.status} for ${model}${hint}`);
     throw new AiError(response.status === 429 ? AI_BUSY : AI_UNAVAILABLE, response.status === 429 ? 429 : 502);
   }
   // From here on the provider has done (and billed) the work.
@@ -87,7 +97,7 @@ async function complete(config: AiConfig, meter: Meter, kind: 'chat' | 'vision',
   meter.output = safeNumber(data.usage?.completion_tokens, 10_000_000);
   const content = data.choices?.[0]?.message?.content;
   // Reasoning models may inline their thinking; only the answer after it is used.
-  const reply = (typeof content === 'string' ? content : '').replace(/<think>[\s\S]*?<\/think>/g, '');
+  const reply = (typeof content === 'string' ? content : '').replace(/<think>[\s\S]*?<\/think>/g, '').replace(/<think>[\s\S]*$/g, '');
   if (!reply.trim()) {
     console.error(`${info.label} returned an empty reply for ${model}.`);
     throw new AiError(AI_UNUSABLE);
@@ -125,10 +135,16 @@ function validatedIntents(value: unknown): unknown[] {
   });
 }
 
-// Older app builds still send a "model" field; it is ignored. The admin picks the model.
+// Older app builds still send a "model" field; it is ignored. The server resolves the model.
 async function coach(config: AiConfig, meter: Meter, body: Record<string, unknown>) {
   const message = text(body.message, 2000);
   if (!message.trim()) throw new AiError('Enter a message first.', 400);
+  if (isUrgentSymptom(message)) {
+    return { result: { reply: 'Stop exercising now. Chest pain, trouble breathing, or feeling faint can be serious. Seek emergency care if symptoms are severe or persist; otherwise contact a doctor today before training again.', safety: true, intents: [] }, tokens: { input: 0, output: 0 } };
+  }
+  if (hasInjuryRedFlag(message)) {
+    return { result: { reply: 'Stop movements that hurt. Swelling, numbness, sharp pain, a pop, or trouble bearing weight should be checked by a doctor or physiotherapist before training that area again. I cannot assess an injury here.', safety: true, intents: [] }, tokens: { input: 0, output: 0 } };
+  }
   const context = body.context && typeof body.context === 'object' ? JSON.stringify(body.context).slice(0, 6000) : '{}';
   const history = Array.isArray(body.history) ? body.history.slice(-12).map((turn) => ({
     role: turn?.role === 'assistant' ? 'assistant' : 'user', content: text(turn?.content, 2000),
@@ -157,23 +173,23 @@ async function coach(config: AiConfig, meter: Meter, body: Record<string, unknow
   return { result: { reply, safety: value.safety === true, intents: validatedIntents(value.intents) }, tokens: response };
 }
 
-type VisionItem = { name: string; portion: string; grams: number; calories: number; protein_g: number; carbs_g: number; fat_g: number; confidence: string; portion_assumption: string; usda_search_query: string };
 async function searchUsda(query: string, pageSize: number) {
   const key = Deno.env.get('FDC_API_KEY') || 'DEMO_KEY';
   // The key goes in a header so it never appears in URLs or proxy logs.
   const response = await fetch('https://api.nal.usda.gov/fdc/v1/foods/search', {
     method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Api-Key': key },
     body: JSON.stringify({ query, pageSize, dataType: ['Foundation', 'SR Legacy', 'Survey (FNDDS)', 'Branded'] }),
+    signal: AbortSignal.timeout(8_000),
   });
   if (!response.ok) {
     console.error(`USDA search ${response.status}: ${(await response.text().catch(() => '')).slice(0, 200)}`);
-    throw new AiError('Food search is not available right now. Try again later.', 502);
+    throw new AiError('Food search is not available right now. Try again later.', 502, response.status === 429 || response.status >= 500);
   }
   return (await response.json()).foods ?? [];
 }
 
 async function usdaItem(item: VisionItem) {
-  const food = (await searchUsda(item.usda_search_query || item.name, 1))[0];
+  const food = matchingFood(item, await searchUsda(item.usda_search_query || item.name, 8));
   if (!food) return null;
   const nutrient = (numbers: string[]) => food.foodNutrients?.find((n: { nutrientNumber?: string }) => numbers.includes(n.nutrientNumber ?? ''))?.value ?? 0;
   const kcal = nutrient(['208', '957', '958']) * item.grams / 100;
@@ -184,6 +200,7 @@ async function usdaItem(item: VisionItem) {
     carbs_g: Math.round(nutrient(['205']) * item.grams / 10) / 10,
     fat_g: Math.round(nutrient(['204']) * item.grams / 10) / 10,
     confidence: item.confidence, portion_assumption: item.portion_assumption,
+    review_required: false,
     source_kind: 'database', source_label: `USDA FoodData Central #${food.fdcId}: ${food.description}`,
     source_url: `https://fdc.nal.usda.gov/food-details/${food.fdcId}/nutrients`,
   };
@@ -211,37 +228,48 @@ async function estimateFood(config: AiConfig, meter: Meter, body: Record<string,
     console.error(`${config.vision_model} meal estimate has no items array.`);
     throw new AiError(AI_UNUSABLE);
   }
-  const items = await Promise.all(value.items.slice(0, 8).map(async (raw: Record<string, unknown>) => {
-    const item: VisionItem = {
-      name: text(raw.name, 100) || 'Unknown food', portion: text(raw.portion, 80) || 'Estimated serving',
-      grams: safeNumber(raw.grams, 5000), calories: safeNumber(raw.calories, 10000),
-      protein_g: safeNumber(raw.protein_g, 1000), carbs_g: safeNumber(raw.carbs_g, 2000), fat_g: safeNumber(raw.fat_g, 1000),
-      confidence: ['high', 'medium', 'low'].includes(String(raw.confidence)) ? String(raw.confidence) : 'low',
-      portion_assumption: text(raw.portion_assumption, 200), usda_search_query: text(raw.usda_search_query, 100),
-    };
-    const sourced = item.grams ? await usdaItem(item).catch(() => null) : null;
+  const validated = value.items.slice(0, 8).map(validateVisionItem);
+  const rejected = validated.filter((item) => item === null).length;
+  if (validated.every((item) => item === null)) throw new AiError('No usable food portions were identified. Please enter the meal manually.', 502);
+  const validItems = validated.filter((item): item is VisionItem => item !== null);
+  const items = [];
+  for (let start = 0; start < validItems.length; start += 2) {
+    items.push(...await Promise.all(validItems.slice(start, start + 2).map(async (item) => {
+    const sourced = item.review_required ? null : await usdaItem(item).catch(() => null);
     return sourced ?? {
       name: item.name, portion: item.portion, grams: item.grams, calories: item.calories,
       protein_g: item.protein_g, carbs_g: item.carbs_g, fat_g: item.fat_g,
       confidence: item.confidence === 'high' ? 'medium' : item.confidence,
-      portion_assumption: item.portion_assumption,
+      portion_assumption: item.portion_assumption, review_required: Boolean(item.review_required),
       source_kind: 'visual_estimate', source_label: 'Visual estimate (no matching USDA value)', source_url: null,
     };
-  }));
-  return { result: { items, overall_confidence: ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes: Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [], model: config.vision_model, provider: PROVIDERS[config.provider].label }, tokens: response };
+    })));
+  }
+  const notes = Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [];
+  if (rejected) notes.unshift(`${rejected} food item(s) had unusable amounts and were omitted. Review the plate and add them manually.`);
+  if (items.some((item) => item.review_required)) notes.unshift('One or more portions need correction before saving.');
+  return { result: { items, rejected_items: rejected, overall_confidence: rejected || items.some((item) => item.review_required) ? 'low' : ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes, model: config.vision_model, provider: PROVIDERS[config.provider].label }, tokens: response };
 }
 
 async function aiInfo(user: User) {
   const config = await loadConfig();
+  const effective = await resolvedForUser(user.id, config);
+  const selected = effective.config;
   const { data } = await admin.from('ai_usage').select('requests').eq('user_id', user.id).eq('day', utcDay()).maybeSingle();
   return {
-    enabled: config.ai_enabled && Boolean(Deno.env.get(PROVIDERS[config.provider].keyEnv)),
-    provider: config.provider,
-    providerLabel: PROVIDERS[config.provider].label,
-    chatModel: config.chat_model,
-    chatModelLabel: modelLabel(config.provider, config.chat_model),
-    visionModel: config.vision_model,
-    visionModelLabel: modelLabel(config.provider, config.vision_model),
+    enabled: config.ai_enabled && config.per_user_daily_limit > 0 && config.global_daily_limit > 0 && Boolean(Deno.env.get(PROVIDERS[selected.provider].keyEnv)),
+    allowUserChoice: config.allow_user_choice,
+    isDefault: effective.isDefault,
+    options: config.allowed_providers.filter((id) => PROVIDERS[id].userSelectable).map((id) => ({
+      id, label: PROVIDERS[id].label, keyConfigured: Boolean(Deno.env.get(PROVIDERS[id].keyEnv)),
+      models: PROVIDERS[id].chatModels.map((model) => ({ id: model.id, label: model.label, vision: Boolean(findModel(PROVIDERS[id].visionModels, model.id)) })),
+    })),
+    provider: selected.provider,
+    providerLabel: PROVIDERS[selected.provider].label,
+    chatModel: selected.chat_model,
+    chatModelLabel: modelLabel(selected.provider, selected.chat_model),
+    visionModel: selected.vision_model,
+    visionModelLabel: modelLabel(selected.provider, selected.vision_model),
     perUserDailyLimit: config.per_user_daily_limit,
     usedToday: data?.requests ?? 0,
   };
@@ -257,8 +285,9 @@ Deno.serve(async (request) => {
   if (!user) return json({ error: 'Sign in first.' }, 401);
   // Invite-created accounts are confirmed at creation; older self-signups must confirm by email.
   if (!user.email_confirmed_at) return json({ error: 'Confirm your email address first, then sign in again.' }, 403);
-  const profile = await profileOf(user.id);
-  if (profile.disabled) return json({ error: 'This account is disabled. Contact the app owner.' }, 403);
+  const gate = await profileGate(() => profileOf(user.id));
+  if (!gate.ok) return json({ error: gate.missing ? 'Account profile is missing.' : 'Account status is unavailable. Try again later.' }, gate.status);
+  if (gate.profile.disabled) return json({ error: 'This account is disabled. Contact the app owner.' }, 403);
   let body: Record<string, unknown>;
   try { body = await readJsonBody(request, MAX_BODY_BYTES); } catch (error) {
     return error instanceof BodyError ? json({ error: error.message }, error.status) : json({ error: 'Invalid request.' }, 400);
@@ -266,11 +295,23 @@ Deno.serve(async (request) => {
   if (body.action === 'info') {
     try { return json(await aiInfo(user)); } catch (error) { return json({ error: error instanceof Error ? error.message : 'AI info unavailable.' }, 503); }
   }
+  if (body.action === 'set_preference') {
+    let config: AiConfig;
+    try { config = await loadConfig(); } catch { return json({ error: 'AI preferences are unavailable right now.' }, 503); }
+    if (!config.allow_user_choice) return json({ error: 'AI choice is disabled.' }, 403);
+    const preference = validPreference(body);
+    if (!preference || !config.allowed_providers.includes(preference.provider)) return json({ error: 'Choose an available provider and model.' }, 400);
+    if (!Deno.env.get(PROVIDERS[preference.provider].keyEnv)) return json({ error: 'That provider is not available.' }, 400);
+    const { error } = await admin.from('user_ai_prefs').upsert({ user_id: user.id, ...preference, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
+    if (error) return json({ error: 'Could not save AI preference.' }, 503);
+    return json({ ok: true, info: await aiInfo(user) });
+  }
   if (body.action === 'search_food') {
     const query = text(body.query, 100).trim();
     if (query.length < 2) return json({ foods: [] });
+    const searchDay = utcDay();
     const { data: searchClaim, error: searchClaimError } = await admin.rpc('claim_food_search', {
-      p_user: user.id, p_day: utcDay(),
+      p_user: user.id, p_day: searchDay,
       p_user_limit: 30, p_global_limit: 500,
     });
     if (searchClaimError) return json({ error: 'Food search metering is not ready. Apply the account SQL setup first.' }, 503);
@@ -285,13 +326,17 @@ Deno.serve(async (request) => {
       return json({ foods: result });
     } catch (error) {
       if (!(error instanceof AiError)) console.error(`USDA search failed: ${error}`);
+      if (!(error instanceof AiError) || error.refundable) {
+        const { error: refundError } = await admin.rpc('release_food_search', { p_user: user.id, p_day: searchDay });
+        if (refundError) console.error(`Food search refund failed: ${refundError.message}`);
+      }
       return json({ error: error instanceof AiError ? error.message : 'Food search is not available right now. Try again later.' }, 502);
     }
   }
   if (body.action !== 'coach' && body.action !== 'estimate_food') return json({ error: 'Unknown action.' }, 400);
 
   let config: AiConfig;
-  try { config = await loadConfig(); } catch (error) { return json({ error: error instanceof AiError ? error.message : 'AI is not ready.' }, 503); }
+  try { config = (await resolvedForUser(user.id, await loadConfig())).config; } catch (error) { return json({ error: error instanceof AiError ? error.message : 'AI is not ready.' }, 503); }
   if (!config.ai_enabled) return json({ error: AI_OFF }, 503);
   const info = PROVIDERS[config.provider];
   if (!Deno.env.get(info.keyEnv)) {

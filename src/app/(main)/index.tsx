@@ -14,6 +14,7 @@ import { activeSession, activityForDay, latestWeight, pendingProposals, remainin
 import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { dayMinutes } from '@/lib/workouts/generator';
 import { displayWeight } from '@/lib/units';
+import { formatDateLabel } from '@/lib/dates';
 
 function greeting() {
   const h = new Date().getHours();
@@ -168,12 +169,12 @@ function ActivityCard({ onLogWeight }: { onLogWeight: () => void }) {
     <Card style={{ gap: Space.md }}>
       <Row>
         <Text variant="h3" style={{ flex: 1 }}>Daily activity</Text>
-        {hc?.status === 'connected' && hc.message?.includes('Simulated') ? <Badge kind="simulated" label="Simulated sync" /> : null}
+        {__DEV__ && hc?.status === 'connected' && hc.message?.includes('Simulated') ? <Badge kind="simulated" label="Simulated sync" /> : null}
       </Row>
       {a.missing ? (
         <Stack gap={Space.sm}>
-          <Muted variant="small">{hc?.status === 'connected' ? 'No activity has synced for today yet.' : 'Connect a health app or add steps manually to see activity here.'}</Muted>
-          <Button title={hc?.status === 'connected' ? 'Review activity' : 'Connect activity'} kind="secondary" size="sm" icon="footsteps-outline" onPress={() => router.push('/activity')} />
+          <Muted variant="small">{hc?.status === 'connected' ? 'No activity has synced for today yet.' : 'Add steps manually to see activity here.'}</Muted>
+          <Button title={hc?.status === 'connected' ? 'Review activity' : 'Add activity'} kind="secondary" size="sm" icon="footsteps-outline" onPress={() => router.push('/activity')} />
         </Stack>
       ) : (
         <Pressable onPress={() => router.push('/activity')} accessibilityRole="button" accessibilityLabel="Open activity details" style={{ gap: Space.sm }}>
@@ -193,7 +194,7 @@ function ActivityCard({ onLogWeight }: { onLogWeight: () => void }) {
         <Stack gap={0} style={{ flex: 1 }}>
           <Muted variant="caption">BODY WEIGHT</Muted>
           <Text variant="bodyStrong">{w ? displayWeight(w.weightKg, state.settings.units) : 'Not logged'}</Text>
-          {w ? <Muted variant="small">{w.date === today ? 'Today' : `Last: ${w.date}`}</Muted> : null}
+          {w ? <Muted variant="small">{formatDateLabel(w.date, today)}</Muted> : null}
         </Stack>
         <Button title={w?.date === today ? 'Update' : 'Log weight'} kind="secondary" size="sm" icon="scale-outline" onPress={onLogWeight} />
       </Row>

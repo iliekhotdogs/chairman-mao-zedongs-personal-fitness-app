@@ -2,7 +2,7 @@ import type { AppState } from '../state';
 import type { Insight, ISODate, Proposal, WorkoutSession } from '../types';
 import { addDays, daysBetween, lastNDates, nowISO, toISODate, weekday } from '../dates';
 import { newId } from '../id';
-import { macrosFor, roundTo } from '../nutrition/targets';
+import { calorieFloor, macrosFor, roundTo } from '../nutrition/targets';
 import { live, loggedDays, totalsForDay, dayTargets } from '../selectors';
 import { dailyActivity } from '../activity/activity';
 import { dayForWeekday } from '../workouts/generator';
@@ -145,6 +145,7 @@ export function trendAdjustment(state: AppState, today: ISODate): { proposal?: P
   }
 
   const nextCalories = targets.calories + delta;
+  if (nextCalories < calorieFloor(profile.sex)) return {};
   const next = macrosFor(nextCalories, latest, profile.goal);
   const goalText = profile.goal.replace('_', ' ');
   const expected = `${band.min}% to ${band.max}% per week`;
@@ -232,6 +233,7 @@ export function missedWorkoutInsight(state: AppState, today: ISODate): Insight |
 
 /** After a finished session, propose updating the saved plan's target weights. */
 export function progressionProposal(state: AppState, session: WorkoutSession): Proposal | undefined {
+  if (session.pain) return undefined;
   const plan = state.plan;
   if (!plan || session.planId !== plan.id || !session.dayId) return undefined;
   const day = plan.days.find((d) => d.id === session.dayId);
@@ -243,11 +245,15 @@ export function progressionProposal(state: AppState, session: WorkoutSession): P
     if (!session.sets.some((s) => s.exerciseId === pe.exerciseId)) continue;
     const rec = recommendNext(pe, sessions, state.settings.units);
     if (rec.weightKg === undefined) continue;
-    const changed = pe.targetWeightKg === undefined || Math.abs(rec.weightKg - pe.targetWeightKg) > 0.01 || rec.repMin !== pe.repMin;
+    const top = Math.max(...session.sets.filter((s) => s.exerciseId === pe.exerciseId).map((s) => s.weightKg));
+    const veryHard = session.effort !== undefined && session.effort >= 9 && rec.kind === 'increase' && top > 0;
+    const nextWeight = veryHard ? Math.round(top * (session.effort === 10 ? 0.9 : 0.95) * 10) / 10 : rec.weightKg;
+    const reason = veryHard ? `You completed the reps but rated effort ${session.effort}/10. A lighter next target gives room to recover.` : rec.reason;
+    const changed = pe.targetWeightKg === undefined || Math.abs(nextWeight - pe.targetWeightKg) > 0.01 || rec.repMin !== pe.repMin;
     if (!changed) continue;
-    updates.push({ dayId: day.id, exerciseId: pe.exerciseId, targetWeightKg: rec.weightKg, repMin: rec.repMin, repMax: rec.repMax });
+    updates.push({ dayId: day.id, exerciseId: pe.exerciseId, targetWeightKg: nextWeight, repMin: rec.repMin, repMax: rec.repMax });
     const from = pe.targetWeightKg !== undefined ? displayWeight(pe.targetWeightKg, state.settings.units) : 'not set';
-    lines.push(`${exerciseName(pe.exerciseId)}: ${from} → ${displayWeight(rec.weightKg, state.settings.units)} (${rec.repMin}–${rec.repMax} reps). ${rec.reason}`);
+    lines.push(`${exerciseName(pe.exerciseId)}: ${from} → ${displayWeight(nextWeight, state.settings.units)} (${rec.repMin}–${rec.repMax} reps). ${reason}${session.effort && !veryHard ? ` You rated effort ${session.effort}/10.` : ''}`);
   }
   if (!updates.length) return undefined;
   return proposal({

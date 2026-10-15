@@ -4,6 +4,8 @@ A fitness app for **Android and desktop browsers** that cuts down food-logging e
 
 > **Status: working prototype.** Accounts and per-user sync use Supabase. Coach chat and meal photos go through the server AI gateway, a Supabase Edge Function that holds the provider key. Database migration and functions must be deployed before these features work end to end. See [setup](docs/SETUP.md) and [verification](docs/TESTING.md).
 
+See the [change log](docs/CHANGELOG.md) for dated, signed notes on repository changes.
+
 ## What's in it
 
 | Area | What works now |
