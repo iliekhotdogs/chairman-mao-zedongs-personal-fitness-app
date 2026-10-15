@@ -216,7 +216,7 @@ async function estimateFood(config: AiConfig, meter: Meter, body: Record<string,
   const rejected = validated.filter((item) => item === null).length;
   if (validated.every((item) => item === null)) throw new AiError('The model returned no usable food portions. Please correct the meal manually.', 502);
   const items = await Promise.all(validated.filter((item): item is VisionItem => item !== null).map(async (item) => {
-    const sourced = item.review_required ? null : await usdaItem(item).catch(() => null) : null;
+    const sourced = item.review_required ? null : await usdaItem(item).catch(() => null);
     return sourced ?? {
       name: item.name, portion: item.portion, grams: item.grams, calories: item.calories,
       protein_g: item.protein_g, carbs_g: item.carbs_g, fat_g: item.fat_g,
