@@ -1,7 +1,8 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Linking, Platform, StyleSheet, View, type ScrollView, type TextInput } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/lib/nav';
+import * as Haptics from 'expo-haptics';
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 
 import { C, Radius, Space } from '@/constants/theme';
@@ -9,7 +10,8 @@ import { Badge, Banner, Button, Card, Columns, Field, LoadingState, Muted, Numbe
 import { FoodItemEditor } from '@/components/FoodItemEditor';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
-import { BarcodeError, hasValidCheckDigit, lookupBarcode, normalizeBarcode, OFF_USER_AGENT } from '@/lib/nutrition/barcode';
+import { BarcodeError, hasValidCheckDigit, normalizeBarcode, OFF_USER_AGENT } from '@/lib/nutrition/barcode';
+import { resolveBarcode } from '@/lib/nutrition/barcodeResolve';
 import { defaultMealForTime, manualEntry } from '@/lib/nutrition/estimate';
 import { sumItems } from '@/lib/nutrition/lookup';
 import { formatDateLabel } from '@/lib/dates';
@@ -45,12 +47,22 @@ export default function BarcodeScreen() {
   const [items, setItems] = useState<FoodItem[]>([]);
   const [meal, setMeal] = useState<MealType>(defaultMealForTime());
   const [blocked, setBlocked] = useState(false);
+  const [torch, setTorch] = useState(false);
   const handled = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
   const codeInput = useRef<TextInput>(null);
   const scrollRef = useRef<ScrollView>(null);
   const reviewRef = useRef<View>(null);
   const { isPhone } = useLayout();
   const total = sumItems(items);
+
+  useEffect(
+    () => () => {
+      abortRef.current?.abort();
+      abortRef.current = null; // lets a stale lookup's finally skip its state updates
+    },
+    [],
+  );
 
   /** On phones the result column sits below the scanner: bring it into view after a scan. */
   const revealResult = () => {
@@ -82,9 +94,14 @@ export default function BarcodeScreen() {
     setCodeError(undefined);
     setError(undefined);
     setMissing(undefined);
+    abortRef.current?.abort();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
     setLooking(clean);
     try {
-      const r = await lookupBarcode(clean, { userAgent: Platform.OS === 'web' ? undefined : OFF_USER_AGENT });
+      // Native only: browsers forbid setting User-Agent (and a custom header would trigger a CORS preflight).
+      const r = await resolveBarcode(clean, { signal: ctrl.signal, userAgent: Platform.OS === 'web' ? undefined : OFF_USER_AGENT });
+      if (ctrl.signal.aborted) return;
       if (r.status === 'found') {
         setItems((cur) => [...cur, r.item]);
         setCode('');
@@ -92,18 +109,27 @@ export default function BarcodeScreen() {
         setMissing({ code: r.code, name: r.status === 'incomplete' ? r.name : undefined, reason: r.status });
       }
     } catch (e) {
+      if (ctrl.signal.aborted || (e as { name?: string })?.name === 'AbortError') return;
       if (!(e instanceof BarcodeError)) log.warn('barcode', 'Lookup failed', e);
       setError({ code: clean, message: e instanceof BarcodeError ? e.message : 'Lookup failed. Try again, or enter the food by hand.' });
     } finally {
-      setLooking(undefined);
-      if (fromScan) revealResult();
+      if (abortRef.current === ctrl) {
+        abortRef.current = null;
+        setLooking(undefined);
+        if (fromScan) revealResult();
+      }
     }
   };
 
   const onScanned = (r: BarcodeScanningResult) => {
     if (handled.current) return;
+    // Misread (bad check digit): ignore silently and keep scanning.
+    const clean = normalizeBarcode(r.data);
+    if (!clean || !hasValidCheckDigit(clean)) return;
     handled.current = true;
+    if (Platform.OS !== 'web') void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch((e) => log.warn('barcode', 'Haptics failed', e));
     setCameraOn(false);
+    setTorch(false);
     setCode(r.data);
     revealResult();
     void lookup(r.data, true);
@@ -157,6 +183,7 @@ export default function BarcodeScreen() {
             <CameraView
               style={StyleSheet.absoluteFill}
               facing="back"
+              enableTorch={torch}
               barcodeScannerSettings={{ barcodeTypes: [...BARCODE_TYPES] }}
               onBarcodeScanned={onScanned}
               onMountError={(e) => {
@@ -179,7 +206,13 @@ export default function BarcodeScreen() {
             {canUseCamera ? <Button title={items.length ? 'Scan another item' : 'Start camera'} icon="scan-outline" size="lg" onPress={startCamera} disabled={!!looking} style={{ alignSelf: 'center' }} /> : null}
           </View>
         )}
-        {cameraOn ? <Button title="Stop camera" kind="secondary" icon="close" onPress={() => setCameraOn(false)} full /> : null}
+        {cameraOn ? <Muted variant="small">Hold steady about 15 cm away and keep the whole barcode in the frame.</Muted> : null}
+        {cameraOn ? (
+          <Row gap={Space.sm}>
+            {Platform.OS !== 'web' ? <Button title={torch ? 'Torch off' : 'Torch on'} kind="secondary" icon={torch ? 'flashlight' : 'flashlight-outline'} onPress={() => setTorch(!torch)} style={{ flex: 1 }} /> : null}
+            <Button title="Stop camera" kind="secondary" icon="close" onPress={() => { setCameraOn(false); setTorch(false); }} style={{ flex: 1 }} />
+          </Row>
+        ) : null}
         {showBlocked ? (
           <View accessibilityRole="alert" accessibilityLiveRegion="polite">
             <Banner kind="warning" title="Camera access is blocked"

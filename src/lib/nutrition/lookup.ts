@@ -142,6 +142,7 @@ export interface FdcResult {
   description: string;
   brandOwner?: string;
   dataType: string;
+  gtinUpc?: string;
   per100g: { kcal: number; p: number; c: number; f: number };
 }
 
@@ -173,7 +174,7 @@ export async function searchFdc(query: string, apiKey: string, signal?: AbortSig
     if (res.status === 429) throw new Error('USDA rate limit reached — try again later.');
     throw new Error(`USDA lookup failed (${res.status}${code ? `, ${code}` : ''}).`);
   }
-  const json = (await res.json()) as { foods?: { fdcId: number; description: string; brandOwner?: string; dataType: string; foodNutrients: { nutrientNumber?: string; nutrientName?: string; value?: number; unitName?: string }[] }[] };
+  const json = (await res.json()) as { foods?: { fdcId: number; description: string; brandOwner?: string; dataType: string; gtinUpc?: string; foodNutrients: { nutrientNumber?: string; nutrientName?: string; value?: number; unitName?: string }[] }[] };
   return (json.foods ?? []).map((f) => {
     const get = (nums: string[]) => f.foodNutrients.find((n) => n.nutrientNumber && nums.includes(n.nutrientNumber))?.value ?? 0;
     return {
@@ -181,6 +182,7 @@ export async function searchFdc(query: string, apiKey: string, signal?: AbortSig
       description: f.description,
       brandOwner: f.brandOwner,
       dataType: f.dataType,
+      gtinUpc: f.gtinUpc,
       per100g: { kcal: get(['208', '957', '958']), p: get(['203']), c: get(['205']), f: get(['204']) },
     };
   });
@@ -225,3 +227,25 @@ export function itemFromFdc(r: FdcResult, grams: number, portionLabel: string): 
     },
   };
 }
+
+const stripZeros = (s: string) => s.replace(/\D/g, '').replace(/^0+/, '');
+
+/**
+ * Finds a USDA branded food whose gtinUpc equals one of the candidate codes (leading zeros
+ * ignored, so UPC-A / EAN-13 / GTIN-14 forms match). Name-only hits are never accepted.
+ * At most 2 searches; network errors propagate.
+ */
+export async function findFdcByGtin(
+  codes: string[],
+  search: (query: string) => Promise<FdcResult[]> = searchFdcForAccount,
+): Promise<FdcResult | undefined> {
+  const wanted = new Set(codes.map(stripZeros).filter(Boolean));
+  for (const code of codes.slice(0, 2)) {
+    const hit = (await search(code)).find((r) => r.gtinUpc && wanted.has(stripZeros(r.gtinUpc)));
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/** FoodItem for a GTIN match at the default 100 g portion. */
+export const itemFromGtinMatch = (r: FdcResult): FoodItem => itemFromFdc(r, 100, '100 g');

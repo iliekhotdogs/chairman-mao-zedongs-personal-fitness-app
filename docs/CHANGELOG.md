@@ -1,5 +1,14 @@
 # Change log
 
+## 2026-10-15 19:20 PDT — Claude
+
+- Barcode scanner hardening (branch `barcode-hardening`, local only): lookups try the EAN-13 form first, then the raw code; UPC-E codes are expanded to UPC-A (only when the expanded check digit holds) and UPC-E check digits are validated on the expansion. Scanned codes with a bad check digit are ignored silently (no request, scanner stays armed).
+- Open Food Facts replies are parsed with zod, lookups time out after 8 s and abort on unmount or a new scan, and results are cached on device (30 days found, 1 day missing).
+- When Open Food Facts has no product or no calories, one USDA branded-food search by GTIN runs (exact GTIN match only, once per code per session). The `ai` edge function's `search_food` now returns `gtinUpc`: needs `supabase functions deploy ai` before signed-in accounts get the fallback (not deployed).
+- Scanner screen: torch toggle (native), scan hint, success haptic.
+
+Signed off: Claude
+
 ## 2026-10-15 18:02 PDT — Claude
 
 - New migration `20261015000500_admin_stats_safe_casts_bug_delete.sql` (not applied): `admin_user_stats` reads record dates and numbers through `safe_date` / `safe_numeric` (null on bad values) and ignores non-array `items`, so one malformed record no longer breaks a user's stats. Still service role only.

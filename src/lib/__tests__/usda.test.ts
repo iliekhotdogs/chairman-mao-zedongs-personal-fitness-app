@@ -21,3 +21,24 @@ describe('USDA lookup', () => {
     await expect(searchFdc('apple', 'a-private-key')).rejects.toThrow(/verification link/);
   });
 });
+
+describe('findFdcByGtin', () => {
+  const { findFdcByGtin, itemFromGtinMatch } = require('../nutrition/lookup');
+  const food = (gtinUpc?: string) => ({ fdcId: 1, description: 'Bar', dataType: 'Branded', gtinUpc, per100g: { kcal: 400, p: 10, c: 50, f: 10 } });
+
+  it('matches across leading zeros', async () => {
+    const search = jest.fn().mockResolvedValue([food('0012345678905')]);
+    const hit = await findFdcByGtin(['012345678905'], search);
+    expect(hit?.fdcId).toBe(1);
+    expect(itemFromGtinMatch(hit).grams).toBe(100);
+  });
+  it('rejects a different gtin and results without gtinUpc', async () => {
+    expect(await findFdcByGtin(['012345678905'], jest.fn().mockResolvedValue([food('999')]))).toBeUndefined();
+    expect(await findFdcByGtin(['012345678905'], jest.fn().mockResolvedValue([food()]))).toBeUndefined();
+  });
+  it('caps searches at 2', async () => {
+    const search = jest.fn().mockResolvedValue([]);
+    await findFdcByGtin(['1', '2', '3'], search);
+    expect(search).toHaveBeenCalledTimes(2);
+  });
+});
