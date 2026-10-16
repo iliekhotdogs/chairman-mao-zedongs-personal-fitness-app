@@ -1,9 +1,9 @@
 import type {
   ActivityRecord, ChatMessage, DayAdjustment, FoodEntry, Insight, IntegrationState, ISODate, NotificationRecord,
-  NutritionTargets, Profile, ProgressPhoto, Proposal, Settings, SyncMeta, WeightEntry, WorkoutDay, WorkoutPlan, WorkoutSession,
+  NutritionTargets, Profile, ProgressPhoto, Proposal, SavedFood, Settings, SyncMeta, WeightEntry, WorkoutDay, WorkoutPlan, WorkoutSession,
 } from './types';
 
-export const STATE_VERSION = 2;
+export const STATE_VERSION = 3;
 
 /** An approved one-day workout replacement (e.g. a 20-minute version). */
 export interface WorkoutOverride extends SyncMeta {
@@ -21,6 +21,8 @@ export interface AppState {
   foodLog: FoodEntry[];
   weights: WeightEntry[];
   progressPhotos: ProgressPhoto[];
+  /** personal food database: confirmed barcode products, restaurant dishes, custom foods */
+  savedFoods: SavedFood[];
   plan?: WorkoutPlan;
   routines: WorkoutPlan[]; // user-created routines
   sessions: WorkoutSession[];
@@ -59,6 +61,7 @@ export function emptyState(deviceId: string, now: string): AppState {
     foodLog: [],
     weights: [],
     progressPhotos: [],
+    savedFoods: [],
     routines: [],
     sessions: [],
     activity: [],
@@ -87,7 +90,7 @@ export function migrateState(saved: AppState): AppState {
 }
 
 /** Collections that sync record-by-record (each item has id/updatedAt/deleted). */
-export const SYNCED_COLLECTIONS = ['dayAdjustments', 'workoutOverrides', 'foodLog', 'weights', 'routines', 'sessions', 'activity', 'proposals', 'chat', 'notifications', 'progressPhotos'] as const;
+export const SYNCED_COLLECTIONS = ['dayAdjustments', 'workoutOverrides', 'foodLog', 'weights', 'routines', 'sessions', 'activity', 'proposals', 'chat', 'notifications', 'progressPhotos', 'savedFoods'] as const;
 export type SyncedCollection = (typeof SYNCED_COLLECTIONS)[number];
 
 /** Single documents that sync as a whole. */

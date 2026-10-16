@@ -391,7 +391,7 @@ export function Field({ label, hint, error, suffix, style, inputStyle, ...rest }
   );
 }
 
-export function NumberField({ value, onChange, min, max, exclusiveMin, error, ...rest }: Omit<React.ComponentProps<typeof Field>, 'value' | 'onChangeText' | 'onChange'> & { value: number | undefined; onChange: (v: number | undefined) => void } & Bounds) {
+export function NumberField({ value, onChange, min, max, exclusiveMin, error, ...rest }: Omit<React.ComponentProps<typeof Field>, 'value' | 'onChangeText' | 'onChange'> & { value: number | undefined; onChange: (v: number | undefined, error?: string) => void } & Bounds) {
   const [text, setText] = React.useState(value === undefined || Number.isNaN(value) ? '' : String(value));
   const [typedError, setTypedError] = React.useState<string | undefined>();
   // Sync the text when the value is changed from outside (e.g. +/- buttons), without an effect.
@@ -415,7 +415,7 @@ export function NumberField({ value, onChange, min, max, exclusiveMin, error, ..
         const msg = r.error ?? (r.value !== undefined ? rangeMessage(r.value, { min, max, exclusiveMin }) : undefined);
         setTypedError(msg);
         // invalid or out-of-range input reports "no value" so callers keep their submit buttons disabled
-        onChange(msg ? undefined : r.value);
+        onChange(msg ? undefined : r.value, msg);
       }}
     />
   );
@@ -545,7 +545,7 @@ export function Expandable({ title, children, initiallyOpen = false, icon }: { t
   const [open, setOpen] = React.useState(initiallyOpen);
   return (
     <View>
-      <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={({ hovered }: PState) => [{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, borderRadius: Radius.sm }, hovered ? { opacity: 0.8 } : null]}>
+      <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={({ hovered }: PState) => [{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, minHeight: 44, borderRadius: Radius.sm }, hovered ? { opacity: 0.8 } : null]}>
         {icon ? <Ionicons name={icon} size={15} color={C.textSecondary} /> : null}
         <Text variant="smallStrong" color={C.textSecondary} style={{ flex: 1 }}>
           {title}

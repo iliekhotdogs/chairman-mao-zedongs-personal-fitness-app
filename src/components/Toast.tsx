@@ -2,28 +2,29 @@ import React, { createContext, useCallback, useContext, useRef, useState } from 
 import { Animated, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, Radius, Space } from '@/constants/theme';
-import { Ionicons, Text } from './ui';
+import { Button, Ionicons, Text } from './ui';
 import { RuleViolation } from '@/lib/reducer';
 import { useStore } from '@/store/AppStore';
 import type { Action } from '@/lib/reducer';
 
 type Kind = 'success' | 'error' | 'info';
-const Ctx = createContext<(msg: string, kind?: Kind) => void>(() => {});
+type ToastAction = { label: string; onPress: () => void };
+const Ctx = createContext<(msg: string, kind?: Kind, action?: ToastAction) => void>(() => {});
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
-  const [toast, setToast] = useState<{ msg: string; kind: Kind } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; kind: Kind; action?: ToastAction } | null>(null);
   const [opacity] = useState(() => new Animated.Value(0));
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const insets = useSafeAreaInsets();
 
   const show = useCallback(
-    (msg: string, kind: Kind = 'success') => {
-      setToast({ msg, kind });
+    (msg: string, kind: Kind = 'success', action?: ToastAction) => {
+      setToast({ msg, kind, action });
       clearTimeout(timer.current);
       Animated.timing(opacity, { toValue: 1, duration: 150, useNativeDriver: Platform.OS !== 'web' }).start();
       timer.current = setTimeout(() => {
         Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: Platform.OS !== 'web' }).start(() => setToast(null));
-      }, 2800);
+      }, action ? 6000 : 2800);
     },
     [opacity],
   );
@@ -33,12 +34,25 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <Ctx.Provider value={show}>
       {children}
       {toast ? (
-        <View style={[styles.wrap, { bottom: Math.max(insets.bottom, 12) + 76, pointerEvents: 'none' }]}>
+        <View style={[styles.wrap, { bottom: Math.max(insets.bottom, 12) + 76, pointerEvents: toast.action ? 'box-none' : 'none' }]}>
           <Animated.View style={[styles.toast, { opacity }]} accessibilityLiveRegion="polite" accessibilityRole={toast.kind === 'error' ? 'alert' : undefined}>
             <Ionicons name={toast.kind === 'error' ? 'alert-circle' : toast.kind === 'info' ? 'information-circle' : 'checkmark-circle'} size={18} color={color} />
             <Text variant="smallStrong" color={C.text} style={{ flexShrink: 1 }}>
               {toast.msg}
             </Text>
+            {toast.action ? (
+              <Button
+                title={toast.action.label}
+                kind="secondary"
+                size="sm"
+                onPress={() => {
+                  const run = toast.action!.onPress;
+                  clearTimeout(timer.current);
+                  setToast(null);
+                  run();
+                }}
+              />
+            ) : null}
           </Animated.View>
         </View>
       ) : null}

@@ -32,10 +32,13 @@ export function SourceLine({ source }: { source: NutritionSource }) {
   );
 }
 
-export function MacroLine({ item }: { item: Pick<FoodItem, 'calories' | 'proteinG' | 'carbsG' | 'fatG'> }) {
+/** "—" marks a macro the source didn't give (see FoodItem.missing). */
+export const gramsText = (item: Pick<FoodItem, 'proteinG' | 'carbsG' | 'fatG' | 'missing'>, k: 'proteinG' | 'carbsG' | 'fatG') => (item.missing?.includes(k) ? '—' : `${Math.round(item[k])} g`);
+
+export function MacroLine({ item }: { item: Pick<FoodItem, 'calories' | 'proteinG' | 'carbsG' | 'fatG' | 'missing'> }) {
   return (
     <Muted variant="small">
-      {Math.round(item.calories)} kcal · P {Math.round(item.proteinG)} g · C {Math.round(item.carbsG)} g · F {Math.round(item.fatG)} g
+      {Math.round(item.calories)} kcal · P {gramsText(item, 'proteinG')} · C {gramsText(item, 'carbsG')} · F {gramsText(item, 'fatG')}
     </Muted>
   );
 }

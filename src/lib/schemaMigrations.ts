@@ -22,6 +22,8 @@ export const MIGRATIONS: Record<number, (s: Raw) => Raw> = {
       return { ...e, estimateQuality: e.estimateQuality ?? (e.origin === 'photo' ? { provider: 'Earlier estimate', overallConfidence: 'low', corrected: false, notes: ['Estimate quality was not recorded in this version.'] } : undefined) };
     }) : s.foodLog,
   }),
+  // v2 -> v3: personal food database (synced collection `savedFoods`).
+  2: (s) => ({ ...s, version: 3, savedFoods: Array.isArray(s.savedFoods) ? s.savedFoods : [] }),
 };
 
 /** Run every migration from the stored version up to `target`. Unknown/newer versions pass through. */

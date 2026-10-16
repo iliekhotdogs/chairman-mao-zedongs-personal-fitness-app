@@ -2,7 +2,7 @@ import { MAX_SET_WEIGHT_KG } from './inputRules';
 import type { AppState, WorkoutOverride } from './state';
 import type {
   ActivityRecord, ChatMessage, FoodEntry, GoalPriority, Insight, IntegrationState, LoggedSet, NotificationRecord,
-  NutritionTargets, Profile, ProgressPhoto, Proposal, ProposalChange, Settings, WeightEntry, WorkoutPlan, WorkoutSession, ISODate,
+  NutritionTargets, Profile, ProgressPhoto, Proposal, ProposalChange, SavedFood, Settings, WeightEntry, WorkoutPlan, WorkoutSession, ISODate,
 } from './types';
 import { mergeActivity } from './activity/activity';
 import { newId } from './id';
@@ -11,6 +11,7 @@ import {
   type PhotoUpload, type RemoteRecord, type StorageRemoval,
 } from './sync/merge';
 import { calorieFloor } from './nutrition/targets';
+import { draftProblems } from './nutrition/savedFoods';
 
 export type Action =
   | { type: 'HYDRATE'; state: AppState }
@@ -21,6 +22,9 @@ export type Action =
   | { type: 'LOG_FOOD'; entry: FoodEntry }
   | { type: 'UPDATE_FOOD'; entry: FoodEntry }
   | { type: 'DELETE_FOOD'; id: string; now: string }
+  /** Save (or update) a food in the personal database; only after the user confirmed it. */
+  | { type: 'SAVE_FOOD'; food: SavedFood }
+  | { type: 'DELETE_SAVED_FOOD'; id: string; now: string }
   | { type: 'LOG_WEIGHT'; entry: WeightEntry }
   | { type: 'DELETE_WEIGHT'; id: string; now: string }
   | { type: 'ADD_PROGRESS_PHOTO'; photo: ProgressPhoto }
@@ -72,6 +76,13 @@ export function checkAction(state: AppState, action: Action): void {
       if (!e.confirmedAt) throw new RuleViolation('Food can only be logged after you confirm it.');
       if (!e.items.length) throw new RuleViolation('A meal needs at least one item.');
       if (e.items.some((i) => i.reviewRequired || !Number.isFinite(i.calories) || i.calories < 0 || [i.proteinG, i.carbsG, i.fatG].some((n) => !Number.isFinite(n) || n < 0) || (i.grams !== undefined && (!Number.isFinite(i.grams) || i.grams <= 0)))) throw new RuleViolation('Review invalid food amounts before logging.');
+      return;
+    }
+    case 'SAVE_FOOD': {
+      const f = action.food;
+      if (!f.confirmedAt) throw new RuleViolation('Confirm the food details before saving.');
+      const problem = draftProblems(f)[0];
+      if (problem) throw new RuleViolation(problem);
       return;
     }
     case 'SET_GOAL':
@@ -236,6 +247,11 @@ export function reducer(state: AppState, action: Action): AppState {
       return { ...state, foodLog: upsert(state.foodLog, action.entry) };
     case 'DELETE_FOOD':
       return { ...state, foodLog: deletePhotoRecord(state.foodLog, 'foodLog', action.id, action.now) };
+
+    case 'SAVE_FOOD':
+      return { ...state, savedFoods: upsert(state.savedFoods, action.food) };
+    case 'DELETE_SAVED_FOOD':
+      return { ...state, savedFoods: tombstone(state.savedFoods, action.id, action.now) };
 
     case 'LOG_WEIGHT': {
       // one weigh-in per day: replace an existing entry for the same date
