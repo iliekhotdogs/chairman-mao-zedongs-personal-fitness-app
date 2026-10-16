@@ -6,7 +6,8 @@ import { isSupabaseConfigured, supabase } from '../sync/supabase';
 import { newId } from '../id';
 import { nowISO, addDays } from '../dates';
 import { remainingForDay, workoutForDay, latestWeight, live } from '../selectors';
-import { exerciseName, formatPrescription } from '../workouts/exercises';
+import { exerciseName, findExercise, formatPrescription } from '../workouts/exercises';
+import { ACTION_INTENT_TYPES, validateActionIntent, type ActionIntent } from '../../../supabase/functions/ai/foodValidation';
 import { prepareImageForAI, type ImageSetting } from './image';
 
 /** Signed-in accounts use the server-side AI gateway (supabase/functions/ai). The
@@ -146,9 +147,10 @@ export type CoachIntent =
   | { type: 'pain'; area: string; red_flags: boolean }
   | { type: 'low_energy' }
   | { type: 'goal_change'; goal: string }
-  | { type: 'training_days'; days: number };
+  | { type: 'training_days'; days: number }
+  | ActionIntent;
 
-function intentPhrase(i: CoachIntent): string {
+function intentPhrase(i: Exclude<CoachIntent, ActionIntent>): string {
   switch (i.type) {
     case 'short_on_time':
       return `I only have ${i.minutes} minutes`;
@@ -163,8 +165,53 @@ function intentPhrase(i: CoachIntent): string {
   }
 }
 
+const isAction = (i: { type: string }): i is ActionIntent => ACTION_INTENT_TYPES.includes(i.type);
+
+/** Builds a pending proposal for a log/edit intent, or null when it is invalid or refers to something missing. */
+function actionProposal(state: AppState, raw: ActionIntent, today: ISODate): Proposal | null {
+  const i = validateActionIntent(raw); // the app re-validates; the server is not trusted blindly
+  if (!i) return null;
+  const now = nowISO();
+  const base = { id: newId(), status: 'pending' as const, createdAt: now, updatedAt: now, origin: 'coach_chat' as const, expiresOn: today };
+  const entryOf = (id: string) => live(state.foodLog).find((e) => e.id === id);
+  switch (i.type) {
+    case 'log_food': {
+      const hour = new Date().getHours();
+      const meal = i.meal ?? (hour < 11 ? 'breakfast' : hour < 15 ? 'lunch' : hour < 21 ? 'dinner' : 'snack');
+      const items = i.items.map((it) => ({
+        name: it.name, portionLabel: it.grams ? `${it.grams} g` : '1 serving', grams: it.grams, calories: it.calories,
+        proteinG: it.protein_g, carbsG: it.carbs_g, fatG: it.fat_g,
+        source: { kind: 'visual_estimate' as const, label: 'Estimated by the coach from your message', sourced: false },
+      }));
+      const kcal = items.reduce((s, it) => s + it.calories, 0);
+      const entry = { id: newId(), date: today, meal, items, origin: 'manual' as const, confirmedAt: '', createdAt: now, updatedAt: now };
+      return { ...base, kind: 'log_food', scope: 'today', title: `Log ${items.map((it) => it.name).join(', ')}`, summary: `${items.length} item(s) · ${kcal} kcal to ${meal}`, rationale: ['Nothing is saved until you accept.'], change: { type: 'log_food', entry }, dedupeKey: `log-food-${entry.id}` };
+    }
+    case 'edit_food': {
+      const e = entryOf(i.entry_id);
+      const item = e?.items[i.item_index];
+      if (!e || !item) return null;
+      return { ...base, kind: 'edit_food', scope: 'today', title: `Change ${item.name} to ${i.calories} kcal`, summary: `${item.calories} kcal → ${i.calories} kcal. Nothing else changes.`, rationale: ['Only the calories of this item are edited.'], change: { type: 'edit_food', entryId: e.id, itemIndex: i.item_index, calories: i.calories, before: item.calories }, dedupeKey: `edit-food-${e.id}-${i.item_index}-${i.calories}` };
+    }
+    case 'delete_food': {
+      const e = entryOf(i.entry_id);
+      if (!e) return null;
+      return { ...base, kind: 'delete_food', scope: 'today', title: `Delete ${e.items.map((it) => it.name).join(', ')}`, summary: `Removes this ${e.meal} entry (${e.items.reduce((s, it) => s + it.calories, 0)} kcal).`, rationale: ['The entry is removed only if you accept.'], change: { type: 'delete_food', entryId: e.id }, dedupeKey: `delete-food-${e.id}` };
+    }
+    case 'log_workout': {
+      const sets = i.sets.flatMap((s) => { const ex = findExercise(s.exercise); return ex ? [{ exerciseId: ex.id, weightKg: s.weight_kg, reps: s.reps, rpe: s.rpe }] : []; });
+      if (!sets.length || sets.length < i.sets.length) return null; // unknown exercise: drop rather than guess
+      return { ...base, kind: 'log_workout', scope: 'today', title: `Log workout${i.name ? `: ${i.name}` : ''}`, summary: `${sets.length} set(s): ${sets.map((s) => `${exerciseName(s.exerciseId)} ${s.reps} × ${s.weightKg} kg`).join(', ')}`, rationale: ['Saved as a finished session only if you accept.'], change: { type: 'log_workout', date: today, sessionId: newId(), name: i.name ?? 'Logged workout', sets }, dedupeKey: `log-workout-${newId()}` };
+    }
+  }
+}
+
 export function proposalsForIntents(state: AppState, intents: CoachIntent[], today: ISODate): Proposal[] {
-  return intents.flatMap((i) => simulateCoachReply(state, intentPhrase(i), today).proposals);
+  return intents.flatMap((i) => {
+    if (!i || typeof i !== 'object') return [];
+    if (isAction(i)) { const p = actionProposal(state, i, today); return p ? [p] : []; }
+    return simulateCoachReply(state, intentPhrase(i), today).proposals;
+  });
 }
 
 /** Compact, privacy-minded summary of the user's data sent to the server coach. */
@@ -181,6 +228,8 @@ export function coachContext(state: AppState, today: ISODate) {
     diet: p?.dietPreferences,
     units: state.settings.units,
     tone: state.settings.coachTone,
+    coach_name: state.settings.coachName,
+    food_today: live(state.foodLog).filter((e) => e.date === today).map((e) => ({ id: e.id, meal: e.meal, items: e.items.map((it) => [it.name, it.calories]) })),
     nutrition_today: rem ? { target: rem.target.calories, eaten: rem.eaten.calories, remaining: rem.remaining } : undefined,
     workout_today: day ? { name: day.name, exercises: day.exercises.map((e) => `${exerciseName(e.exerciseId)} ${formatPrescription(e)}`) } : null,
     latest_weight_kg: latestWeight(state)?.weightKg,

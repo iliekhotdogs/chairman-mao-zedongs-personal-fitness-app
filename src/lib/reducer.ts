@@ -1,7 +1,7 @@
 import type { AppState, WorkoutOverride } from './state';
 import type {
   ActivityRecord, ChatMessage, FoodEntry, GoalPriority, Insight, IntegrationState, LoggedSet, NotificationRecord,
-  NutritionTargets, Profile, ProgressPhoto, Proposal, Settings, WeightEntry, WorkoutPlan, WorkoutSession, ISODate,
+  NutritionTargets, Profile, ProgressPhoto, Proposal, ProposalChange, Settings, WeightEntry, WorkoutPlan, WorkoutSession, ISODate,
 } from './types';
 import { mergeActivity } from './activity/activity';
 import { newId } from './id';
@@ -85,6 +85,8 @@ export function checkAction(state: AppState, action: Action): void {
       if (p.expiresOn && p.expiresOn < action.today) throw new RuleViolation('This suggestion has expired.');
       if (p.change.type === 'plan_weight_update' && state.plan?.id !== p.change.planId) throw new RuleViolation('Your plan changed since this suggestion was made.');
       if ((p.change.type === 'target_change' || p.change.type === 'day_calorie_adjustment') && !state.targets) throw new RuleViolation('Set up nutrition targets first.');
+      // Food and workout log proposals are checked as the reducer actions they expand to.
+      for (const a of logActions(state, p.change, action.now)) checkAction(state, a);
       const floor = calorieFloor(state.profile?.sex ?? 'unspecified');
       if ((p.change.type === 'target_change' || p.change.type === 'goal_change') && (!Number.isFinite(p.change.next.calories) || p.change.next.calories < floor)) throw new RuleViolation(`Daily calories cannot be below ${floor}.`);
       if (p.change.type === 'day_calorie_adjustment' && (!Number.isFinite(p.change.calorieDelta) || state.targets!.calories + p.change.calorieDelta < floor)) throw new RuleViolation(`Daily calories cannot be below ${floor}.`);
@@ -122,6 +124,39 @@ export function checkAction(state: AppState, action: Action): void {
       return;
     default:
       return;
+  }
+}
+
+/**
+ * The reducer actions an accepted coach log proposal expands to ([] for other kinds).
+ * Accepting is the confirm tap, so `confirmedAt` is stamped with the accept time here and nowhere earlier.
+ */
+export function logActions(state: AppState, c: ProposalChange, now: string): Action[] {
+  const entryOf = (id: string) => {
+    const e = state.foodLog.find((x) => x.id === id && !x.deleted);
+    if (!e) throw new RuleViolation('That food entry no longer exists.');
+    return e;
+  };
+  switch (c.type) {
+    case 'log_food':
+      return [{ type: 'LOG_FOOD', entry: { ...c.entry, confirmedAt: now, updatedAt: now } }];
+    case 'edit_food': {
+      const e = entryOf(c.entryId);
+      if (!e.items[c.itemIndex]) throw new RuleViolation('That food item no longer exists.');
+      const items = e.items.map((it, i) => (i === c.itemIndex ? { ...it, calories: c.calories } : it));
+      return [{ type: 'UPDATE_FOOD', entry: { ...e, items, confirmedAt: now, updatedAt: now } }];
+    }
+    case 'delete_food':
+      entryOf(c.entryId);
+      return [{ type: 'DELETE_FOOD', id: c.entryId, now }];
+    case 'log_workout':
+      return [
+        { type: 'START_SESSION', session: { id: c.sessionId, date: c.date, name: c.name, startedAt: now, sets: [], updatedAt: now } },
+        { type: 'ADD_SETS', sessionId: c.sessionId, now, sets: c.sets.map((s) => ({ id: newId(), exerciseId: s.exerciseId, weightKg: s.weightKg, reps: s.reps, rpe: s.rpe, via: 'manual' as const, loggedAt: now })) },
+        { type: 'FINISH_SESSION', sessionId: c.sessionId, now },
+      ];
+    default:
+      return [];
   }
 }
 
@@ -352,6 +387,19 @@ function applyProposal(state: AppState, id: string, now: string): AppState {
     }
     case 'new_plan':
       return { ...state, proposals, plan: c.plan };
+    case 'log_food':
+    case 'edit_food':
+    case 'delete_food':
+    case 'log_workout': {
+      try {
+        let next: AppState = { ...state, proposals };
+        for (const a of logActions(state, c, now)) next = reducer(next, a);
+        // A retroactive log must not steal or clear the user's live session.
+        return c.type === 'log_workout' ? { ...next, activeSessionId: state.activeSessionId } : next;
+      } catch {
+        return state;
+      }
+    }
     default:
       return { ...state, proposals };
   }

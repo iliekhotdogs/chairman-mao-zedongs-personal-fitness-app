@@ -110,6 +110,46 @@ function ChangeDetails({ proposal }: { proposal: Proposal }) {
       </Card>
     );
   }
+  if (c.type === 'log_food') {
+    return (
+      <Card style={{ padding: Space.md, gap: 4 }}>
+        {c.entry.items.map((it, i) => (
+          <Row key={i}>
+            <Muted variant="small" style={{ flex: 1 }}>{it.name} ({it.portionLabel})</Muted>
+            <Text variant="smallStrong">{it.calories} kcal · {it.proteinG}P {it.carbsG}C {it.fatG}F</Text>
+          </Row>
+        ))}
+      </Card>
+    );
+  }
+  if (c.type === 'edit_food') {
+    return (
+      <Card style={{ padding: Space.md }}>
+        <Row>
+          <Muted variant="small" style={{ flex: 1 }}>Calories</Muted>
+          <Text variant="smallStrong">{c.before} → {c.calories} kcal</Text>
+        </Row>
+      </Card>
+    );
+  }
+  if (c.type === 'delete_food') {
+    return (
+      <Card style={{ padding: Space.md }}>
+        <Muted variant="small">This food entry will be removed from your log.</Muted>
+      </Card>
+    );
+  }
+  if (c.type === 'log_workout') {
+    return (
+      <Card style={{ padding: Space.md, gap: 4 }}>
+        {c.sets.map((s, i) => (
+          <Muted key={i} variant="small">
+            {exerciseName(s.exerciseId)} · {s.reps} × {s.weightKg} kg{s.rpe ? ` · RPE ${s.rpe}` : ''}
+          </Muted>
+        ))}
+      </Card>
+    );
+  }
   if (c.type === 'new_plan') {
     return (
       <Card style={{ padding: Space.md, gap: 4 }}>

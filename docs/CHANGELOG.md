@@ -1,5 +1,13 @@
 # Change log
 
+## 2026-10-15 17:50 PDT — Claude
+
+- Coach (F1): moved the server system prompt to `_shared/coachPrompt.ts`; coaching-only scope with a fixed redirect for off-topic asks (no provider call), user data fenced as data, optional sanitized coach name plus the existing tone. The offline coach mirrors the refusal; medical wording still takes the safety path first.
+- Coach (F2): new intents `log_food`, `edit_food`, `delete_food`, `log_workout`, validated server and client side (reps 1-300, weight 20-400 kg, kcal 0-5000, at least 1 item; rejected, not clamped). They become proposals that map to LOG_FOOD / UPDATE_FOOD / DELETE_FOOD / START_SESSION + ADD_SETS + FINISH_SESSION only when accepted (`confirmedAt` is stamped at accept). Proposal cards show the exact change.
+- Added `coachActions` tests for mapping, bounds and scope.
+
+Signed off: Claude
+
 ## 2026-10-15 00:43 PDT — Codex
 
 - Replaced the user-selectable Gemini gateway with OpenRouter and added GLM 5.3 Flash, Nemotron 3.5 Lightning, and DeepSeek V4.1 Flash choices, with image-capable meal models and short DeepSeek responses.
