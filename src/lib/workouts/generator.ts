@@ -96,7 +96,7 @@ export function generatePlan(profile: Profile, today: string): WorkoutPlan {
 
   const rationale = [
     `${split} split for ${days} training day${days > 1 ? 's' : ''} per week.`,
-    `Rep ranges are set for ${profile.goal.replace('_', ' ')} at a ${profile.experience} level.`,
+    `Rep ranges are set for your goal (${GOAL_LABEL[profile.goal].toLowerCase()}) at a ${profile.experience} level.`,
     `Sessions are trimmed to about ${profile.sessionMinutes} minutes.`,
     `Exercises use your equipment (${profile.equipment.replace('_', ' ')}).`,
   ];
@@ -104,7 +104,24 @@ export function generatePlan(profile: Profile, today: string): WorkoutPlan {
   rationale.push('Start each exercise with a weight you could lift 2–3 more reps with. The app suggests the next weights after each session.');
 
   const now = nowISO();
-  return { id: newId(), name: `${split} plan`, source: 'ai_generated', days: workoutDays, rationale: [...rationale, ...notes], createdAt: now, updatedAt: now };
+  return { id: newId(), name: `${split} plan`, source: 'ai_generated', goal: profile.goal, days: workoutDays, rationale: [...rationale, ...notes], createdAt: now, updatedAt: now };
+}
+
+export const GOAL_LABEL: Record<GoalPriority, string> = { fat_loss: 'Lose fat', muscle_gain: 'Build muscle', strength: 'Get stronger', maintenance: 'Maintain' };
+
+/** The goal a generated plan was built for. Older plans did not store it, so fall back to their rationale line. */
+export function planGoal(plan: WorkoutPlan): GoalPriority | undefined {
+  if (plan.goal) return plan.goal;
+  if (plan.source !== 'ai_generated') return undefined;
+  const line = plan.rationale.find((r) => r.startsWith('Rep ranges are set for ')) ?? '';
+  return (Object.keys(GOAL_LABEL) as GoalPriority[]).find((g) => line.includes(g.replace('_', ' ')) || line.includes(GOAL_LABEL[g].toLowerCase()));
+}
+
+/** The goal a plan is out of step with: set when the plan was generated for a different goal than the profile has now. */
+export function stalePlanGoal(plan: WorkoutPlan | undefined, profile: Pick<Profile, 'goal'> | undefined): GoalPriority | undefined {
+  if (!plan || !profile) return undefined;
+  const g = planGoal(plan);
+  return g && g !== profile.goal ? g : undefined;
 }
 
 /** Focus label from what the day actually contains (templates can change after limitation swaps). */

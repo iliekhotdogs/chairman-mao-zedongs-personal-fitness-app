@@ -1,5 +1,14 @@
 # Change log
 
+## 2026-10-15 16:00 PDT — Claude
+
+- Generated plans store the goal they were built for. When the profile goal no longer matches (older plans are read from their rationale), Training and Settings > Current priority show "Your plan was built for <goal>. Regenerate?" with a button that opens the existing plan preview. "Why this plan?" names the goal by its Settings label.
+- Progression tips are unit-aware: timed exercises (Farmer's Carry, Plank) talk about seconds, never reps. The edit-set sheet and "last session" line show seconds for timed sets.
+- Food search: built-in results rank exact, then prefix, then whole-word name matches, then shorter names; USDA results put generic entries (e.g. "Banana, raw") before branded ones.
+- Added docs/REVIEW_ROUND_1.md (Marcus and Dana reviews, Round 1.5 owner findings).
+
+Signed off: Claude
+
 ## 2026-10-15 15:10 PDT — Claude
 
 - Security audit fixes: bug report insert is column-limited (no client `id`/`created_at`, so the daily cap cannot be bypassed), `user_stats` fails closed when the audit row cannot be written, and `<` is escaped in the coach prompt's user-data fence.

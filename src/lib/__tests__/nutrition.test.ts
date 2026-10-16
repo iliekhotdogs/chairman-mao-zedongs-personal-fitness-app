@@ -1,6 +1,6 @@
 import { bmrMifflin, computeTargets, targetsForDay } from '../nutrition/targets';
 import { confirmEstimate, FoodConfirmationError, markEdited, simulateFoodEstimate } from '../nutrition/estimate';
-import { parseQuantity, scaleItem, searchFoods } from '../nutrition/lookup';
+import { parseQuantity, rankFdc, scaleItem, searchFoods, type FdcResult } from '../nutrition/lookup';
 import type { Profile } from '../types';
 
 const profile: Pick<Profile, 'sex' | 'birthYear' | 'heightCm' | 'dailyActivity' | 'trainingDays' | 'sessionMinutes' | 'goal'> = {
@@ -46,6 +46,24 @@ describe('food lookup', () => {
   it('finds foods by alias', () => {
     expect(searchFoods('grilled chicken')[0].id).toBe('chicken_breast');
     expect(searchFoods('fries')[0].id).toBe('fries');
+  });
+
+  it('ranks exact and prefix name matches first', () => {
+    expect(searchFoods('banana')[0].id).toBe('banana');
+    expect(searchFoods('rice')[0].id).toBe('white_rice');
+    expect(searchFoods('chicken fried rice')[0].id).toBe('fried_rice');
+  });
+
+  it('puts generic USDA foods before branded ones, exact/prefix and shorter names first', () => {
+    const r = (fdcId: number, description: string, dataType: string, brandOwner?: string): FdcResult => ({ fdcId, description, dataType, brandOwner, per100g: { kcal: 0, p: 0, c: 0, f: 0 } });
+    const ranked = rankFdc('banana', [
+      r(1, 'BANANA CHIPS', 'Branded', 'Acme'),
+      r(2, 'Bread, banana, prepared from recipe', 'SR Legacy'),
+      r(3, 'BANANA', 'Branded', 'Fruit Co'),
+      r(4, 'Bananas, raw, ripe and slightly ripe', 'Foundation'),
+      r(5, 'Banana, raw', 'SR Legacy'),
+    ]);
+    expect(ranked.map((x) => x.fdcId)).toEqual([5, 4, 2, 3, 1]);
   });
 
   it('scales items proportionally', () => {

@@ -28,6 +28,7 @@ import { csvExports, jsonExport } from '@/lib/export';
 import { saveExportFile } from '@/lib/exportFile';
 import { clearIntegrationConfig } from '@/lib/integrations/config';
 import { formatRest, REST_MAX_SEC, REST_MIN_SEC, REST_STEP_SEC, sanitizeRestPrefs } from '@/lib/workouts/restTimer';
+import { GOAL_LABEL, stalePlanGoal } from '@/lib/workouts/generator';
 import type { BodyArea, DailyActivity, GoalPriority, NutritionTargets, Profile, Sex } from '@/lib/types';
 
 const GOALS: { value: GoalPriority; label: string }[] = [
@@ -84,8 +85,8 @@ function GoalSection() {
   const { state } = useStore();
   const doAct = useAct();
   const [preview, setPreview] = useState<{ goal: GoalPriority; t: NutritionTargets } | null>(null);
-  const [offerPlan, setOfferPlan] = useState(false);
   const p = state.profile!;
+  const staleGoal = stalePlanGoal(state.plan, p);
   const w = latestWeight(state)?.weightKg ?? p.startWeightKg;
   return (
     <Card style={[FLAT, { gap: Space.md }]}>
@@ -103,7 +104,7 @@ function GoalSection() {
         footer={
           <Row gap={Space.sm}>
             <Button title="Keep current" kind="reject" style={{ flex: 1 }} onPress={() => setPreview(null)} />
-            <Button title="Confirm change" kind="accept" icon="checkmark" style={{ flex: 1 }} onPress={() => { if (preview && doAct({ type: 'SET_GOAL', goal: preview.goal, targets: preview.t, now: nowISO(), confirmed: true })) { setPreview(null); setOfferPlan(true); } }} />
+            <Button title="Confirm change" kind="accept" icon="checkmark" style={{ flex: 1 }} onPress={() => { if (preview && doAct({ type: 'SET_GOAL', goal: preview.goal, targets: preview.t, now: nowISO(), confirmed: true })) setPreview(null); }} />
           </Row>
         }>
         {preview ? (
@@ -117,7 +118,7 @@ function GoalSection() {
           </>
         ) : null}
       </Sheet>
-      {offerPlan ? <Banner kind="info" title="Priority updated"><Button title="Update your plan" kind="secondary" size="sm" onPress={() => { setOfferPlan(false); router.push('/workouts?preview=1'); }} /></Banner> : null}
+      {staleGoal ? <Banner kind="info" title={`Your plan was built for ${GOAL_LABEL[staleGoal].toLowerCase()}. Regenerate?`}><Button title="Regenerate plan" kind="secondary" size="sm" icon="sparkles-outline" onPress={() => router.push('/workouts?preview=1')} /></Banner> : null}
     </Card>
   );
 }

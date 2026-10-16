@@ -3,7 +3,7 @@ import { simulateCoachReply } from '../coaching/coachSim';
 import { buildSampleState } from '../sampleData';
 import { emptyState, type AppState } from '../state';
 import { decide, inQuietHours, MAX_COACH_NOTIFICATIONS_PER_DAY, type Candidate } from '../notifications/policy';
-import { generatePlan } from '../workouts/generator';
+import { generatePlan, planGoal, stalePlanGoal } from '../workouts/generator';
 import type { NotificationPrefs, NotificationRecord } from '../types';
 
 const TODAY = '2026-10-02';
@@ -208,5 +208,22 @@ describe('plan generator', () => {
   it('fits the time budget and schedules on chosen weekdays', () => {
     const plan = generatePlan({ ...base, sessionMinutes: 30, trainingDays: [2, 4] }, TODAY);
     expect(plan.days.map((d) => d.weekday)).toEqual([2, 4]);
+  });
+
+  it('stores the goal and flags a plan built for a different goal', () => {
+    const plan = generatePlan({ ...base, goal: 'fat_loss' }, TODAY);
+    expect(plan.goal).toBe('fat_loss');
+    expect(plan.rationale.join(' ')).toContain('lose fat');
+    expect(stalePlanGoal(plan, { goal: 'fat_loss' })).toBeUndefined();
+    expect(stalePlanGoal(plan, { goal: 'muscle_gain' })).toBe('fat_loss');
+    expect(stalePlanGoal(undefined, { goal: 'muscle_gain' })).toBeUndefined();
+  });
+
+  it('reads the goal of older plans from their rationale, ignores user routines', () => {
+    const { goal: _goal, ...plan } = generatePlan({ ...base, goal: 'fat_loss' }, TODAY);
+    const legacy = { ...plan, rationale: ['Rep ranges are set for fat loss at a beginner level.'] };
+    expect(planGoal(legacy)).toBe('fat_loss');
+    expect(stalePlanGoal(legacy, { goal: 'strength' })).toBe('fat_loss');
+    expect(stalePlanGoal({ ...legacy, source: 'user_created' }, { goal: 'strength' })).toBeUndefined();
   });
 });

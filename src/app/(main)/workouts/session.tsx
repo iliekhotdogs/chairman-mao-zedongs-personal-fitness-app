@@ -358,7 +358,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
       ))}
       {prev ? (
         <Row gap={Space.sm}>
-          <Muted variant="small" style={{ flex: 1 }}>Last session, set {workingCount + 1}: {bodyweight && prev.weightKg === 0 ? 'bodyweight' : displayWeight(prev.weightKg, units)} × {prev.reps}{prev.rpe ? ` @ RPE ${prev.rpe}` : ''}</Muted>
+          <Muted variant="small" style={{ flex: 1 }}>Last session, set {workingCount + 1}: {bodyweight && prev.weightKg === 0 ? 'bodyweight' : displayWeight(prev.weightKg, units)} × {prev.reps}{timed ? ' s' : ''}{prev.rpe ? ` @ RPE ${prev.rpe}` : ''}</Muted>
           <Button title="Same as last" kind="ghost" size="sm" onPress={() => { setWeight(weightValue(prev.weightKg, units)); setReps(prev.reps); setAckJump(undefined); setMsg(undefined); }} />
         </Row>
       ) : null}
@@ -403,6 +403,7 @@ function EditSetSheet({ set, onClose, sessionId }: { set: LoggedSet | null; onCl
   const [rpe, setRpe] = useState<number | undefined>(set?.rpe);
   const [warm, setWarm] = useState(Boolean(set?.warmup));
   const bodyweight = set ? EXERCISE_BY_ID[set.exerciseId]?.loadType === 'bodyweight' : false;
+  const timed = set ? Boolean(EXERCISE_BY_ID[set.exerciseId]?.timed) : false;
   return (
     <Sheet
       visible={!!set}
@@ -421,8 +422,8 @@ function EditSetSheet({ set, onClose, sessionId }: { set: LoggedSet | null; onCl
         />
       }>
       <NumberField label={`${bodyweight ? 'Added weight' : 'Weight'} (${weightUnit(units)})`} value={w} onChange={setW} min={0} max={weightValue(MAX_SET_WEIGHT_KG, units)} />
-      <Text variant="smallStrong">Reps</Text>
-      <Stepper value={r} onChange={setR} min={1} max={100} />
+      <Text variant="smallStrong">{timed ? 'Seconds' : 'Reps'}</Text>
+      <Stepper value={r} onChange={setR} min={1} max={timed ? MAX_REPS : 100} step={timed ? 5 : 1} />
       <Text variant="smallStrong">RPE (optional)</Text>
       <Row wrap gap={6}>{[6, 7, 8, 9, 10].map((v) => <Chip key={v} label={String(v)} selected={rpe === v} onPress={() => setRpe(rpe === v ? undefined : v)} />)}</Row>
       <Chip label="Warm-up set (not counted)" selected={warm} onPress={() => setWarm(!warm)} />
