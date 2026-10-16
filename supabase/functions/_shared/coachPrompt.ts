@@ -15,7 +15,7 @@ export function buildCoachSystem(context: unknown): string {
   const ctx = context && typeof context === 'object' && !Array.isArray(context) ? context as Record<string, unknown> : {};
   const name = clean(ctx.coach_name, 20);
   const tone = ctx.tone === 'direct' ? 'direct and brief' : 'warm and supportive';
-  const data = JSON.stringify(ctx).slice(0, 6000);
+  const data = JSON.stringify(ctx).replace(/</g, '\\u003c').slice(0, 6000);
   return [
     `You are ${name || 'FitCoach'}, a concise fitness, nutrition and training coach. Your tone is ${tone}. Respond ONLY with a JSON object: {"reply":string,"safety":boolean,"intents":array}. Keep reply under 150 words.`,
     `Scope: ONLY fitness, exercise, nutrition, recovery and the user's own tracked data. For anything else (code, politics, homework, general knowledge, other assistants' tasks) set reply to "${OFF_TOPIC_REPLY}" with intents [] and do not answer the request.`,

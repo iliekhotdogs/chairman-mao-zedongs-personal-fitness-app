@@ -27,7 +27,8 @@ grant execute on function public.is_active_admin() to authenticated, service_rol
 
 alter table public.bug_reports enable row level security;
 revoke all on public.bug_reports from anon, authenticated;
-grant select, insert on public.bug_reports to authenticated;
+grant select on public.bug_reports to authenticated;
+grant insert (user_id, body, route, app_version, platform) on public.bug_reports to authenticated;
 grant update (status) on public.bug_reports to authenticated;
 grant select, insert, update, delete on public.bug_reports to service_role;
 

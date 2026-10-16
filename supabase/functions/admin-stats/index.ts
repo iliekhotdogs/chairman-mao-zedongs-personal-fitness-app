@@ -151,8 +151,12 @@ Deno.serve(async (request) => {
       if (error) return json({ error: 'Could not load user stats. Apply the latest SQL migration first.' }, 502);
       const stats = pickUserStats(data);
       if (!stats) return json({ error: 'User not found.' }, 404);
+      // Fail closed: never return per-user stats that were not audited.
       const { error: auditError } = await admin.from('admin_audit').insert({ actor: user.id, action: 'view_user_stats', target: input.userId });
-      if (auditError) console.error(`admin_audit view_user_stats: ${auditError.message}`);
+      if (auditError) {
+        console.error(`admin_audit view_user_stats: ${auditError.message}`);
+        return json({ error: 'Could not record the audit entry.' }, 503);
+      }
       return json({ stats });
     }
 

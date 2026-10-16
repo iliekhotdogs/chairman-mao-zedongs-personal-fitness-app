@@ -1,5 +1,11 @@
 # Change log
 
+## 2026-10-15 15:10 PDT — Claude
+
+- Security audit fixes: bug report insert is column-limited (no client `id`/`created_at`, so the daily cap cannot be bypassed), `user_stats` fails closed when the audit row cannot be written, and `<` is escaped in the coach prompt's user-data fence.
+
+Signed off: Claude
+
 ## 2026-10-15 14:30 PDT — Claude
 
 - Workout session: RPE chips per set (shown in the set line), last-session reference with a "Same as last" quick-fill, auto-advance to the next exercise when planned sets are done, "Added weight" for bodyweight lifts, visible edit / warm-up / delete buttons per set. Warm-up sets are ignored by volume and progression.
