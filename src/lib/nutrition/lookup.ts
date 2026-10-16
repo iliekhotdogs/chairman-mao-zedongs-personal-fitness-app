@@ -52,12 +52,23 @@ export function matchScore(ref: RefFood, text: string): number {
   return best;
 }
 
+/** 0 = exact name, 1 = name starts with the query ("Banana, raw"), 2 = whole-word match, 3 = anything else. */
+export function nameRank(names: string[], query: string): number {
+  const q = norm(query);
+  return Math.min(3, ...names.map((name) => {
+    const n = norm(name);
+    if (n === q) return 0;
+    if (n.startsWith(q)) return 1;
+    return ` ${n} `.includes(` ${q} `) ? 2 : 3;
+  }));
+}
+
 export function searchFoods(query: string, limit = 8): RefFood[] {
   const q = norm(query);
   if (!q) return [];
-  return FOOD_DB.map((f) => ({ f, s: Math.max(matchScore(f, q), f.name.toLowerCase().includes(q) ? q.length + 5 : 0) }))
+  return FOOD_DB.map((f) => ({ f, s: Math.max(matchScore(f, q), f.name.toLowerCase().includes(q) ? q.length + 5 : 0), r: nameRank([f.name, ...f.aliases], q) }))
     .filter((x) => x.s > 0)
-    .sort((a, b) => b.s - a.s)
+    .sort((a, b) => a.r - b.r || b.s - a.s || a.f.name.length - b.f.name.length)
     .slice(0, limit)
     .map((x) => x.f);
 }
@@ -175,19 +186,25 @@ export async function searchFdc(query: string, apiKey: string, signal?: AbortSig
   });
 }
 
+/** Generic USDA entries before branded ones, then exact/prefix name matches, then shorter names. */
+export function rankFdc(query: string, results: FdcResult[]): FdcResult[] {
+  const branded = (r: FdcResult) => (r.dataType === 'Branded' || r.brandOwner ? 1 : 0);
+  return [...results].sort((a, b) => branded(a) - branded(b) || nameRank([a.description], query) - nameRank([b.description], query) || a.description.length - b.description.length);
+}
+
 /** Signed-in accounts share the server's USDA key; local prototype uses its own key. */
 export async function searchFdcForAccount(query: string): Promise<FdcResult[]> {
   const { isSupabaseConfigured, supabase } = await import('../sync/supabase');
   if (!isSupabaseConfigured()) {
     const { getUsdaKey } = await import('../integrations/config');
-    return searchFdc(query, getUsdaKey());
+    return rankFdc(query, await searchFdc(query, getUsdaKey()));
   }
   const sb = supabase();
   if (!sb) throw new Error('Sign in to search USDA foods.');
   const { data, error } = await sb.functions.invoke('ai', { body: { action: 'search_food', query } });
   if (error) throw new Error('USDA search is unavailable. Check the server connection.');
   if (data?.error) throw new Error(String(data.error));
-  return (data?.foods ?? []) as FdcResult[];
+  return rankFdc(query, (data?.foods ?? []) as FdcResult[]);
 }
 
 export function itemFromFdc(r: FdcResult, grams: number, portionLabel: string): FoodItem {

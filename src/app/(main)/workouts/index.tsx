@@ -3,11 +3,11 @@ import { Pressable } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Button, Card, EmptyState, Expandable, Menu, Muted, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, IconButton, Ionicons } from '@/components/ui';
+import { Badge, Banner, Button, Card, EmptyState, Expandable, Menu, Muted, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, IconButton, Ionicons } from '@/components/ui';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
 import { live, activeSession, workoutForDay } from '@/lib/selectors';
-import { generatePlan, dayMinutes } from '@/lib/workouts/generator';
+import { generatePlan, dayMinutes, GOAL_LABEL, stalePlanGoal } from '@/lib/workouts/generator';
 import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { formatDateLabel, nowISO, WEEKDAY_SHORT } from '@/lib/dates';
 import { displayWeight } from '@/lib/units';
@@ -30,6 +30,7 @@ export default function Workouts() {
   const [openDay, setOpenDay] = useState<string | null>(null);
   const todayDayId = workoutForDay(state, today).day?.sourceDayId ?? workoutForDay(state, today).day?.id;
 
+  const staleGoal = stalePlanGoal(state.plan, state.profile);
   const proposeNewPlan = () => state.profile && setPreview(generatePlan(state.profile, today));
   useEffect(() => {
     if (previewParam === '1' && state.profile && !openedFromSettings.current) {
@@ -50,6 +51,12 @@ export default function Workouts() {
       {tab === 'plan' &&
         (state.plan ? (
           <Stack gap={Space.md}>
+            {staleGoal ? (
+              <Banner kind="warning" title={`Your plan was built for ${GOAL_LABEL[staleGoal].toLowerCase()}. Regenerate?`}>
+                <Muted variant="small">Your goal is now {GOAL_LABEL[state.profile!.goal].toLowerCase()}, so the rep ranges and rest times below may not fit it.</Muted>
+                <Button title="Regenerate plan" kind="secondary" size="sm" icon="sparkles-outline" onPress={proposeNewPlan} />
+              </Banner>
+            ) : null}
             <Card style={{ gap: Space.sm }}>
               <Row wrap gap={6}>
                 <Badge kind={state.plan.source === 'ai_generated' ? 'suggestion' : 'neutral'} label={state.plan.source === 'ai_generated' ? 'Generated for you' : 'Your routine'} icon={state.plan.source === 'ai_generated' ? 'sparkles' : 'person-outline'} />

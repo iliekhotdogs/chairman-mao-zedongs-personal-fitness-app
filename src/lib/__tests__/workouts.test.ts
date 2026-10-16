@@ -1,4 +1,5 @@
 import { parseSetUtterance, wordsToDigits } from '../workouts/voiceParser';
+import { EXERCISES } from '../workouts/exercises';
 import { recommendNext, e1rm } from '../workouts/progression';
 import { lbToKg } from '../units';
 import type { WorkoutSession } from '../types';
@@ -95,6 +96,25 @@ describe('progression', () => {
   it('ignores unfinished sessions', () => {
     const s = { ...sess('2026-09-28', 60, [10, 10, 10]), finishedAt: undefined };
     expect(recommendNext(planned, [s], 'metric').kind).toBe('first_time');
+  });
+
+  it('talks about seconds, never reps, for every timed exercise', () => {
+    for (const ex of EXERCISES.filter((e) => e.timed)) {
+      const p = { exerciseId: ex.id, sets: 3, repMin: 30, repMax: 45, restSec: 60 };
+      const s = (date: string, secs: number[]) => {
+        const base = sess(date, ex.loadType === 'bodyweight' ? 0 : 20, secs);
+        return { ...base, sets: base.sets.map((x) => ({ ...x, exerciseId: ex.id })) };
+      };
+      const reasons = [
+        recommendNext(p, [], 'metric'),
+        recommendNext(p, [s('2026-09-28', [45, 45, 45])], 'metric'),
+        recommendNext(p, [s('2026-09-28', [40, 35, 30])], 'metric'),
+        recommendNext(p, [s('2026-09-25', [20, 20, 20]), s('2026-09-28', [20, 20, 20])], 'metric'),
+      ].map((r) => r.reason);
+      for (const r of reasons) expect(r).not.toMatch(/\brep/i);
+      expect(reasons[0]).toMatch(/second/);
+    }
+    expect(recommendNext({ exerciseId: 'farmer_carry', sets: 3, repMin: 30, repMax: 45, restSec: 60 }, [], 'metric').reason).toContain('stop at 45 seconds');
   });
 
   it('e1rm', () => {

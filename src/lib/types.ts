@@ -186,6 +186,8 @@ export interface WorkoutPlan extends SyncMeta {
   source: 'ai_generated' | 'user_created';
   days: WorkoutDay[];
   rationale: string[];
+  /** the profile goal the plan was generated for (absent on user routines and older plans) */
+  goal?: GoalPriority;
   createdAt: ISODateTime;
 }
 
