@@ -39,7 +39,7 @@ export function incrementKg(exerciseId: string, units: UnitSystem): number {
 export function historyFor(exerciseId: string, sessions: WorkoutSession[]): { session: WorkoutSession; sets: LoggedSet[] }[] {
   return sessions
     .filter((s) => !s.deleted && s.finishedAt)
-    .map((session) => ({ session, sets: session.sets.filter((x) => x.exerciseId === exerciseId) }))
+    .map((session) => ({ session, sets: session.sets.filter((x) => x.exerciseId === exerciseId && !x.warmup) }))
     .filter((h) => h.sets.length > 0)
     .sort((a, b) => (a.session.date < b.session.date ? 1 : a.session.date > b.session.date ? -1 : b.session.startedAt.localeCompare(a.session.startedAt)));
 }

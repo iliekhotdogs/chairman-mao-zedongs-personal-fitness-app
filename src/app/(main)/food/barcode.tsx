@@ -165,7 +165,7 @@ export default function BarcodeScreen() {
                 setError({ message: 'The camera could not start. Type the number under the barcode instead.' });
               }}
             />
-            <View pointerEvents="none" style={styles.frameWrap}>
+            <View style={[styles.frameWrap, { pointerEvents: 'none' }]}>
               <View style={styles.frame} />
               <Text variant="caption" color={C.text} style={styles.frameHint}>Line up the barcode inside the frame</Text>
             </View>
@@ -243,6 +243,7 @@ export default function BarcodeScreen() {
         </Row>
         <Muted variant="small">P {Math.round(total.proteinG)} g · C {Math.round(total.carbsG)} g · F {Math.round(total.fatG)} g</Muted>
       </Card>
+      {!items.length ? <Muted variant="small">Scan or look up a product first to enable Log meal.</Muted> : null}
       <Button title="Log meal" icon="checkmark" size="lg" onPress={save} disabled={!items.length} full />
       <Muted variant="small">Nothing is saved until you tap Log meal. Product data comes from Open Food Facts, a free community database, so double-check it against the label.</Muted>
     </Stack>

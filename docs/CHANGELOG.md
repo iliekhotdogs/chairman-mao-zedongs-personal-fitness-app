@@ -1,5 +1,18 @@
 # Change log
 
+## 2026-10-15 14:30 PDT — Claude
+
+- Workout session: RPE chips per set (shown in the set line), last-session reference with a "Same as last" quick-fill, auto-advance to the next exercise when planned sets are done, "Added weight" for bodyweight lifts, visible edit / warm-up / delete buttons per set. Warm-up sets are ignored by volume and progression.
+- Progress > Strength: weekly working sets per muscle vs the previous week.
+- Today: coach cards collapsed into one summary row; "Resume workout" banner when a session is active.
+- Welcome: "Get started" is the primary action; explains sample data and that photo analysis needs an account. A persistent "Sample data" banner shows on every tab while sample data is loaded.
+- Food: explains why Log meal is disabled, Undo after deleting a meal, "Log again today" on past meals, clearer local vs cloud delete copy in Settings.
+- Finish sheet shows a warning (not just a disabled button) when no sets are logged.
+- RN-web warnings: `useNativeDriver` off on web, `pointerEvents` moved into style.
+- README: invite-only signup, OpenRouter, dev-server port 8082 (8081 collides with another project); removed Windows/Gemini wording.
+
+Signed off: Claude
+
 ## 2026-10-15 12:00 PDT — Claude
 
 - NumberField no longer strips characters: '-', repeated dots and junk show an inline message; per-field min/max (calories, set weight, body weight, food item kcal).

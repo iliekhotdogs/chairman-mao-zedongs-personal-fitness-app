@@ -396,6 +396,7 @@ function PrivacySection() {
       </Row>
       <Stack gap={Space.sm} style={{ marginTop: Space.md, paddingTop: Space.md, borderTopWidth: 1, borderTopColor: C.border }}>
         <Text variant="smallStrong" color={C.danger}>Danger zone</Text>
+        <Muted variant="small">{sync.session ? '"Delete data on this device" clears only this browser or phone; your cloud copy stays and downloads again when you sign in. "Delete my cloud data" removes the server copy too.' : 'This clears only this browser or phone. You have no cloud copy.'}</Muted>
         <Row wrap gap={Space.sm}>
           <Button title="Delete data on this device" kind="danger" size="sm" onPress={() => setConfirm('local')} />
           {sync.session ? <Button title="Delete my cloud data" kind="danger" size="sm" onPress={() => setConfirm('cloud')} /> : null}
