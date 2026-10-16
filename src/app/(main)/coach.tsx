@@ -13,6 +13,7 @@ import { router } from 'expo-router';
 import { coachReply, type AiNoticeKind } from '@/lib/ai/provider';
 import { pendingProposals, visibleChat } from '@/lib/selectors';
 import { newId } from '@/lib/id';
+import { outgoingMessage, parseChatMarkdown } from '@/lib/coaching/chatText';
 import { formatTime, nowISO } from '@/lib/dates';
 import type { ChatMessage } from '@/lib/types';
 import { PrivacyNotice } from '@/components/PrivacyNotice';
@@ -28,8 +29,8 @@ export default function Coach() {
   const [text, setText] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
   const [thinking, setThinking] = useState(false);
-  const [error, setError] = useState<{ msg: string; retry: string } | null>(null);
-  const [notice, setNotice] = useState<{ text: string; kind: AiNoticeKind; retry: string } | null>(null);
+  const [error, setError] = useState<{ msg: string; retry: ChatMessage } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; kind: AiNoticeKind; retry: ChatMessage } | null>(null);
   const [tab, setTab] = useState<'chat' | 'suggestions'>('chat');
   const [confirmClear, setConfirmClear] = useState(false);
   const [moreIdeas, setMoreIdeas] = useState(false);
@@ -47,25 +48,28 @@ export default function Coach() {
     return () => clearTimeout(t);
   }, [messages.length, thinking]);
 
-  const send = async (msg: string) => {
+  const send = async (msg: string, retry: ChatMessage | null = null) => {
     const body = msg.trim();
     if (!body || thinking) return;
     setText('');
     setSent((n) => n + 1);
     setError(null);
     setNotice(null);
-    const now = nowISO();
-    const userMsg: ChatMessage = { id: newId(), role: 'user', text: body, createdAt: now, updatedAt: now };
-    doAct({ type: 'ADD_CHAT', messages: [userMsg] });
+    const { msg: userMsg, isNew } = outgoingMessage(body, retry, newId(), nowISO());
+    if (isNew) doAct({ type: 'ADD_CHAT', messages: [userMsg] });
     setThinking(true);
     try {
-      const reply = await coachReply({ ...state, chat: [...state.chat, userMsg] }, body, today);
-      if (reply.aiNotice) setNotice({ text: reply.aiNotice, kind: reply.aiNoticeKind ?? 'other', retry: body });
+      const reply = await coachReply({ ...state, chat: isNew ? [...state.chat, userMsg] : state.chat }, body, today);
+      if (reply.failed) {
+        setNotice({ text: reply.aiNotice ?? 'Coach is unavailable right now. Try again.', kind: reply.aiNoticeKind ?? 'unavailable', retry: userMsg });
+        return;
+      }
+      if (reply.aiNotice) setNotice({ text: reply.aiNotice, kind: reply.aiNoticeKind ?? 'other', retry: userMsg });
       if (reply.proposals.length) doAct({ type: 'ADD_PROPOSALS', proposals: reply.proposals });
       const t = nowISO();
       doAct({ type: 'ADD_CHAT', messages: [{ id: newId(), role: 'coach', text: reply.text, createdAt: t, updatedAt: t, proposalIds: reply.proposals.map((p) => p.id), simulated: reply.simulated, safety: reply.safety }] });
     } catch (e) {
-      setError({ msg: e instanceof Error ? e.message : 'The coach could not reply.', retry: body });
+      setError({ msg: e instanceof Error ? e.message : 'The coach could not reply.', retry: userMsg });
     } finally {
       setThinking(false);
     }
@@ -113,14 +117,20 @@ export default function Coach() {
           </Row>
         ) : null}
         {notice ? (
-          <Banner
-            kind="warning"
-            title="Showing a built-in reply"
-            action={notice.kind === 'signed_out' ? <Button title="Sign in" size="sm" onPress={() => router.push('/settings')} /> : notice.kind === 'unavailable' ? <Button title="Retry" size="sm" onPress={() => send(notice.retry)} /> : undefined}>
-            {notice.text.replace(/([^.!?])$/, '$1.')}
-          </Banner>
+          <View role={notice.kind === 'signed_out' ? 'status' : 'alert'} accessibilityRole="alert" accessibilityLiveRegion="assertive" aria-live="assertive">
+            <Banner
+              kind="warning"
+              title={notice.kind === 'signed_out' ? 'Showing a built-in reply' : 'Coach unavailable'}
+              action={notice.kind === 'signed_out' ? <Button title="Sign in" size="sm" onPress={() => router.push('/settings')} /> : <Button title="Retry" size="sm" onPress={() => send(notice.retry.text, notice.retry)} />}>
+              {notice.text.replace(/([^.!?])$/, '$1.')}
+            </Banner>
+          </View>
         ) : null}
-        {error ? <ErrorState title="No reply" body={error.msg} onRetry={() => send(error.retry)} /> : null}
+        {error ? (
+          <View role="alert" accessibilityRole="alert" accessibilityLiveRegion="assertive" aria-live="assertive">
+            <ErrorState title="No reply" body={error.msg} onRetry={() => send(error.retry.text, error.retry)} />
+          </View>
+        ) : null}
       </ScrollView>
       <View style={styles.composer}>
         {!simulated ? <PrivacyNotice kind="chat" dismissSignal={sent} /> : null}
@@ -161,7 +171,7 @@ export default function Coach() {
             <Muted variant="small">Suggestions are never applied without your OK.</Muted>
           </Stack>
           {!isDesktop ? (
-            <Pressable onPress={() => setTab(tab === 'chat' ? 'suggestions' : 'chat')} accessibilityRole="button" accessibilityLabel={tab === 'chat' ? `Suggestions, ${pending.length} waiting` : 'Back to chat'}>
+            <Pressable onPress={() => setTab(tab === 'chat' ? 'suggestions' : 'chat')} hitSlop={8} style={{ minHeight: 44, justifyContent: 'center' }} accessibilityRole="button" accessibilityLabel={tab === 'chat' ? `Suggestions, ${pending.length} waiting` : 'Back to chat'}>
               {tab === 'chat' ? <Badge kind={pending.length ? 'pending' : 'neutral'} label={`Suggestions${pending.length ? ` · ${pending.length}` : ''}`} icon="bulb-outline" /> : <Badge kind="neutral" label="Back to chat" icon="chatbubbles-outline" />}
             </Pressable>
           ) : null}
@@ -218,7 +228,14 @@ function Bubble({ m, hidePending }: { m: ChatMessage; hidePending: boolean }) {
             {m.simulated ? <Badge kind="neutral" label="Built-in reply" /> : null}
           </Row>
         ) : null}
-        <Text color={mine ? C.onPrimary : C.text}>{m.text}</Text>
+        {parseChatMarkdown(m.text).map((b, i) => (
+          <Row key={i} gap={6} align="flex-start">
+            {b.marker ? <Text color={mine ? C.onPrimary : C.text}>{b.marker}</Text> : null}
+            <Text color={mine ? C.onPrimary : C.text} style={{ flexShrink: 1 }}>
+              {b.parts.map((p, j) => (p.bold ? <Text key={j} variant="bodyStrong" color={mine ? C.onPrimary : C.text}>{p.text}</Text> : p.text))}
+            </Text>
+          </Row>
+        ))}
         <Text variant="caption" color={mine ? C.onPrimary : C.textMuted} style={mine ? { opacity: 0.65 } : undefined}>{formatTime(m.createdAt)}</Text>
       </View>
       {proposals.length < all.length ? <Muted variant="small">Suggestion waiting in the panel on the right.</Muted> : null}

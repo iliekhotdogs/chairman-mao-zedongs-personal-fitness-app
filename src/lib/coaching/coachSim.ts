@@ -158,7 +158,7 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
     const protein = rem ? Math.max(0, rem.remaining.proteinG) : undefined;
     const lines = [
       tone(tn, 'Enjoy it. One meal out never derails progress. A little planning helps:', 'Plan it and it fits. Here is how:'),
-      left !== undefined ? `• You have about ${left.toLocaleString()} kcal and ${protein} g protein left today. Keep earlier meals lighter and protein-focused to leave room.` : '• Keep earlier meals lighter and protein-focused to leave room.',
+      left !== undefined ? `• You have about ${left.toLocaleString()} kcal and ${protein?.toLocaleString()} g protein left today. Keep earlier meals lighter and protein-focused to leave room.` : '• Keep earlier meals lighter and protein-focused to leave room.',
       '• Pick a protein-centred main (grilled meat or fish, steak, chicken, tofu), then choose either the bread, fries, or dessert rather than all three.',
       '• Ask for sauces and dressings on the side. They are often the biggest hidden calories.',
       '• Drinks count: a cocktail or two beers can be 300–500 kcal.',
@@ -257,7 +257,7 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
       safety: false,
       proposals: [],
       text: [
-        left > 150 ? `You still have ~${left} kcal today, so eat something.` : "You're close to today's target.",
+        left > 150 ? `You still have ~${left.toLocaleString()} kcal today, so eat something.` : "You're close to today's target.",
         'High-volume, filling options: Greek yogurt with berries, a big salad with lean protein, vegetable soup, popcorn, an apple with a little peanut butter, or a protein shake.',
         profile?.goal === 'fat_loss' ? 'If hunger is constant for more than a week, tell me. Your deficit may be too aggressive and I can suggest a small increase.' : '',
       ].filter(Boolean).join('\n'),
@@ -286,19 +286,15 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
     return {
       safety: false,
       proposals: [],
-      text: `Remaining today: ${r.calories} kcal · ${r.proteinG} g protein · ${r.carbsG} g carbs · ${r.fatG} g fat.\n${r.proteinG > 30 ? 'Prioritise protein: e.g. chicken or tofu with rice and vegetables, a salmon fillet with potatoes, or Greek yogurt and berries.' : 'Protein is nearly covered, so fill the rest with whatever you enjoy, ideally with some vegetables.'}`,
+      text: `Remaining today: ${r.calories.toLocaleString()} kcal · ${r.proteinG.toLocaleString()} g protein · ${r.carbsG.toLocaleString()} g carbs · ${r.fatG.toLocaleString()} g fat.\n${r.proteinG > 30 ? 'Prioritise protein: e.g. chicken or tofu with rice and vegetables, a salmon fillet with potatoes, or Greek yogurt and berries.' : 'Protein is nearly covered, so fill the rest with whatever you enjoy, ideally with some vegetables.'}`,
     };
   }
 
-  // Default. A question we can't match gets an honest "no built-in answer", not a generic status reply.
-  const asked = /\?\s*$|^(?:does|do|is|are|can|should|will|what|why|how|when)\b/.test(t.trim());
-  return {
-    safety: false,
-    proposals: [],
-    text: (asked ? tone(tn, "I don't have a built-in answer to that question, sorry. ", "No built-in answer to that question. ") : '') + tone(
-      tn,
-      `I'm here to help.${day ? ` Today's workout is ${day.name}.` : ' No workout is scheduled today.'}${rem ? ` You have ${Math.max(0, rem.remaining.calories)} kcal left.` : ''}\nYou can ask me things like:\n• "I only have 20 minutes today"\n• "I'm eating out tonight"\n• "My knee hurts"\n• "How am I doing?"\n• "I can only train 3 days a week now"`,
-      `${day ? `Today: ${day.name}.` : 'Rest day.'}${rem ? ` ${Math.max(0, rem.remaining.calories)} kcal left.` : ''} Try: "20 minutes today", "eating out tonight", "knee hurts", "how am I doing?", "3 days a week".`,
-    ),
-  };
+  // Greeting (only when nothing else matched, so "hi, my knee hurts" still gets the injury branch).
+  if (/^(hi|hello|hey|yo|hiya|good (morning|afternoon|evening))\b[\s\w!.,]{0,20}$/.test(t.trim())) {
+    return { safety: false, proposals: [], text: tone(tn, 'Hi! Ask me about your workout, food or progress.', 'Hi. Workout, food or progress?') };
+  }
+
+  // Default: be honest that the built-in coach can't answer this.
+  return { safety: false, proposals: [], text: tone(tn, "I can't answer that offline. Try \"How am I doing?\" or \"I only have 20 minutes today\".", "I can't answer that offline. Try \"How am I doing?\".") };
 }

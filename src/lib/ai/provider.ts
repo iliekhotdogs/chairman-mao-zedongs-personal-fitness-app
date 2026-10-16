@@ -23,6 +23,10 @@ export const SIGNED_OUT = 'Sign in to use the AI coach.';
 export const UNAVAILABLE = 'Coach is unavailable right now. Try again.';
 export type AiNoticeKind = 'signed_out' | 'unavailable' | 'other';
 
+// Server reasons that are written for users; anything else (stack text, "boom") gets the caller's friendly fallback.
+const SAFE_SERVER_MESSAGE = /limit|allowance|sign in|confirm your email|disabled|too large|invalid request|try again|not ready|not available|unavailable|switched off|not configured/i;
+const isSafe = (m: string) => SAFE_SERVER_MESSAGE.test(m) && !/supabase|edge function|api_key|sql|migration/i.test(m);
+
 /** supabase-js reports any non-2xx as a generic message; the gateway's own reason is in the body. */
 export async function functionErrorMessage(error: unknown, fallback: string): Promise<string> {
   // Transport failures (CORS, offline, outage) carry developer jargon the user must never see.
@@ -30,10 +34,10 @@ export async function functionErrorMessage(error: unknown, fallback: string): Pr
   const context = (error as { context?: unknown } | null)?.context;
   if (context instanceof Response) {
     const body = await context.clone().json().catch(() => null) as { error?: unknown } | null;
-    if (typeof body?.error === 'string' && body.error) return /supabase|edge function|api_key/i.test(body.error) ? UNAVAILABLE : body.error;
+    if (typeof body?.error === 'string' && body.error) return isSafe(body.error) ? body.error : fallback;
   }
   const m = error instanceof Error ? error.message : fallback;
-  return /supabase|edge function/i.test(m) ? UNAVAILABLE : m;
+  return isSafe(m) ? m : fallback;
 }
 
 export type AIEngine = 'server' | 'simulated';
@@ -294,7 +298,7 @@ export function coachContext(state: AppState, today: ISODate) {
   };
 }
 
-export async function coachReply(state: AppState, message: string, today: ISODate): Promise<CoachReply & { simulated: boolean; aiNotice?: string; aiNoticeKind?: AiNoticeKind }> {
+export async function coachReply(state: AppState, message: string, today: ISODate): Promise<CoachReply & { simulated: boolean; aiNotice?: string; aiNoticeKind?: AiNoticeKind; failed?: boolean }> {
   const engine = aiEngine();
   if (engine === 'simulated') {
     await delay(500);
@@ -315,7 +319,8 @@ export async function coachReply(state: AppState, message: string, today: ISODat
     return { text: d.reply, safety: d.safety, proposals: proposalsForIntents(state, d.intents ?? [], today), simulated: false };
   } catch (error) {
     const aiNotice = await functionErrorMessage(error, UNAVAILABLE);
-    return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice, aiNoticeKind: aiNotice === UNAVAILABLE ? 'unavailable' : 'other' };
+    // No stacked built-in bubble: the screen shows an unavailable state with Retry instead.
+    return { text: '', safety: false, proposals: [], simulated: true, failed: true, aiNotice, aiNoticeKind: aiNotice === UNAVAILABLE ? 'unavailable' : 'other' };
   }
 }
 

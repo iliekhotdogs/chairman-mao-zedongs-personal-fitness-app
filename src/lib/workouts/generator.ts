@@ -95,7 +95,9 @@ export function generatePlan(profile: Profile, today: string): WorkoutPlan {
   });
 
   const rationale = [
-    `${split} split for ${days} training day${days > 1 ? 's' : ''} per week.`,
+    profile.trainingDays.length
+      ? `${split} split for ${days} training day${days > 1 ? 's' : ''} per week.`
+      : `${split} split with flexible days because no training days are selected.`,
     `Rep ranges are set for your goal (${GOAL_LABEL[profile.goal].toLowerCase()}) at a ${profile.experience} level.`,
     `Sessions are trimmed to about ${profile.sessionMinutes} minutes.`,
     `Exercises use your equipment (${profile.equipment.replace('_', ' ')}).`,

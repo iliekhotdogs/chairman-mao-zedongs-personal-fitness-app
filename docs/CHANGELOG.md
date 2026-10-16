@@ -1,5 +1,29 @@
 # Change log
 
+## 2026-10-16 11:51 PDT — Claude
+
+- UX fixes from a local QA pass (mocked Supabase session; signup is invite-only):
+  - Coach: short greeting reply; unmatched input says "I can't answer that offline."; server failure shows one "Coach unavailable" banner (announced to screen readers) instead of stacked generic bubbles; Retry reuses the failed message; replies render **bold**, lists and headings; raw server errors map to a friendly message; thousands separators.
+  - Training: "Today's workout" card under the header with one action (Start, Resume or View session), override badge and rest-day state via new `todayWorkout` helper; duplicate Start buttons removed; weekly plan uses a grid. "Continue" is now "Resume" everywhere.
+  - Today: desktop right column holds workout, activity and weight, then the Coach row.
+  - Progress: average intake, protein and days near target show "—" until 3 completed logged days ("N of 3 logged days needed", today excluded); responsive 320 px range control, tabs, axis labels and round y-ticks.
+  - Food: "Add meal" in empty states; recent meals use two lines with "+N items" and a full accessible label; Recent meals no longer lose older meals to the selected day.
+- Visual redesign toward the FC88 look: #181818 base with grain, soft sage-mint accent (#9BD8B3), uppercase Barlow Condensed headings, blob-cornered buttons and cards, hover wiggle (off under reduced motion), hidden scrollbars, landing marquee. New tokens `Blob`, `Ease`, `glyph`; `chartBar` recoloured.
+- Softened the palette (sage-mint accent #9BD8B3, slightly warmer text) and rewrote landing copy from first person ("I train. I eat.") to second person ("Train. Eat. Feel better.").
+- Local verification: TypeScript, 440 Jest tests, web export, Deno typecheck and 6 Edge Function tests passed; lint has 0 errors (1 existing warning in usda.test.ts). Not run against a real account or deployed.
+
+Signed off: Claude
+
+## 2026-10-16 11:14 PDT — Codex
+
+- Added web main landmarks and keyboard skip links to app screens and the public landing page. Progress bars now name the metric they show, and segmented options can wrap long labels on narrow screens.
+- Clarified Progress milestones by calling the profile entry the setup weight. Confirmed the single-weigh-in view already hides change and has one Log weight button.
+- Traced "ANY DAY" to regenerating a plan after all training days are cleared in Settings. Such plans now say "Flexible day" and explain the missing schedule.
+- CI runs the restaurant Edge Function's Deno tests. The staging RLS check now covers saved foods, restaurant catalog access, import sources, and the privileged replacement RPC; verification docs were updated.
+- Local verification: TypeScript, lint, 423 Jest tests, web export, Deno typecheck, 6 Edge Function tests, and script syntax passed. Browser automation and the live staging RLS run still need an accessible browser/server and staging credentials.
+
+Signed off: Codex
+
 ## 2026-10-15 23:32 PDT — Claude
 
 - UX fixes from a local Playwright test pass (5 test accounts on a local Supabase stack):

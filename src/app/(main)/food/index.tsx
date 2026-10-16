@@ -17,6 +17,8 @@ import { dishFromEntry, draftProblems, itemFromSaved, logAgain, recentMeals, res
 import type { FoodEntry, MealType, SavedFood } from '@/lib/types';
 
 const ORDER: MealType[] = ['breakfast', 'lunch', 'dinner', 'snack'];
+const fullName = (e: FoodEntry) => e.items.map((i) => i.name).join(', ');
+const shortName = (e: FoodEntry) => (e.items.length > 1 ? `${e.items[0].name} +${e.items.length - 1} item${e.items.length > 2 ? 's' : ''}` : fullName(e));
 const LABEL: Record<MealType, string> = { breakfast: 'Breakfast', lunch: 'Lunch', dinner: 'Dinner', snack: 'Snacks' };
 
 export default function FoodLog() {
@@ -35,7 +37,8 @@ export default function FoodLog() {
     if (item) doAct({ type: 'LOG_FOOD', entry: manualEntry({ items: [item], meal: defaultMealForTime(), date }) }, `Logged ${item.name}`);
   };
   const entries = foodForDay(state, date);
-  const recent = recentMeals(state.foodLog).filter((e) => e.date !== date);
+  // filter before the cap: otherwise this day's meals use up the slots and hide older ones
+  const recent = recentMeals(state.foodLog.filter((e) => e.date !== date));
   const restaurants = restaurantsVisited(state.savedFoods);
   const rem = remainingForDay(state, date)!;
 
@@ -72,10 +75,10 @@ export default function FoodLog() {
                 {recent.map((e) => (
                   <Row key={e.id} gap={Space.sm}>
                     <Stack gap={0} style={{ flex: 1 }}>
-                      <Text variant="smallStrong" numberOfLines={1}>{e.items.map((i) => i.name).join(', ')}</Text>
+                      <Text variant="smallStrong" numberOfLines={2}>{shortName(e)}</Text>
                       <Muted variant="small">{Math.round(sumItems(e.items).calories)} kcal · {formatDateLabel(e.date, today)}</Muted>
                     </Stack>
-                    <Button title="Log again" kind="secondary" size="sm" icon="copy-outline" accessibilityLabel={`Log ${e.items.map((i) => i.name).join(', ')} again`} onPress={() => relog(e, date)} />
+                    <Button title="Log again" kind="secondary" size="sm" icon="copy-outline" accessibilityLabel={`Log ${fullName(e)} again`} onPress={() => relog(e, date)} />
                   </Row>
                 ))}
               </Card>
@@ -103,6 +106,7 @@ export default function FoodLog() {
                 icon="restaurant-outline"
                 title={date === today ? 'Nothing logged yet today' : 'Nothing logged this day'}
                 body="Add a meal with a photo, a short description or manual entry. You'll review any estimate before it's saved."
+                action={<Button title="Add meal" icon="add" onPress={() => setMealOpen(true)} />}
               />
             ) : (
               ORDER.map((m) => {

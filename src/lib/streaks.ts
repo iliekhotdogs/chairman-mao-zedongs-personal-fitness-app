@@ -118,7 +118,7 @@ export function milestones(state: Pick<AppState, 'foodLog' | 'sessions' | 'weigh
   const fmt = opts.formatWeight ?? ((kg: number) => `${Math.round(kg * 10) / 10} kg`);
   const out: Milestone[] = [];
 
-  if (state.profile?.createdAt) out.push({ id: 'start', date: toISODate(new Date(state.profile.createdAt)), kind: 'start', title: 'Started FitCoach', detail: `Starting weight ${fmt(state.profile.startWeightKg)}` });
+  if (state.profile?.createdAt) out.push({ id: 'start', date: toISODate(new Date(state.profile.createdAt)), kind: 'start', title: 'Started FitCoach', detail: `Setup weight ${fmt(state.profile.startWeightKg)}` });
 
   const meals = live(state.foodLog).map((e) => e.date).sort();
   if (meals[0]) out.push({ id: 'first-meal', date: meals[0], kind: 'meal', title: 'First meal logged' });

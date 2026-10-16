@@ -9,8 +9,9 @@ import { WeightSheet } from '@/components/WeightSheet';
 import { LogMealSheet } from '@/components/LogMealSheet';
 import { useStore } from '@/store/AppStore';
 import { useLayout } from '@/hooks/useLayout';
-import { activeSession, activityForDay, hasActivitySource, latestWeight, pendingProposals, remainingForDay, sessionForDay, workoutForDay } from '@/lib/selectors';
+import { activeSession, activityForDay, hasActivitySource, latestWeight, pendingProposals, remainingForDay } from '@/lib/selectors';
 import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
+import { todayWorkout } from '@/lib/workouts/todayWorkout';
 import { dayMinutes } from '@/lib/workouts/generator';
 import { displayWeight } from '@/lib/units';
 import { formatDateLabel } from '@/lib/dates';
@@ -22,7 +23,7 @@ function greeting() {
 
 export default function Dashboard() {
   const { state, today, storageError } = useStore();
-  const { isPhone, isDesktop } = useLayout();
+  const { isPhone } = useLayout();
   const [weightOpen, setWeightOpen] = useState(false);
   const [mealOpen, setMealOpen] = useState(false);
   const rem = remainingForDay(state, today)!;
@@ -78,31 +79,16 @@ export default function Dashboard() {
         </Banner>
       ) : null}
       {storageError ? <Banner kind="danger" title="Storage problem">{storageError}</Banner> : null}
-      {isDesktop ? (
-        <Row align="flex-start" gap={Space.lg}>
-          <Stack gap={Space.lg} style={{ flex: 1.35 }}>
-            {nutrition}
-            <Row align="flex-start" gap={Space.lg}>
-              <View style={{ flex: 1 }}><WorkoutCard /></View>
-              <View style={{ flex: 1 }}><ActivityCard onLogWeight={() => setWeightOpen(true)} /></View>
-            </Row>
-          </Stack>
-          <View style={{ flex: 1 }}>{coach}</View>
-        </Row>
-      ) : (
-        <Columns>
-          {[
-            <Stack key="a" gap={Space.lg}>
-              {nutrition}
-              <WorkoutCard />
-            </Stack>,
-            <Stack key="b" gap={Space.lg}>
-              <ActivityCard onLogWeight={() => setWeightOpen(true)} />
-              {coach}
-            </Stack>,
-          ]}
-        </Columns>
-      )}
+      <Columns ratio={[1.35, 1]}>
+        {[
+          <Stack key="a" gap={Space.lg}>{nutrition}</Stack>,
+          <Stack key="b" gap={Space.lg}>
+            <WorkoutCard />
+            <ActivityCard onLogWeight={() => setWeightOpen(true)} />
+            {coach}
+          </Stack>,
+        ]}
+      </Columns>
       <WeightSheet visible={weightOpen} onClose={() => setWeightOpen(false)} />
       <LogMealSheet visible={mealOpen} onClose={() => setMealOpen(false)} />
     </Screen>
@@ -111,11 +97,9 @@ export default function Dashboard() {
 
 function WorkoutCard() {
   const { state, today } = useStore();
-  const { day, overridden } = workoutForDay(state, today);
-  const done = sessionForDay(state, today);
-  const active = activeSession(state);
+  const w = todayWorkout(state, today);
 
-  if (!state.plan && !overridden) {
+  if (w.status === 'no_plan') {
     return (
       <Card style={{ gap: Space.sm }}>
         <Text variant="h3">Today&apos;s workout</Text>
@@ -124,7 +108,7 @@ function WorkoutCard() {
       </Card>
     );
   }
-  if (!day) {
+  if (w.status === 'rest' || !w.day) {
     return (
       <Card style={{ gap: Space.sm }}>
         <Row>
@@ -136,12 +120,13 @@ function WorkoutCard() {
       </Card>
     );
   }
+  const { day } = w;
   return (
     <Card style={{ gap: Space.sm }}>
       <Row wrap>
         <Text variant="h3" style={{ flex: 1 }}>Today&apos;s workout</Text>
-        {overridden ? <Badge kind="saved" label="Adjusted for today" /> : null}
-        {done?.finishedAt ? <Badge kind="saved" label="Done" /> : null}
+        {w.overridden ? <Badge kind="saved" label="Adjusted for today" /> : null}
+        {w.status === 'done' ? <Badge kind="saved" label="Done" /> : null}
       </Row>
       <Text variant="bodyStrong">{day.name}</Text>
       <Muted variant="small">{day.focus} · ~{dayMinutes(day)} min</Muted>
@@ -153,10 +138,10 @@ function WorkoutCard() {
         ))}
         {day.exercises.length > 5 ? <Muted variant="small">+{day.exercises.length - 5} more</Muted> : null}
       </Stack>
-      {done?.finishedAt ? (
-        <Button title="View session" kind="secondary" size="sm" onPress={() => router.push({ pathname: '/workouts/session', params: { id: done.id } })} />
+      {w.status === 'done' && w.session ? (
+        <Button title="View session" kind="secondary" size="sm" onPress={() => router.push({ pathname: '/workouts/session', params: { id: w.session!.id } })} />
       ) : (
-        <Button title={active ? 'Continue workout' : 'Start workout'} icon="play" onPress={() => router.push('/workouts/session')} />
+        <Button title={w.status === 'active' ? 'Resume workout' : 'Start workout'} icon="play" onPress={() => router.push('/workouts/session')} />
       )}
     </Card>
   );
@@ -182,7 +167,7 @@ function ActivityCard({ onLogWeight }: { onLogWeight: () => void }) {
             <Text variant="number">{(a.steps ?? 0).toLocaleString()}</Text>
             <Muted style={{ marginBottom: 4 }}>steps</Muted>
           </Row>
-          <ProgressBar value={a.steps ?? 0} max={baseline} color={C.info} />
+          <ProgressBar value={a.steps ?? 0} max={baseline} color={C.info} label="Steps today" />
           <Muted variant="small">
             Your target assumes ~{baseline.toLocaleString()} steps. {a.activeKcal ? `~${a.activeKcal} active kcal (device estimate)` : ''}
           </Muted>

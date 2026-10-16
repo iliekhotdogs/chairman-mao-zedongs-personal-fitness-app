@@ -101,24 +101,37 @@ export function LineChart({ points, height = 180, color = C.primary, trend, form
   );
 }
 
+const BAR = C.chartBar;
+
+/** Round axis ticks (step 1/2/2.5/5 x 10^k) covering [0, maxVal]. */
+export function niceTicks(maxVal: number, count = 3): number[] {
+  const raw = Math.max(maxVal, 1) / count;
+  const pow = 10 ** Math.floor(Math.log10(raw));
+  const step = ([1, 2, 2.5, 5, 10].find((m) => m * pow >= raw) ?? 10) * pow;
+  const n = Math.ceil(maxVal / step - 1e-9);
+  return Array.from({ length: Math.max(1, n) + 1 }, (_, i) => i * step);
+}
+
 /** Bars with an optional target line (e.g. daily calories vs target). */
-export function BarChart({ bars, height = 170, target, color = C.chartBar, label, format = (v: number) => String(Math.round(v)) }: { bars: { x: string; y: number | null; highlight?: boolean }[]; height?: number; target?: number; color?: string; label: string; format?: (v: number) => string }) {
+export function BarChart({ bars, height = 170, target, color = BAR, label, format = (v: number) => String(Math.round(v)) }: { bars: { x: string; y: number | null; highlight?: boolean }[]; height?: number; target?: number; color?: string; label: string; format?: (v: number) => string }) {
   const { w, onLayout } = useWidth();
   const vals = bars.map((b) => b.y ?? 0);
-  const max = Math.max(1, ...vals, target ?? 0) * 1.1;
+  const ticks = niceTicks(Math.max(1, ...vals, target ?? 0));
+  const max = ticks[ticks.length - 1];
   const left = 40;
   const bottom = 22;
   const top = 8;
-  const iw = w - left - 4;
+  const iw = w - left - 16; // room for the half-width last label
   const ih = height - top - bottom;
   const bw = Math.max(4, (iw / bars.length) * 0.62);
   const xFor = (i: number) => left + (i + 0.5) * (iw / bars.length);
   const yFor = (v: number) => top + ih - (v / max) * ih;
-  const every = Math.ceil(bars.length / 7);
+  // ~46px per label so they never collide; counted from the last bar so it is always labelled
+  const every = Math.ceil(bars.length / Math.max(1, Math.floor(iw / 46)));
   return (
     <View onLayout={onLayout} accessibilityRole="image" accessibilityLabel={label}>
       <Svg width={w} height={height}>
-        {[0, max / 2, max / 1.1].map((t, i) => (
+        {ticks.map((t, i) => (
           <G key={i}>
             <Line x1={left} x2={w} y1={yFor(t)} y2={yFor(t)} stroke={C.border} />
             <SvgText x={left - 6} y={yFor(t) + 4} fontSize={10} fill={C.textMuted} textAnchor="end">
@@ -135,7 +148,7 @@ export function BarChart({ bars, height = 170, target, color = C.chartBar, label
         )}
         {target ? <Line x1={left} x2={w} y1={yFor(target)} y2={yFor(target)} stroke={C.textSecondary} strokeDasharray="5 4" strokeWidth={1.25} /> : null}
         {bars.map((b, i) =>
-          i % every === 0 || i === bars.length - 1 ? (
+          (bars.length - 1 - i) % every === 0 ? (
             <SvgText key={`l${i}`} x={xFor(i)} y={height - 6} fontSize={10} fill={C.textMuted} textAnchor="middle">
               {b.x}
             </SvgText>

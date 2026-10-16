@@ -45,7 +45,7 @@ export function RestTimerCard({ rest, label }: { rest: RestTimerControls; label?
         </Text>
       </Row>
       <View style={{ borderRadius: Radius.pill, overflow: 'hidden' }}>
-        <ProgressBar value={rest.progress * rest.total} max={rest.total} height={6} color={C.accent} />
+        <ProgressBar value={rest.progress * rest.total} max={rest.total} height={6} color={C.accent} label="Rest time elapsed" />
       </View>
       <Row gap={Space.sm}>
         <Button title={`−${REST_STEP_SEC}s`} kind="secondary" size="sm" onPress={() => rest.adjust(-REST_STEP_SEC)} disabled={done} accessibilityLabel={`Remove ${REST_STEP_SEC} seconds`} style={{ flex: 1 }} />

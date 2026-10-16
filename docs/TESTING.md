@@ -2,7 +2,7 @@
 
 ## Automated
 
-Run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build:web`. CI runs the same on every push and pull request (`.github/workflows/ci.yml`), plus a Deno type-check of `supabase/functions`.
+Run `npm run typecheck`, `npm run lint`, `npm test` and `npm run build:web`. CI runs the same on every push and pull request (`.github/workflows/ci.yml`), plus `deno check supabase/functions/*/index.ts` and `deno test --allow-read supabase/functions`.
 
 Unit tests (`src/lib/__tests__`) cover:
 
@@ -25,7 +25,8 @@ Tests run in the `America/New_York` time zone (`jest.global-setup.js`) so date l
 - reads 0 of A's records and cannot update, delete or forge them (verified afterwards with the service role);
 - cannot download, sign, list, overwrite or delete A's photo, or upload into A's folder;
 - gets 403 from the `admin-stats` function (`stats` action) and cannot call `admin_stats` or `claim_ai_request` directly;
-- cannot read `app_config`, `invites`, `ai_global_usage`, `signup_attempts`, `ai_ip_usage`, `food_search_global_usage`, or A's rows in `profiles`, `push_tokens`, `notification_log`, `ai_usage`, `food_search_usage`; cannot make itself admin or change `app_config`;
+- cannot read server-only tables, including `restaurant_sources` and `bug_report_counts`, or A's rows in user tables and saved foods; cannot make itself admin or change `app_config`;
+- can read the signed-in restaurant catalog but cannot write it or call its replacement RPC; a signed-out client cannot read it;
 - cannot call the service-role RPCs `user_storage_objects` (list A's photos) or `admin_revoke_sessions`;
 
 It also checks, as user A, that:
@@ -42,7 +43,7 @@ SUPABASE_SECRET_KEY=sb_secret_... \
 npm run check:rls -- --yes
 ```
 
-Run it against a **staging** project with all migrations applied (including `20261015000000_security_hardening.sql`) and `admin-stats` deployed. It needs the secret (service-role) key, so it is not part of CI; never commit the key. Exit code 0 means every check passed, 1 that one failed, 2 a setup problem.
+Run it against a **staging** project with all migrations applied (including the restaurant catalog and saved foods migrations) and `admin-stats` deployed. It needs the secret (service-role) key, so it is not part of CI; never commit the key. Exit code 0 means every check passed, 1 that one failed, 2 a setup problem.
 
 ## Manual checks (before a release)
 
