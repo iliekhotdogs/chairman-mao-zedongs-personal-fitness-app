@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/lib/nav';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, EmptyState, Expandable, Field, IconButton, Menu, Muted, NumberField, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Ionicons, Columns } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, EmptyState, Expandable, Field, IconButton, Menu, Muted, NumberField, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Ionicons } from '@/components/ui';
 import { ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
@@ -78,7 +78,7 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
 
   return (
     <Screen size="narrow">
-      <PageHeader title="Start a workout" subtitle={formatDateLabel(today, today)} right={<Row gap={Space.sm}><Button title="Back" kind="ghost" onPress={() => goBack('/workouts')} /><Menu title="Other options" items={[{ label: 'Freestyle workout (no plan)', icon: 'add', onPress: () => start(undefined) }]} /></Row>} />
+      <PageHeader title="Start a workout" subtitle={formatDateLabel(today, today)} right={<Button title="Back" kind="ghost" onPress={() => goBack('/workouts')} />} />
       {first ? (
         <Card tone={overridden && !preferred ? 'saved' : 'default'} style={{ gap: Space.sm }}>
           <Row wrap gap={6}>
@@ -100,7 +100,7 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
         </Card>
       )}
       {state.plan ? (
-        <Expandable title="Other days in your plan">
+        <Expandable title={first ? 'Other days in your plan' : 'Days in your plan'} initiallyOpen={!first}>
           {state.plan.days
             .filter((d) => d.id !== first?.id)
             .map((d) => (
@@ -116,6 +116,7 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
             ))}
         </Expandable>
       ) : null}
+      <Button title="Freestyle workout (no plan)" kind="secondary" icon="add" onPress={() => start(undefined)} />
     </Screen>
   );
 }
@@ -134,6 +135,7 @@ function SessionView({ session }: { session: WorkoutSession }) {
   const [painNote, setPainNote] = useState('');
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [focusEx, setFocusEx] = useState<string | undefined>();
+  const [moreOpen, setMoreOpen] = useState(false);
   const rest = useRestTimer();
   const startRestAfter = (exerciseId: string) => {
     if (finished) return;
@@ -195,29 +197,26 @@ function SessionView({ session }: { session: WorkoutSession }) {
       {finished ? <Banner kind="success" title="Workout saved">You can still correct sets below.</Banner> : null}
       {progression ? <ProposalCard proposal={progression} /> : null}
 
-      <Columns ratio={[3, 2]}>
-        {[
-          <Stack key="ex" gap={Space.md}>
-            {exerciseIds.length === 0 ? <EmptyState icon="barbell-outline" title="No exercises yet" body="Add an exercise, or log a set by voice or text." /> : null}
-            {exerciseIds.map((exId) => (
-              <ExerciseBlock key={exId} session={session} exerciseId={exId} planned={planned?.exercises.find((e) => e.exerciseId === exId)} highlighted={!finished && exId === currentEx} onFocus={() => setFocusEx(exId)} onLogged={(n) => afterLog(exId, n)} rest={!finished && rest.timer?.exerciseId === exId ? rest : undefined} />
-            ))}
-            <Button title="Add exercise" kind="secondary" icon="add" onPress={() => setPickerOpen(true)} />
-          </Stack>,
-          <Stack key="voice" gap={Space.md}>
-            <Expandable title="More" icon="ellipsis-horizontal">
-              <VoiceLogger session={session} currentExerciseId={currentEx} onLogged={startRestAfter} />
-              {!finished ? (
-                <Card style={{ gap: Space.sm }}>
-                  <Button title={pain ? 'Pain during workout: yes' : 'Pain during workout'} kind={pain ? 'danger' : 'secondary'} onPress={() => setPain(!pain)} />
-                  {pain ? <Field label="Where or when did it hurt? (optional)" value={painNote} onChangeText={setPainNote} /> : null}
-                  {pain ? <Banner kind="warning">Skip movements that hurt. No automatic progression will be suggested from this session.</Banner> : null}
-                </Card>
-              ) : null}
-            </Expandable>
-          </Stack>,
-        ]}
-      </Columns>
+      <Stack gap={Space.md}>
+        {exerciseIds.length === 0 ? <EmptyState icon="barbell-outline" title="No exercises yet" body="Add an exercise, or log a set by voice or text." /> : null}
+        {exerciseIds.map((exId) => (
+          <ExerciseBlock key={exId} session={session} exerciseId={exId} planned={planned?.exercises.find((e) => e.exerciseId === exId)} highlighted={!finished && exId === currentEx} onFocus={() => setFocusEx(exId)} onLogged={(n) => afterLog(exId, n)} rest={!finished && rest.timer?.exerciseId === exId ? rest : undefined} />
+        ))}
+        <Button title="Add exercise" kind="secondary" icon="add" onPress={() => setPickerOpen(true)} />
+        <Button title={finished ? 'Log by voice or text' : 'Voice logging & pain'} kind="ghost" icon={moreOpen ? 'chevron-up' : 'chevron-down'} onPress={() => setMoreOpen(!moreOpen)} accessibilityState={{ expanded: moreOpen }} />
+        {moreOpen ? (
+          <>
+          <VoiceLogger session={session} currentExerciseId={currentEx} onLogged={startRestAfter} />
+          {!finished ? (
+            <Card style={{ gap: Space.sm }}>
+              <Button title={pain ? 'Pain during workout: yes' : 'Pain during workout'} kind={pain ? 'danger' : 'secondary'} onPress={() => setPain(!pain)} />
+              {pain ? <Field label="Where or when did it hurt? (optional)" value={painNote} onChangeText={setPainNote} /> : null}
+              {pain ? <Banner kind="warning">Skip movements that hurt. No automatic progression will be suggested from this session.</Banner> : null}
+            </Card>
+          ) : null}
+          </>
+        ) : null}
+      </Stack>
 
       <ExercisePicker visible={pickerOpen} onClose={() => setPickerOpen(false)} onPick={(exId) => { setExtra([...extra, exId]); setFocusEx(exId); setPickerOpen(false); }} />
 
@@ -268,7 +267,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
   const doAct = useAct();
   const units = state.settings.units;
   const ex = EXERCISE_BY_ID[exerciseId];
-  const sets = session.sets.filter((s) => s.exerciseId === exerciseId);
+  const sets = session.sets.filter((s) => s.exerciseId === exerciseId).sort((a, b) => a.loggedAt.localeCompare(b.loggedAt));
   const workingCount = sets.filter((s) => !s.warmup).length;
   const finished = Boolean(session.finishedAt);
   // during a workout: advice for this session; after finishing: advice for next time
@@ -285,10 +284,12 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
 
   const [msg, setMsg] = useState<string | undefined>();
   const [undoId, setUndoId] = useState<string | undefined>();
+  const [removed, setRemoved] = useState<LoggedSet | undefined>();
   const [ackJump, setAckJump] = useState<number | undefined>();
   const lastTap = useRef(0);
   const maxWeight = weightValue(MAX_SET_WEIGHT_KG, units);
   const prev = finished ? undefined : lastSessionSet(exerciseId, history, workingCount);
+  const weightHint = bodyweight ? '0 = bodyweight only' : weight === undefined ? 'Enter a weight to log a set' : undefined;
   const lastTopKg = Math.max(0, ...(historyFor(exerciseId, history)[0]?.sets.map((s) => s.weightKg) ?? []));
 
   const log = () => {
@@ -299,6 +300,11 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
     const weightKg = toKg(weight, units);
     const bad = checkSet({ weightKg, reps });
     if (bad) return setMsg(bad);
+    // 0 on a loaded lift is usually a missed field; it would also drag progression down
+    if (weightKg === 0 && !bodyweight && !timed && ackJump !== 0) {
+      setAckJump(0);
+      return setMsg('Weight is 0. Enter the weight you lifted, or tap Log set again to log an unloaded set.');
+    }
     const jump = jumpWarning(weightKg, lastTopKg);
     if (jump && ackJump !== weight) {
       setAckJump(weight);
@@ -313,6 +319,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
     }
     setMsg(undefined);
     setUndoId(id);
+    setRemoved(undefined);
     setRpe(undefined);
     onFocus();
     onLogged(workingCount + 1);
@@ -332,7 +339,7 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
             <Muted variant="small">Added to this session</Muted>
           )}
         </Stack>
-        <Badge kind={workingCount >= (planned?.sets ?? 1) ? 'saved' : 'neutral'} label={`${workingCount}/${planned?.sets ?? '–'} sets`} icon={null} />
+        <Badge kind={planned && workingCount >= planned.sets ? 'saved' : 'neutral'} label={planned ? `${workingCount}/${planned.sets} sets` : `${workingCount} set${workingCount === 1 ? '' : 's'}`} icon={null} />
       </Row>
       {rec ? (
         <Row align="flex-start" gap={6}>
@@ -353,9 +360,17 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
           {s.via === 'voice' ? <Ionicons name="mic-outline" size={14} color={C.textMuted} accessibilityLabel="Logged by voice" /> : null}
           <IconButton icon={s.warmup ? 'flame' : 'flame-outline'} label={s.warmup ? `Set ${i + 1} is a warm-up, tap to count it` : `Mark set ${i + 1} as warm-up`} size={18} color={s.warmup ? C.warning : C.textSecondary} onPress={() => doAct({ type: 'UPDATE_SET', sessionId: session.id, set: { ...s, warmup: !s.warmup }, now: nowISO() })} />
           <IconButton icon="create-outline" label={`Edit set ${i + 1}`} size={18} color={C.textSecondary} onPress={() => setEditing(s)} />
-          <IconButton icon="close" label={`Delete set ${i + 1}`} size={18} color={C.danger} onPress={() => doAct({ type: 'DELETE_SET', sessionId: session.id, setId: s.id, now: nowISO() })} />
+          <IconButton icon="close" label={`Delete set ${i + 1}`} size={18} color={C.danger} onPress={() => { if (doAct({ type: 'DELETE_SET', sessionId: session.id, setId: s.id, now: nowISO() })) { setRemoved(s); setUndoId(undefined); } }} />
         </Row>
       ))}
+      {removed ? (
+        <Row gap={Space.sm}>
+          <Muted variant="small" style={{ flex: 1 }}>Set deleted.</Muted>
+          <Button title="Undo" kind="secondary" size="sm" onPress={() => { if (doAct({ type: 'ADD_SETS', sessionId: session.id, sets: [removed], now: nowISO() }, 'Set restored')) setRemoved(undefined); }} />
+        </Row>
+      ) : null}
+      {finished && sets.length === 0 ? <Muted variant="small">Not done in this workout.</Muted> : null}
+      {finished && sets.length === 0 ? null : <>
       {prev ? (
         <Row gap={Space.sm}>
           <Muted variant="small" style={{ flex: 1 }}>Last session, set {workingCount + 1}: {bodyweight && prev.weightKg === 0 ? 'bodyweight' : displayWeight(prev.weightKg, units)} × {prev.reps}{timed ? ' s' : ''}{prev.rpe ? ` @ RPE ${prev.rpe}` : ''}</Muted>
@@ -363,12 +378,12 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
         </Row>
       ) : null}
       <Row wrap gap={Space.md} style={{ marginTop: 4 }}>
-        <NumberField label={`${bodyweight ? 'Added weight' : 'Weight'} (${weightUnit(units)})`} value={weight} onChange={(v) => { setWeight(v); setAckJump(undefined); setMsg(undefined); }} min={0} max={maxWeight} style={{ width: 130 }} hint={bodyweight ? '0 = bodyweight only' : undefined} />
+        <NumberField label={`${bodyweight ? 'Added weight' : 'Weight'} (${weightUnit(units)})`} value={weight} onChange={(v) => { setWeight(v); setAckJump(undefined); setMsg(undefined); }} min={0} max={maxWeight} style={{ width: 130 }} hint={weightHint} placeholder={bodyweight ? '0' : 'e.g. 60'} onSubmitEditing={log} returnKeyType="done" />
         <Stack gap={6}>
           <Text variant="smallStrong">{timed ? 'Seconds' : 'Reps'}</Text>
           <Stepper value={reps} onChange={setReps} min={1} max={timed ? MAX_REPS : 100} step={timed ? 5 : 1} />
         </Stack>
-        <View style={{ justifyContent: 'flex-end', paddingBottom: bodyweight ? 22 : 0 }}>
+        <View style={{ justifyContent: 'flex-end', paddingBottom: weightHint ? 22 : 0 }}>
           <Row gap={4}>
             {SHOW_WEIGHT_NUDGE && !bodyweight ? <IconButton icon="remove-circle-outline" label={`Decrease weight by ${step}`} onPress={() => setWeight(Math.max(0, (weight ?? 0) - step))} /> : null}
             {SHOW_WEIGHT_NUDGE && !bodyweight ? <IconButton icon="add-circle-outline" label={`Increase weight by ${step}`} onPress={() => setWeight((weight ?? 0) + step)} /> : null}
@@ -377,9 +392,9 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
         </View>
       </Row>
       <Row wrap gap={6}>
-        <Muted variant="small">RPE</Muted>
-        {[6, 7, 8, 9, 10].map((v) => <Chip key={v} label={String(v)} selected={rpe === v} onPress={() => setRpe(rpe === v ? undefined : v)} />)}
+        {[6, 7, 8, 9, 10].map((v) => <Chip key={v} label={`RPE ${v}`} selected={rpe === v} onPress={() => setRpe(rpe === v ? undefined : v)} />)}
       </Row>
+      </>}
       {msg ? <Text variant="small" color={C.danger} accessibilityRole="alert">{msg}</Text> : null}
       {undoId && sets.some((s) => s.id === undoId) ? (
         <Row gap={Space.sm}>

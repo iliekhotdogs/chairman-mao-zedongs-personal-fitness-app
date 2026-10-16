@@ -1,19 +1,78 @@
 import React, { useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
-import type { FoodItem } from '@/lib/types';
+import type { FoodItem, MacroKey } from '@/lib/types';
 import { C, Space } from '@/constants/theme';
 import { Badge, Button, Card, Expandable, Field, IconButton, Muted, NumberField, Row, Sheet, Stack, Text, Ionicons } from './ui';
 import { MacroLine, SourceLine } from './nutrition';
 import { itemFromFdc, itemFromRef, scaleItem, searchFdcForAccount, searchFoods, type FdcResult } from '@/lib/nutrition/lookup';
 import { markEdited } from '@/lib/nutrition/estimate';
 import type { RefFood } from '@/lib/nutrition/foodDb';
+import { FOOD_LIMITS, macroValue, setMacro } from '@/lib/nutrition/savedFoods';
+
+/** Tracks which NumberFields currently show an error, so Save/Add can stay disabled. */
+export function useFieldErrors() {
+  const [errs, setErrs] = useState<Record<string, boolean>>({});
+  const track = (key: string) => (_v: number | undefined, err?: string) => setErrs((e) => (e[key] === !!err ? e : { ...e, [key]: !!err }));
+  return { hasError: Object.values(errs).some(Boolean), track, reset: () => setErrs({}) };
+}
+
+const MACRO_FIELDS: { key: MacroKey; label: string }[] = [
+  { key: 'proteinG', label: 'Protein' }, { key: 'carbsG', label: 'Carbs' }, { key: 'fatG', label: 'Fat' },
+];
+
+/** Calories + protein/carbs/fat inputs. Empty macros are kept as unknown ("—"), not 0. */
+export function NutrientFields({ item, onChange, track }: { item: FoodItem; onChange: (next: FoodItem) => void; track: (key: string) => (v: number | undefined, err?: string) => void }) {
+  const macro = (key: MacroKey, label: string) => (
+    <NumberField
+      key={key}
+      label={label}
+      suffix="g"
+      value={macroValue(item, key)}
+      min={0}
+      max={FOOD_LIMITS.macroG}
+      placeholder="—"
+      onChange={(v, err) => {
+        track(key)(v, err);
+        if (!err) onChange(setMacro(item, key, v));
+      }}
+      style={{ flex: 1 }}
+    />
+  );
+  return (
+    <>
+      <Row gap={Space.sm} align="flex-start">
+        <NumberField
+          label="Calories"
+          suffix="kcal"
+          value={item.calories || undefined}
+          min={0}
+          max={FOOD_LIMITS.kcal}
+          exclusiveMin
+          onChange={(v, err) => {
+            track('calories')(v, err);
+            if (!err) onChange({ ...item, calories: Math.round(v ?? 0) });
+          }}
+          style={{ flex: 1 }}
+        />
+        {macro(MACRO_FIELDS[0].key, MACRO_FIELDS[0].label)}
+      </Row>
+      <Row gap={Space.sm} align="flex-start">
+        {MACRO_FIELDS.slice(1).map((m) => macro(m.key, m.label))}
+      </Row>
+    </>
+  );
+}
 
 /** Editable row for one food item. Portion edits rescale; macro edits mark the item "edited by you". */
 export function FoodItemEditor({ item, onChange, onRemove, extra }: { item: FoodItem; onChange: (next: FoodItem) => void; onRemove: () => void; extra?: React.ReactNode }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item);
+  const [amountError, setAmountError] = useState<string>();
+  const errors = useFieldErrors();
   const open = () => {
     setDraft(item);
+    setAmountError(undefined);
+    errors.reset();
     setEditing(true);
   };
   return (
@@ -43,7 +102,7 @@ export function FoodItemEditor({ item, onChange, onRemove, extra }: { item: Food
             title="Save changes"
             icon="checkmark"
             full
-            disabled={!draft.name.trim() || !(draft.calories > 0)}
+            disabled={!draft.name.trim() || !(draft.calories > 0) || draft.calories > FOOD_LIMITS.kcal || errors.hasError || !!amountError}
             onPress={() => {
               onChange(markEdited(item, draft));
               setEditing(false);
@@ -57,23 +116,29 @@ export function FoodItemEditor({ item, onChange, onRemove, extra }: { item: Food
             label="Amount"
             suffix="g"
             value={draft.grams}
-            onChange={(g) => g && g > 0 && setDraft({ ...scaleItem({ ...item, name: draft.name, portionLabel: draft.portionLabel }, g) })}
+            min={0}
+            max={FOOD_LIMITS.amount}
+            exclusiveMin
+            error={amountError}
+            onChange={(g, err) => {
+              errors.track('amount')(g, err);
+              if (!g) return;
+              const next = scaleItem({ ...item, name: draft.name, portionLabel: draft.portionLabel }, g);
+              // Never clamp silently: a scaled portion over the calorie limit is almost always a typo.
+              setAmountError(next.calories > FOOD_LIMITS.kcal ? `That is ${next.calories.toLocaleString()} kcal. Check the amount (max ${FOOD_LIMITS.kcal} kcal per item).` : undefined);
+              setDraft(next.calories > FOOD_LIMITS.kcal ? { ...next, calories: FOOD_LIMITS.kcal } : next);
+            }}
             hint="Changing the amount rescales calories and macros from the same nutrition source."
           />
         ) : null}
-        <Row gap={Space.sm}>
-          <NumberField label="Calories" suffix="kcal" value={draft.calories || undefined} min={0} max={5000} exclusiveMin onChange={(v) => setDraft({ ...draft, calories: Math.round(v ?? 0) })} style={{ flex: 1 }} />
-          <NumberField label="Protein" suffix="g" value={draft.proteinG} onChange={(v) => setDraft({ ...draft, proteinG: v ?? 0 })} style={{ flex: 1 }} />
-        </Row>
-        <Row gap={Space.sm}>
-          <NumberField label="Carbs" suffix="g" value={draft.carbsG} onChange={(v) => setDraft({ ...draft, carbsG: v ?? 0 })} style={{ flex: 1 }} />
-          <NumberField label="Fat" suffix="g" value={draft.fatG} onChange={(v) => setDraft({ ...draft, fatG: v ?? 0 })} style={{ flex: 1 }} />
-        </Row>
+        <NutrientFields item={draft} onChange={setDraft} track={errors.track} />
         <Muted variant="small">Editing calories or macros directly marks this item as &quot;entered by you&quot;.</Muted>
       </Sheet>
     </Card>
   );
 }
+
+const BLANK_CUSTOM: FoodItem = { name: '', portionLabel: '1 serving', calories: 0, proteinG: 0, carbsG: 0, fatG: 0, missing: ['proteinG', 'carbsG', 'fatG'], source: { kind: 'user_entered', sourced: false, label: 'Entered by you' } };
 
 /** Search the built-in reference foods and (optionally) USDA FoodData Central. */
 export function FoodSearch({ onPick }: { onPick: (item: FoodItem) => void }) {
@@ -82,9 +147,13 @@ export function FoodSearch({ onPick }: { onPick: (item: FoodItem) => void }) {
   const [remote, setRemote] = useState<FdcResult[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
-  const [custom, setCustom] = useState<FoodItem>({ name: '', portionLabel: '1 serving', calories: 0, proteinG: 0, carbsG: 0, fatG: 0, source: { kind: 'user_entered', sourced: false, label: 'Entered by you' } });
+  const [custom, setCustom] = useState<FoodItem>(BLANK_CUSTOM);
+  // bumped after each add so the custom form's number fields remount empty (no stale "-4")
+  const [customKey, setCustomKey] = useState(0);
+  const customErrors = useFieldErrors();
 
   const searchUsda = async () => {
+    if (q.trim().length < 2 || loading) return;
     setLoading(true);
     setError(undefined);
     try {
@@ -104,7 +173,7 @@ export function FoodSearch({ onPick }: { onPick: (item: FoodItem) => void }) {
 
   return (
     <Stack gap={Space.sm}>
-      <Field placeholder="Search foods, e.g. chicken, rice, latte" value={q} onChangeText={(t) => { setQ(t); setRemote(null); }} accessibilityLabel="Search foods" returnKeyType="search" />
+      <Field placeholder="Search foods, e.g. chicken, rice, latte" value={q} onChangeText={(t) => { setQ(t); setRemote(null); }} accessibilityLabel="Search foods" returnKeyType="search" onSubmitEditing={() => void searchUsda()} />
       {q.trim().length > 1 ? (
         <Stack gap={4}>
           {local.map((f) => (
@@ -118,7 +187,7 @@ export function FoodSearch({ onPick }: { onPick: (item: FoodItem) => void }) {
               </Row>
             </Pressable>
           ))}
-          {!local.length ? <Muted variant="small">No matches in the built-in list.</Muted> : null}
+          {!local.length ? <Muted variant="small">No matches in the built-in list. Try Search USDA database below (or press Enter).</Muted> : null}
           <Row wrap gap={Space.sm}>
             <Button title="Search USDA database" kind="secondary" size="sm" icon="globe-outline" loading={loading} onPress={searchUsda} />
             <Badge kind="info" label="Live lookup" />
@@ -139,25 +208,21 @@ export function FoodSearch({ onPick }: { onPick: (item: FoodItem) => void }) {
         </Stack>
       ) : null}
       <Expandable title="Add a custom item" icon="create-outline">
-        <View style={{ gap: Space.sm }}>
+        <View key={customKey} style={{ gap: Space.sm }}>
           <Field label="Name" value={custom.name} onChangeText={(name) => setCustom({ ...custom, name })} placeholder="e.g. Mom's lasagna" />
           <Field label="Portion" value={custom.portionLabel} onChangeText={(portionLabel) => setCustom({ ...custom, portionLabel })} />
-          <Row gap={Space.sm}>
-            <NumberField label="Calories" suffix="kcal" value={custom.calories || undefined} onChange={(v) => setCustom({ ...custom, calories: Math.round(v ?? 0) })} style={{ flex: 1 }} />
-            <NumberField label="Protein" suffix="g" value={custom.proteinG || undefined} onChange={(v) => setCustom({ ...custom, proteinG: v ?? 0 })} style={{ flex: 1 }} />
-          </Row>
-          <Row gap={Space.sm}>
-            <NumberField label="Carbs" suffix="g" value={custom.carbsG || undefined} onChange={(v) => setCustom({ ...custom, carbsG: v ?? 0 })} style={{ flex: 1 }} />
-            <NumberField label="Fat" suffix="g" value={custom.fatG || undefined} onChange={(v) => setCustom({ ...custom, fatG: v ?? 0 })} style={{ flex: 1 }} />
-          </Row>
+          <NutrientFields item={custom} onChange={setCustom} track={customErrors.track} />
+          <Muted variant="small">Leave a macro empty if you don&apos;t know it; it shows as &quot;—&quot;.</Muted>
           <Button
             title="Add custom item"
             kind="secondary"
             icon="add"
-            disabled={!custom.name.trim() || custom.calories <= 0}
+            disabled={!custom.name.trim() || !(custom.calories > 0) || custom.calories > FOOD_LIMITS.kcal || customErrors.hasError}
             onPress={() => {
               onPick({ ...custom, name: custom.name.trim() });
-              setCustom({ ...custom, name: '', calories: 0, proteinG: 0, carbsG: 0, fatG: 0 });
+              setCustom({ ...BLANK_CUSTOM, portionLabel: custom.portionLabel });
+              customErrors.reset();
+              setCustomKey((k) => k + 1);
             }}
           />
         </View>

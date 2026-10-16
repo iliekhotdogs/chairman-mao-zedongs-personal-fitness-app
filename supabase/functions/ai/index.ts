@@ -10,6 +10,7 @@ import { ACTION_INTENT_TYPES, matchingFood, validateActionIntent, validateVision
 import { buildCoachSystem, buildCoachUserTurn, isOffTopic, OFF_TOPIC_REPLY } from '../_shared/coachPrompt.ts';
 import { hasInjuryRedFlag, isUrgentSymptom } from '../_shared/coachSafety.ts';
 import { profileGate } from '../_shared/profile.ts';
+import { CATALOG_COLUMNS, detectRestaurant, rankCandidates, type CatalogItem } from '../_shared/restaurantCatalog.ts';
 
 const safeNumber = (value: unknown, max: number) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max ? value : 0;
 const text = (value: unknown, max: number) => typeof value === 'string' ? value.slice(0, max) : '';
@@ -111,8 +112,28 @@ Use the hint and the photo together. For each food give a realistic portion in g
 Be honest about uncertainty: photos cannot show hidden oil, sauces or portion depth. Use "low" confidence when unsure.
 If one key detail is missing (size, sauce, brand), ask ONE short follow_up_question, otherwise null.
 Reply with ONLY a JSON object, no other text, in exactly this shape:
-{"items":[{"name":"Grilled chicken breast","portion":"1 palm-size piece","grams":120,"calories":198,"protein_g":37,"carbs_g":0,"fat_g":4.3,"confidence":"medium","portion_assumption":"About the size of a palm, 2 cm thick","usda_search_query":"chicken breast roasted"}],"overall_confidence":"medium","follow_up_question":null,"notes":["Short note about assumptions"]}
-Up to 8 items. "usda_search_query" is a short generic USDA food search term. "notes" has at most 3 short sentences.`;
+{"items":[{"name":"Grilled chicken breast","portion":"1 palm-size piece","grams":120,"calories":198,"protein_g":37,"carbs_g":0,"fat_g":4.3,"confidence":"medium","portion_assumption":"About the size of a palm, 2 cm thick","usda_search_query":"chicken breast roasted"}],"overall_confidence":"medium","follow_up_question":null,"notes":["Short note about assumptions"],"restaurant":null,"dish_guesses":[]}
+Up to 8 items. "usda_search_query" is a short generic USDA food search term. "notes" has at most 3 short sentences.
+"restaurant" is the restaurant or chain the meal is from when the hint or packaging names one, else null. "dish_guesses" lists up to 3 menu names that restaurant most likely uses for the whole dish (empty when not a restaurant meal).`;
+
+/** Official catalog candidates when the hint (or the model) names a restaurant. No extra model call. */
+async function restaurantMatch(hint: string, value: Record<string, unknown>, photoKcal: number) {
+  const named = text(value.restaurant, 80).trim();
+  const supported = detectRestaurant(hint) ?? detectRestaurant(named);
+  if (!supported) {
+    if (!named || /^(null|none|unknown)$/i.test(named)) return null;
+    return { name: named, supported: false, candidates: [], note: `The app has no official nutrition for ${named} yet, so this is a photo estimate. For exact values, retake with a photo of the nutrition label or menu, or send the restaurant's nutrition page link to the app owner.` };
+  }
+  const guesses = [...(Array.isArray(value.dish_guesses) ? value.dish_guesses.slice(0, 3).map((g: unknown) => text(g, 100)) : []), hint].filter(Boolean);
+  const { data, error } = await admin.from('restaurant_items').select(CATALOG_COLUMNS).eq('restaurant', supported).limit(2000);
+  if (error) console.error(`Restaurant catalog read failed: ${error.message}`);
+  const catalog = (data ?? []) as CatalogItem[];
+  const candidates = rankCandidates(catalog, guesses, photoKcal);
+  const note = candidates.length ? null : catalog.length
+    ? `No close match on the official ${supported} nutrition list, so this is a photo estimate.`
+    : `Official ${supported} nutrition is not available in the app yet, so this is a photo estimate.`;
+  return { name: supported, supported: true, candidates, note };
+}
 
 function parseObject(reply: string): Record<string, unknown> {
   const start = reply.indexOf('{');
@@ -242,7 +263,8 @@ async function estimateFood(config: AiConfig, meter: Meter, body: Record<string,
   const notes = Array.isArray(value.notes) ? value.notes.slice(0, 3).map((note: unknown) => text(note, 200)) : [];
   if (rejected) notes.unshift(`${rejected} food item(s) had unusable amounts and were omitted. Review the plate and add them manually.`);
   if (items.some((item) => item.review_required)) notes.unshift('One or more portions need correction before saving.');
-  return { result: { items, rejected_items: rejected, overall_confidence: rejected || items.some((item) => item.review_required) ? 'low' : ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes, model: config.vision_model, provider: PROVIDERS[config.provider].label }, tokens: response };
+  const restaurant = await restaurantMatch(hint, value, items.reduce((sum, item) => sum + item.calories, 0));
+  return { result: { items, rejected_items: rejected, overall_confidence: rejected || items.some((item) => item.review_required) ? 'low' : ['high', 'medium', 'low'].includes(String(value.overall_confidence)) ? value.overall_confidence : 'low', follow_up_question: text(value.follow_up_question, 200) || null, notes, model: config.vision_model, provider: PROVIDERS[config.provider].label, restaurant }, tokens: response };
 }
 
 async function aiInfo(user: User) {

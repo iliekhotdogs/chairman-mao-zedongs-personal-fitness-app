@@ -2,6 +2,10 @@
 
 export const MAX_SET_WEIGHT_KG = 700;
 export const MAX_REPS = 300;
+export const MAX_CALORIES = 6000;
+/** Protein may supply at most this share of calories, so carbs and fat still fit. */
+export const MAX_PROTEIN_SHARE = 0.6;
+export const maxProteinG = (calories: number) => Math.floor((calories * MAX_PROTEIN_SHARE) / 4);
 
 export interface Bounds {
   min?: number;
@@ -14,6 +18,7 @@ export interface Bounds {
 export function parseNumberText(text: string): { value?: number; error?: string } {
   const t = text.trim().replace(/^(\d*),(\d+)$/, '$1.$2');
   if (t === '') return { value: undefined };
+  if (t.startsWith('-')) return { error: "Can't be negative." };
   if (!/^\d*\.?\d*$/.test(t) || t === '.') return { error: 'Enter digits only, with at most one decimal point.' };
   return { value: parseFloat(t) };
 }

@@ -58,7 +58,6 @@ export function ProgressPhotosSection() {
           icon="body-outline"
           title="See the change, not just the scale"
           body="Take a photo every couple of weeks in the same spot and light. Photos stay private to your account."
-          action={<Button title="Add progress photo" icon="camera" onPress={() => setAdding(true)} />}
         />
       ) : (
         <>

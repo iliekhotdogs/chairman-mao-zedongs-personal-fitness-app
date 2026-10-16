@@ -1,5 +1,5 @@
 import type { AppState } from '../state';
-import type { Confidence, EstimateItem, FoodEstimate, ISODate, Proposal } from '../types';
+import type { Confidence, EstimateItem, FoodEstimate, FoodItem, ISODate, Proposal } from '../types';
 import { simulateFoodEstimate } from '../nutrition/estimate';
 import { hasInjuryRedFlag, isUrgentSymptom, simulateCoachReply, type CoachReply } from '../coaching/coachSim';
 import { isSupabaseConfigured, supabase } from '../sync/supabase';
@@ -9,6 +9,7 @@ import { remainingForDay, workoutForDay, latestWeight, live } from '../selectors
 import { exerciseName, findExercise, formatPrescription } from '../workouts/exercises';
 import { ACTION_INTENT_TYPES, validateActionIntent, type ActionIntent } from '../../../supabase/functions/ai/foodValidation';
 import { prepareImageForAI, type ImageSetting } from './image';
+import { recentFoodSummary, recentSessionSummary } from './coachHistory';
 import { z } from 'zod';
 import { log } from '../log';
 
@@ -78,7 +79,7 @@ export async function saveAiPreference(provider: string, chat_model: string): Pr
 
 type FoodInput = { hint?: string; photoUri?: string; photoSize?: { width?: number; height?: number }; followUpAnswered?: boolean; imageSetting?: ImageSetting };
 
-export async function estimateFood(state: AppState, input: FoodInput): Promise<FoodEstimate> {
+export async function estimateFood(state: AppState, input: FoodInput): Promise<AiFoodEstimate> {
   const engine = aiEngine();
   if (engine === 'simulated') {
     await delay(700); // let the UI show its loading state realistically
@@ -109,9 +110,45 @@ interface ServerEstimate {
   rejected_items?: number;
   model: string;
   provider?: string;
+  restaurant?: {
+    name: string; supported: boolean; note?: string | null;
+    candidates: { name: string; serving: string; calories: number; protein_g: number; carbs_g: number; fat_g: number; source_url: string; checked_at: string; stale: boolean; disagreement?: string | null }[];
+  } | null;
 }
 
-export function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: string }): FoodEstimate {
+/** Official restaurant values offered next to the photo estimate; the user picks one or keeps the estimate. */
+export interface RestaurantCandidate {
+  item: FoodItem;
+  checkedAt: string;
+  /** Checked more than 30 days ago: shown as "may be out of date". */
+  stale: boolean;
+  disagreement?: string;
+}
+export interface RestaurantMatch { name: string; supported: boolean; note?: string; candidates: RestaurantCandidate[] }
+export type AiFoodEstimate = FoodEstimate & { restaurant?: RestaurantMatch };
+
+const okNumber = (n: unknown, max: number) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= max;
+
+function toRestaurant(r: ServerEstimate['restaurant']): RestaurantMatch | undefined {
+  if (!r || typeof r.name !== 'string') return undefined;
+  const candidates = (Array.isArray(r.candidates) ? r.candidates : [])
+    // The gateway is not trusted blindly: drop anything the food log would refuse.
+    .filter((c) => c && typeof c.name === 'string' && /^https:\/\//.test(c.source_url ?? '') && okNumber(c.calories, 5000) && c.calories > 0 && [c.protein_g, c.carbs_g, c.fat_g].every((n) => okNumber(n, 1000)))
+    .slice(0, 3)
+    .map((c) => {
+      const date = (c.checked_at ?? '').slice(0, 10);
+      return {
+        item: {
+          name: c.name, portionLabel: c.serving || '1 serving', calories: Math.round(c.calories), proteinG: c.protein_g, carbsG: c.carbs_g, fatG: c.fat_g,
+          source: { kind: 'official_restaurant' as const, label: `${r.name} official nutrition, checked ${date}${c.stale ? ' (may be out of date)' : ''}`, url: c.source_url, sourced: true },
+        },
+        checkedAt: date, stale: c.stale !== false, disagreement: c.disagreement ?? undefined,
+      };
+    });
+  return { name: r.name, supported: r.supported === true, note: r.note ?? undefined, candidates };
+}
+
+export function toEstimate(data: ServerEstimate, input: { hint?: string; photoUri?: string }): AiFoodEstimate {
   if (!Array.isArray(data?.items) || !data.items.length) throw new Error('The image service returned no usable food items.');
   for (const item of data.items) {
     if (!item.name || !Number.isFinite(item.grams) || item.grams <= 0 || [item.calories, item.protein_g, item.carbs_g, item.fat_g].some((n) => !Number.isFinite(n) || n < 0)) throw new Error('The image service returned invalid food amounts.');
@@ -127,6 +164,7 @@ export function toEstimate(data: ServerEstimate, input: { hint?: string; photoUr
     followUpQuestion: data.follow_up_question ?? undefined,
     notes: data.notes ?? [],
     rejectedItems: data.rejected_items,
+    restaurant: toRestaurant(data.restaurant),
     items: (data.items ?? []).map((i) => ({
       name: i.name,
       portionLabel: i.portion,
@@ -251,6 +289,8 @@ export function coachContext(state: AppState, today: ISODate) {
     latest_weight_kg: latestWeight(state)?.weightKg,
     weights_14d: live(state.weights).filter((w) => w.date > addDays(today, -14)).map((w) => [w.date, w.weightKg]),
     sessions_14d: live(state.sessions).filter((s) => s.finishedAt && s.date > addDays(today, -14)).length,
+    food_14d: recentFoodSummary(state, today),
+    recent_sessions: recentSessionSummary(state, today),
   };
 }
 

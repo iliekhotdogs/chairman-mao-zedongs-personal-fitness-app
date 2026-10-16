@@ -1,5 +1,31 @@
 # Change log
 
+## 2026-10-15 23:32 PDT — Claude
+
+- UX fixes from a local Playwright test pass (5 test accounts on a local Supabase stack):
+  - Bounded numeric input everywhere it was missing: onboarding calorie override (calorie floor–6000), protein target (≤60% of calories), food editor and custom items (5000 kcal, 1000 g macros, 5000 g amount; Save blocked while a field has an error), steps (1–100,000), age/height/session. Negative numbers say "Can't be negative."
+  - New shared `HeightField` (cm or ft/in, inches 0–11) used by onboarding and Settings; Settings honours imperial units; onboarding plan summary uses units and labels.
+  - Sign-in: placeholders, email check, hint on the disabled button, friendly wrong-password copy, inline reset notice, `current-password`.
+  - Sign-out while offline or with sync failing warns that unsynced changes will be lost ("Sign out anyway"). Sync shows an Offline state and "Can't reach the server. We'll retry." instead of raw fetch errors.
+  - Profile is saved immediately when onboarding finishes (closing the tab within the debounce lost it).
+  - Admin button reads the user's own `profiles` row instead of calling `admin-stats` (no 403 for every non-admin load).
+  - Enter submits: workout weight, steps, weigh-in, food search. Undo for deleted sets, weigh-ins and meals (toast now supports an action and lifts above the coach input).
+  - Workouts: confirm before logging 0 on a weighted lift, rest-day start view shows plan days and a Freestyle button, routine Cancel confirms when dirty, plural/target copy fixes, larger RPE/More targets.
+  - Activity: edit/delete manual days, month on the chart axis, "No steps entered" copy; `mergeActivity` restores a re-entered deleted manual day.
+  - Progress tab kept in the URL; single weigh-in shows "—" change; duplicate empty-state buttons removed. Coach input capped at 2,000 characters; desktop proposal shown once.
+  - Barcode: typed lookups scroll the result into view; camera start state; "no camera" vs "blocked" copy.
+  - Accessibility: `aria-checked` on Chip/Segmented/OptionCard/Toggle, `aria-current` on sidebar links, labelled progress bars, 44 px expanders and links, per-route web titles. Cloud data delete needs typed DELETE (case-sensitive, as does Delete account). Export confirms with a toast.
+- Food AI and personal database:
+  - New synced `savedFoods` collection (STATE_VERSION 3, migration 2→3) for confirmed barcode products, restaurant dishes and custom foods; migration `20261016000100_saved_foods.sql` adds it to `records_collection_check` (not applied to fitdih).
+  - Barcode: saved personal products are added immediately; new Open Food Facts products open a verify form (name, brand, flavour, package size, serving basis g/mL/per serving). Nutrition Facts photo option reads a label through the existing `estimateFood` client; every value is editable and must be confirmed. Missing macros stay missing (`FoodItem.missing`, shown "—"), and mL is never treated as grams.
+  - Food screen: Recent meals with Log again (independent copy), Restaurants visited, Save as restaurant dish.
+  - Restaurant catalog: migration `20261016000000_restaurant_catalog.sql` (read-only `restaurant_items` for signed-in users, service-role writes, atomic replace RPC, weekly pg_cron job reading Vault secrets) and the `restaurant-import` Edge Function with per-source parsers, zod validation, and needs_review on failure or suspicious drops. Boston Pizza and Olive Garden Canada are seeded **disabled**: both sites' terms forbid scraping/automated access (checked 2026-10-15). Enable only with written permission.
+  - `estimate_food` returns restaurant and dish guesses in the same model call, up to 3 official candidates (stale >30 days labelled), a disagreement note, and a menu/label suggestion for unknown restaurants. Candidate picker on the capture screen.
+  - Coach context includes confirmed food totals (14 days) and finished sessions with top sets (28 days); context cap 9,000 characters.
+- Not deployed: run `supabase db push`, `supabase functions deploy ai` and `supabase functions deploy restaurant-import`, and add Vault secrets `project_url` and `service_role_key`. See docs/SETUP.md.
+
+Signed off: Claude
+
 ## 2026-10-15 19:20 PDT — Claude
 
 - Barcode scanner hardening (branch `barcode-hardening`, local only): lookups try the EAN-13 form first, then the raw code; UPC-E codes are expanded to UPC-A (only when the expanded check digit holds) and UPC-E check digits are validated on the expansion. Scanned codes with a bad check digit are ignored silently (no request, scanner stays armed).

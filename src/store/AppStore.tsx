@@ -19,6 +19,7 @@ import { localChanges } from '@/lib/sync/merge';
 import { signOutAndWipe } from '@/lib/sync/signOut';
 import type { Proposal } from '@/lib/types';
 import { loadIntegrationConfig, useIntegrationConfig } from '@/lib/integrations/config';
+import { isNetworkError } from '@/lib/uiText';
 
 const STORAGE_KEY = 'fitapp:state:v1';
 const CURSOR_KEY = 'fitapp:sync-cursor:v1';
@@ -161,14 +162,20 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     return () => { active = false; };
   }, [owner, integrationsLoaded, authReady, configured, userId, dispatch]);
 
+  const savedProfile = useRef(false);
   useEffect(() => {
     if (!scopeReady || owner === 'signed-out') return;
-    const t = setTimeout(() => {
+    const save = () => {
+      savedProfile.current = !!state.profile;
       AsyncStorage.setItem(stateKey(owner), JSON.stringify(state)).catch((e) => {
         log.error('store', 'Could not persist state.', e);
         setStorageError('Could not save to this device. Storage may be full.');
       });
-    }, 250);
+    };
+    // A profile that just appeared (onboarding finished) is saved at once, not after the
+    // debounce, so closing the tab right away can't lose it.
+    if (state.profile && !savedProfile.current) return save();
+    const t = setTimeout(save, 250);
     return () => clearTimeout(t);
   }, [state, scopeReady, owner]);
 
@@ -303,12 +310,13 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       await AsyncStorage.setItem(cursorKey, JSON.stringify(result.cursor));
       setLastSyncAt(nowISO());
       setSyncError(result.pushError);
-      setSyncStatus(result.pushError ? 'error' : 'idle');
+      setSyncStatus(!result.pushError ? 'idle' : isNetworkError(result.pushError) ? 'offline' : 'error');
     } catch (e) {
       log.warn('sync', 'Sync failed.', e);
       if (stillSignedIn()) {
         setSyncError(e instanceof Error ? e.message : String(e));
-        setSyncStatus(Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'error');
+        const offline = (Platform.OS === 'web' && typeof navigator !== 'undefined' && !navigator.onLine) || isNetworkError(e instanceof Error ? e.message : String(e));
+        setSyncStatus(offline ? 'offline' : 'error');
       }
     } finally {
       if (syncing.current === userId) syncing.current = null;

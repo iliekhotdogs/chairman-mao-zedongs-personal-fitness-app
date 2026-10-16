@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, Expandable, Field, IconButton, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Toggle } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, Expandable, Field, HeightField, IconButton, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Toggle } from '@/components/ui';
 import { useStore, clearLocalData } from '@/store/AppStore';
 import { AccountCard } from '@/components/AccountCard';
 import { AiSettings } from '@/components/AiSettings';
@@ -15,6 +15,8 @@ import { ageFromBirthYear, computeTargets, macrosFor } from '@/lib/nutrition/tar
 import { latestWeight } from '@/lib/selectors';
 import { nowISO, WEEKDAY_SHORT } from '@/lib/dates';
 import { displayWeight } from '@/lib/units';
+import { maxProteinG } from '@/lib/inputRules';
+import { ACTIVITY_LABEL, formatHeight } from '@/lib/uiText';
 import { emptyState } from '@/lib/state';
 import { buildSampleState } from '@/lib/sampleData';
 import { newId } from '@/lib/id';
@@ -133,11 +135,13 @@ function TargetsSection() {
   const w = latestWeight(state)?.weightKg ?? state.profile!.startWeightKg;
   const [recalc, setRecalc] = useState<NutritionTargets | null>(null);
 
+  const fatG = Math.round(((cal ?? 0) * 0.27) / 9);
+  const carbsG = Math.max(0, Math.round(((cal ?? 0) - (prot ?? 0) * 4 - fatG * 9) / 4));
+  const protMax = cal ? maxProteinG(cal) : undefined;
+  const protError = prot !== undefined && protMax !== undefined && prot > protMax ? `At ${cal!.toLocaleString()} kcal, protein can be at most ${protMax} g (60% of calories).` : undefined;
   const saveManual = () => {
-    if (!cal || !prot) return;
+    if (!cal || !prot || protError) return;
     const m = macrosFor(cal, w, state.profile!.goal);
-    const fatG = Math.round((cal * 0.27) / 9);
-    const carbsG = Math.max(0, Math.round((cal - prot * 4 - fatG * 9) / 4));
     if (doAct({ type: 'SET_TARGETS', targets: { ...t, ...m, proteinG: Math.round(prot), carbsG, fatG, method: 'Set manually by you', updatedAt: nowISO() }, confirmed: true }, 'Targets updated')) setEdit(false);
   };
 
@@ -159,10 +163,10 @@ function TargetsSection() {
         <Button title="Edit manually" kind="secondary" size="sm" icon="create-outline" onPress={() => { setCal(t.calories); setProt(t.proteinG); setEdit(true); }} />
         <Button title="Recalculate from latest weight" kind="ghost" size="sm" icon="refresh" onPress={() => setRecalc(computeTargets(state.profile!, w))} />
       </Row>
-      <Sheet visible={edit} onClose={() => setEdit(false)} title="Edit targets" footer={<Button title="Save targets" icon="checkmark" full onPress={saveManual} disabled={!cal || cal < 1000 || !prot} />}>
+      <Sheet visible={edit} onClose={() => setEdit(false)} title="Edit targets" footer={<Button title="Save targets" icon="checkmark" full onPress={saveManual} disabled={!cal || cal < 1000 || !prot || !!protError} />}>
         <NumberField label="Daily calories" value={cal} onChange={setCal} min={0} max={10000} exclusiveMin suffix="kcal" error={cal !== undefined && cal < 1000 ? 'Below 1,000 kcal is not supported. Please talk to a professional.' : undefined} />
-        <NumberField label="Protein" value={prot} onChange={setProt} suffix="g" />
-        <Muted variant="small">Fat is set to ~27% of calories and carbs fill the rest.</Muted>
+        <NumberField label="Protein" value={prot} onChange={setProt} min={0} exclusiveMin max={1000} suffix="g" error={protError} />
+        <Muted variant="small">Fat is set to ~27% of calories and carbs fill the rest{cal && prot && !protError ? ` (${fatG} g fat, ${carbsG} g carbs)` : ''}.</Muted>
       </Sheet>
       <Sheet
         visible={!!recalc}
@@ -216,7 +220,7 @@ function ProfileSection() {
       <Text variant="h3">Profile</Text>
       <Field label="Name" value={p.name === 'there' ? '' : p.name} onChangeText={(name) => upd({ name: name || 'there' })} />
       <Button title="Edit body & lifestyle" kind="secondary" size="sm" onPress={() => setDraft({ ...p, dietPreferences: [...p.dietPreferences] })} />
-      <Muted variant="small">Age {ageFromBirthYear(p.birthYear)} · {p.heightCm} cm · {p.sessionMinutes} min sessions · {p.dailyActivity.replace('_', ' ')}</Muted>
+      <Muted variant="small">Age {ageFromBirthYear(p.birthYear)} · {formatHeight(p.heightCm, state.settings.units)} · {p.sessionMinutes} min sessions · {ACTIVITY_LABEL[p.dailyActivity]}</Muted>
       <Text variant="smallStrong">Units</Text>
       <Segmented label="Units" value={state.settings.units} onChange={(units) => doAct({ type: 'UPDATE_SETTINGS', patch: { units }, now: nowISO() })} options={[{ value: 'imperial', label: 'lb / ft' }, { value: 'metric', label: 'kg / cm' }]} />
       <Text variant="smallStrong">Training days</Text>
@@ -240,15 +244,15 @@ function ProfileSection() {
       {offerPlan ? <Banner kind="info" title="Profile updated"><Button title="Update your plan" kind="secondary" size="sm" onPress={() => { setOfferPlan(false); router.push('/workouts?preview=1'); }} /></Banner> : null}
       <Sheet visible={!!draft} onClose={() => setDraft(null)} title="Edit body & lifestyle" footer={<Row gap={Space.sm}><Button title="Cancel" kind="secondary" onPress={() => setDraft(null)} /><Button title="Save profile & targets" kind="accept" disabled={!valid} onPress={saveBasics} /></Row>}>
         {draft ? <>
-          <NumberField label="Age" value={ageFromBirthYear(draft.birthYear)} onChange={(age) => age && set({ birthYear: new Date().getFullYear() - age })} suffix="years" />
-          <NumberField label="Height" value={draft.heightCm} onChange={(heightCm) => set({ heightCm: heightCm ?? 0 })} suffix="cm" />
-          <Segmented<Sex> label="Sex" value={draft.sex} onChange={(sex) => set({ sex })} options={[{ value: 'female', label: 'Female' }, { value: 'male', label: 'Male' }, { value: 'unspecified', label: 'Prefer not to say' }]} />
+          <NumberField label="Age" value={draft.birthYear ? ageFromBirthYear(draft.birthYear) : undefined} onChange={(age) => set({ birthYear: age ? new Date().getFullYear() - age : 0 })} min={16} max={90} suffix="years" />
+          <HeightField units={state.settings.units} value={draft.heightCm || undefined} onChange={(heightCm) => set({ heightCm: heightCm ?? 0 })} />
+          <Segmented<Sex> label="Sex" value={draft.sex} onChange={(sex) => set({ sex })} options={[{ value: 'female', label: 'Female' }, { value: 'male', label: 'Male' }, { value: 'unspecified', label: 'Not saying' }]} />
           <Segmented<DailyActivity> label="Daily activity" value={draft.dailyActivity} onChange={(dailyActivity) => set({ dailyActivity })} options={[{ value: 'mostly_sitting', label: 'Sitting' }, { value: 'on_feet', label: 'On my feet' }, { value: 'physical_job', label: 'Physical work' }]} />
-          <NumberField label="Workout session length" value={draft.sessionMinutes} onChange={(sessionMinutes) => set({ sessionMinutes: sessionMinutes ?? 0 })} suffix="minutes" />
+          <NumberField label="Workout session length" value={draft.sessionMinutes || undefined} onChange={(sessionMinutes) => set({ sessionMinutes: sessionMinutes ?? 0 })} min={15} max={180} suffix="minutes" />
           <Text variant="smallStrong">Food preferences</Text>
           <Row wrap gap={6}>{[['vegetarian', 'Vegetarian'], ['vegan', 'Vegan'], ['pescatarian', 'Pescatarian'], ['dairy_free', 'Dairy-free'], ['gluten_free', 'Gluten-free'], ['halal', 'Halal'], ['no_pork', 'No pork'], ['low_carb', 'Lower carb']].map(([value, label]) => <Chip key={value} label={label} selected={draft.dietPreferences.includes(value)} onPress={() => set({ dietPreferences: draft.dietPreferences.includes(value) ? draft.dietPreferences.filter((item) => item !== value) : [...draft.dietPreferences, value] })} />)}</Row>
           {previewTargets ? <Card tone="pending" style={{ gap: Space.sm }}><Text variant="smallStrong">New daily targets</Text><KeyValue k="Calories" v={`${state.targets?.calories ?? '—'} → ${previewTargets.calories} kcal`} /><KeyValue k="Protein" v={`${state.targets?.proteinG ?? '—'} → ${previewTargets.proteinG} g`} /><KeyValue k="Carbs" v={`${state.targets?.carbsG ?? '—'} → ${previewTargets.carbsG} g`} /><KeyValue k="Fat" v={`${state.targets?.fatG ?? '—'} → ${previewTargets.fatG} g`} /></Card> : null}
-          {!valid ? <Muted variant="small">Age must be 16–90, height 121–229 cm, and sessions 15–180 minutes.</Muted> : null}
+          {!valid ? <Muted variant="small">Fix the highlighted fields to save.</Muted> : null}
         </> : null}
       </Sheet>
     </Card>
@@ -346,9 +350,9 @@ function QuietHours({ start, end, onSave }: { start: string; end: string; onSave
     <Stack gap={6}>
       <Text variant="smallStrong">Quiet hours (no notifications)</Text>
       <Row gap={Space.sm} align="flex-start">
-        <Field value={s} onChangeText={setS} onBlur={() => ok(s) && ok(e) && onSave(s, e)} placeholder="21:30" style={{ width: 100 }} accessibilityLabel="Quiet hours start (HH:MM)" error={ok(s) ? undefined : 'HH:MM'} />
+        <Field value={s} onChangeText={setS} onBlur={() => ok(s) && ok(e) && onSave(s, e)} placeholder="21:30" style={{ width: 100 }} accessibilityLabel="Quiet hours start (HH:MM)" error={ok(s) ? undefined : 'Use 24-hour time, e.g. 22:30'} />
         <Muted style={{ paddingTop: 12 }}>to</Muted>
-        <Field value={e} onChangeText={setE} onBlur={() => ok(s) && ok(e) && onSave(s, e)} placeholder="07:30" style={{ width: 100 }} accessibilityLabel="Quiet hours end (HH:MM)" error={ok(e) ? undefined : 'HH:MM'} />
+        <Field value={e} onChangeText={setE} onBlur={() => ok(s) && ok(e) && onSave(s, e)} placeholder="07:30" style={{ width: 100 }} accessibilityLabel="Quiet hours end (HH:MM)" error={ok(e) ? undefined : 'Use 24-hour time, e.g. 22:30'} />
       </Row>
     </Stack>
   );
@@ -448,11 +452,15 @@ function PrivacySection() {
   const doAct = useAct();
   const toast = useToast();
   const [confirm, setConfirm] = useState<'local' | 'cloud' | null>(null);
+  const [typed, setTyped] = useState('');
 
   const exportData = async (format: 'json' | 'csv') => {
     try {
+      const hasRows = state.foodLog.some((e) => !e.deleted) || state.weights.some((e) => !e.deleted);
+      if (format === 'csv' && !hasRows) return toast('Nothing to export yet', 'info');
       const files = format === 'json' ? [jsonExport(state, nowISO())] : csvExports(state, nowISO());
       for (const f of files) await saveExportFile(f);
+      toast(files.length > 1 ? `Exported ${files.length} files` : 'Export saved');
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Export failed', 'error');
     }
@@ -493,7 +501,7 @@ function PrivacySection() {
         <Muted variant="small">{sync.session ? '"Delete data on this device" clears only this browser or phone; your cloud copy stays and downloads again when you sign in. "Delete my cloud data" removes the server copy too.' : 'This clears only this browser or phone. You have no cloud copy.'}</Muted>
         <Row wrap gap={Space.sm}>
           <Button title="Delete data on this device" kind="danger" size="sm" onPress={() => setConfirm('local')} />
-          {sync.session ? <Button title="Delete my cloud data" kind="danger" size="sm" onPress={() => setConfirm('cloud')} /> : null}
+          {sync.session ? <Button title="Delete my cloud data" kind="danger" size="sm" onPress={() => { setTyped(''); setConfirm('cloud'); }} /> : null}
         </Row>
       </Stack>
       <Sheet
@@ -503,7 +511,7 @@ function PrivacySection() {
         footer={
           <Row gap={Space.sm}>
             <Button title="Cancel" kind="secondary" style={{ flex: 1 }} onPress={() => setConfirm(null)} />
-            <Button title="Delete permanently" kind="danger" style={{ flex: 1 }} onPress={wipe} />
+            <Button title="Delete permanently" kind="danger" style={{ flex: 1 }} onPress={wipe} disabled={confirm === 'cloud' && typed.trim() !== 'DELETE'} />
           </Row>
         }>
         <Muted>
@@ -513,6 +521,7 @@ function PrivacySection() {
               ? 'This clears this device and signs you out. Your account and cloud copy stay on the server and download again when you sign back in.'
               : 'This permanently removes your profile, logs and history from this device. Consider exporting first.'}
         </Muted>
+        {confirm === 'cloud' ? <Field value={typed} onChangeText={setTyped} autoCapitalize="characters" placeholder="DELETE" label="Type DELETE to confirm" /> : null}
       </Sheet>
     </Card>
   );
@@ -565,7 +574,7 @@ function DeleteAccountSection() {
         footer={
           <Row gap={Space.sm}>
             <Button title="Cancel" kind="secondary" style={{ flex: 1 }} onPress={() => setConfirm(false)} />
-            <Button title="Delete forever" kind="danger" style={{ flex: 1 }} loading={busy} disabled={typed.trim().toUpperCase() !== 'DELETE'} onPress={deleteAccount} />
+            <Button title="Delete forever" kind="danger" style={{ flex: 1 }} loading={busy} disabled={typed.trim() !== 'DELETE'} onPress={deleteAccount} />
           </Row>
         }>
         <Muted>Your login, synced data and photos for {sync.session.user.email} are removed for good, and you are signed out on this device. Type DELETE to confirm.</Muted>

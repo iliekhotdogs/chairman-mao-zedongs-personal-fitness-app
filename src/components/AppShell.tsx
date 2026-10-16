@@ -34,7 +34,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const collapsed = !isDesktop || collapsedPref;
 
   if (isWide) {
-    const syncLabel = sync.configured ? (sync.session ? `Synced · ${sync.status === 'syncing' ? 'syncing…' : sync.status === 'error' ? 'sync error' : 'up to date'}` : 'Not signed in · this device only') : 'Local mode · this device only';
+    const syncLabel = sync.configured ? (sync.session ? (sync.status === 'offline' ? 'Offline · changes saved here' : `Synced · ${sync.status === 'syncing' ? 'syncing…' : sync.status === 'error' ? 'sync error' : 'up to date'}`) : 'Not signed in · this device only') : 'Local mode · this device only';
+    const dotColor = sync.status === 'error' ? C.danger : sync.status === 'offline' ? C.warning : sync.session ? C.success : C.textMuted;
     return (
       <View style={{ flex: 1, flexDirection: 'row', backgroundColor: C.bg }}>
         <View style={[styles.sidebar, collapsed ? styles.sidebarCollapsed : null]} role="navigation">
@@ -60,10 +61,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           ) : null}
           <View style={{ paddingHorizontal: Space.sm, paddingTop: Space.md, alignItems: collapsed ? 'center' : 'flex-start' }}>
             {collapsed ? (
-              <View accessibilityLabel={syncLabel} style={[styles.syncDot, { backgroundColor: sync.status === 'error' ? C.danger : sync.session ? C.success : C.textMuted }]} />
+              <View accessibilityLabel={syncLabel} style={[styles.syncDot, { backgroundColor: dotColor }]} />
             ) : (
               <Row gap={6}>
-                <View style={[styles.syncDot, { backgroundColor: sync.status === 'error' ? C.danger : sync.session ? C.success : C.textMuted }]} />
+                <View style={[styles.syncDot, { backgroundColor: dotColor }]} />
                 <Muted variant="caption" style={{ flex: 1 }}>{syncLabel}</Muted>
               </Row>
             )}
@@ -107,7 +108,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         {tabs.map((n) => {
           const active = n.match(path);
           return (
-            <Pressable key={n.href} onPress={() => router.navigate(n.href as never)} style={({ pressed }) => [styles.tab, pressed ? { opacity: 0.7 } : null]} accessibilityRole="tab" accessibilityState={{ selected: active }} accessibilityLabel={n.label}>
+            <Pressable key={n.href} onPress={() => router.navigate(n.href as never)} style={({ pressed }) => [styles.tab, pressed ? { opacity: 0.7 } : null]} accessibilityRole="tab" accessibilityState={{ selected: active }} aria-selected={active} accessibilityLabel={n.label}>
               <View style={[styles.tabIndicator, active ? { backgroundColor: C.primary } : null]} />
               <View>
                 <Ionicons name={active ? n.iconActive : n.icon} size={22} color={active ? C.primary : C.textSecondary} />
@@ -131,6 +132,7 @@ function SideItem({ item, active, badge, collapsed }: { item: NavItem; active: b
       accessibilityRole="link"
       accessibilityLabel={badge ? `${item.label}, ${badge} pending` : item.label}
       accessibilityState={{ selected: active }}
+      {...({ 'aria-current': active ? 'page' : undefined } as object)}
       style={({ pressed, hovered }: PState) => [styles.sideItem, collapsed ? styles.sideItemCollapsed : null, active ? { backgroundColor: C.surfaceAlt } : hovered ? { backgroundColor: C.surface } : null, pressed ? { opacity: 0.8 } : null]}>
       {active ? <View style={styles.activeBar} /> : null}
       <View>

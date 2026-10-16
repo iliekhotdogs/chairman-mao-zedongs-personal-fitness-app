@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { goBack } from '@/lib/nav';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Expandable, InfoTip, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Text, Columns } from '@/components/ui';
+import { Badge, Banner, Button, Card, Expandable, IconButton, InfoTip, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Text, Columns } from '@/components/ui';
 import { BarChart } from '@/components/charts';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
@@ -24,6 +24,7 @@ export default function Activity() {
   const doAct = useAct();
   const [manualOpen, setManualOpen] = useState(false);
   const [steps, setSteps] = useState<number | undefined>();
+  const [manualDate, setManualDate] = useState(today);
   const [disconnectOpen, setDisconnectOpen] = useState(false);
   const hc = state.integrations.find((i) => i.id === 'health_connect') ?? { id: 'health_connect' as const, status: 'not_connected' as const };
   const support = healthConnectSupport();
@@ -40,10 +41,16 @@ export default function Activity() {
     doAct({ type: 'SET_INTEGRATION', integration: r.integration }, 'Sample activity synced');
   };
 
+  const openManual = (date = today, current?: number) => {
+    setManualDate(date);
+    setSteps(current);
+    setManualOpen(true);
+  };
   const saveManual = () => {
     if (!steps) return;
     const now = nowISO();
-    doAct({ type: 'MERGE_ACTIVITY', records: [{ id: newId(), date: today, source: 'manual', origin: 'Entered by you', steps: Math.round(steps), syncedAt: now, updatedAt: now }] }, 'Steps saved');
+    // same date + origin merges into the existing manual record, so this also edits
+    doAct({ type: 'MERGE_ACTIVITY', records: [{ id: newId(), date: manualDate, source: 'manual', origin: 'Entered by you', steps: Math.round(steps), syncedAt: now, updatedAt: now }] }, 'Steps saved');
     setManualOpen(false);
   };
 
@@ -70,9 +77,9 @@ export default function Activity() {
                 ) : (
                   !sync.configured ? <Button title="Use sample data" kind="secondary" size="sm" icon="flask-outline" onPress={connectSimulated} /> : null
                 )}
-                <Button title="Add steps manually" kind="secondary" size="sm" icon="create-outline" onPress={() => setManualOpen(true)} />
+                <Button title="Add steps manually" kind="secondary" size="sm" icon="create-outline" onPress={() => openManual()} />
               </Row>
-            </Card> : <Button title="Add steps manually" kind="secondary" size="sm" icon="create-outline" onPress={() => setManualOpen(true)} />}
+            </Card> : <Button title="Add steps manually" kind="secondary" size="sm" icon="create-outline" onPress={() => openManual()} />}
             <Card tone="muted" style={{ gap: 6 }}>
               <Text variant="h3">How activity affects your targets</Text>
               <Muted variant="small">Your daily target already assumes about {baseline.toLocaleString()} steps plus your planned workouts. Only activity well above that can trigger a one-day food suggestion, and only half of the device&apos;s calorie estimate is used, because wearables often overestimate.</Muted>
@@ -96,7 +103,7 @@ export default function Activity() {
                 <Text variant="h3" style={{ flex: 1 }}>Last 14 days</Text>
                 <InfoTip title="Reading this chart">{`Bars are daily steps. The dashed line is the ~${baseline.toLocaleString()} steps your target assumes. Days with several sources count one, so nothing is double counted.`}</InfoTip>
               </Row>
-              <BarChart label="Daily steps for the last 14 days" bars={history.map((h) => ({ x: parseISODate(h.date).toLocaleDateString(undefined, { day: 'numeric' }), y: h.missing ? null : (h.steps ?? 0) }))} target={baseline} color={C.info} format={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)))} />
+              <BarChart label="Daily steps for the last 14 days" bars={history.map((h) => ({ x: parseISODate(h.date).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), y: h.missing ? null : (h.steps ?? 0) }))} target={baseline} color={C.info} format={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)))} />
               <Row wrap gap={6}>
                 {missing ? <Badge kind="pending" label={`${missing} day${missing > 1 ? 's' : ''} with no data`} /> : null}
 
@@ -110,7 +117,7 @@ export default function Activity() {
                   <Row key={h.date} style={{ paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: C.border }}>
                     <Text variant="small" style={{ width: 110 }}>{formatDateLabel(h.date, today)}</Text>
                     {h.missing ? (
-                      <Muted variant="small" style={{ flex: 1 }}>No data. Device not worn or not synced.</Muted>
+                      <Muted variant="small" style={{ flex: 1 }}>{showHc ? 'No data. Device not worn or not synced.' : 'No steps entered'}</Muted>
                     ) : (
                       <Stack gap={0} style={{ flex: 1 }}>
                         <Text variant="smallStrong">{(h.steps ?? 0).toLocaleString()} steps{h.activeKcal ? ` · ~${h.activeKcal} active kcal` : ''}</Text>
@@ -120,6 +127,12 @@ export default function Activity() {
                         </Muted>
                       </Stack>
                     )}
+                    {h.chosen?.source === 'manual' ? (
+                      <>
+                        <IconButton icon="create-outline" label={`Edit steps for ${formatDateLabel(h.date, today)}`} size={18} color={C.textSecondary} onPress={() => openManual(h.date, h.steps)} />
+                        <IconButton icon="trash-outline" label={`Delete steps for ${formatDateLabel(h.date, today)}`} size={18} color={C.textSecondary} onPress={() => doAct({ type: 'DELETE_ACTIVITY', id: h.chosen!.id, now: nowISO() }, 'Steps deleted')} />
+                      </>
+                    ) : null}
                   </Row>
                 ))}
               </Card>
@@ -128,8 +141,8 @@ export default function Activity() {
         ]}
       </Columns>
 
-      <Sheet visible={manualOpen} onClose={() => setManualOpen(false)} title="Add today's steps" footer={<Button title="Save" icon="checkmark" full onPress={saveManual} disabled={!steps} />}>
-        <NumberField label="Steps" value={steps} onChange={setSteps} suffix="steps" autoFocus />
+      <Sheet visible={manualOpen} onClose={() => setManualOpen(false)} title={manualDate === today ? "Today's steps" : `Steps for ${formatDateLabel(manualDate, today)}`} footer={<Button title="Save" icon="checkmark" full onPress={saveManual} disabled={!steps} />}>
+        <NumberField key={`${manualDate}-${manualOpen}`} label="Steps" value={steps} onChange={setSteps} min={1} max={100000} suffix="steps" autoFocus onSubmitEditing={saveManual} returnKeyType="done" hint={steps === undefined ? 'Enter a step count from 1 to 100,000 to save.' : undefined} />
         <Muted variant="small">Manual entries take priority over device data for that day.</Muted>
       </Sheet>
       <Sheet
