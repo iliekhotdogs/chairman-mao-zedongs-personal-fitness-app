@@ -3,17 +3,19 @@ import { View } from 'react-native';
 import { Redirect, router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { AccentRule, Badge, Banner, Button, Card, Chip, Columns, Field, Muted, NumberField, OptionCard, ProgressBar, Row, Screen, Segmented, Stack, Text, Expandable, Ionicons } from '@/components/ui';
+import { AccentRule, Badge, Banner, Button, Card, Chip, Columns, Field, HeightField, Muted, NumberField, OptionCard, ProgressBar, Row, Screen, Segmented, Stack, Text, Expandable, Ionicons } from '@/components/ui';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
 import { LogoMark } from '@/components/Brand';
 import type { BodyArea, DailyActivity, Equipment, Experience, GoalPriority, Profile, Sex, UnitSystem } from '@/lib/types';
-import { computeTargets, macrosFor } from '@/lib/nutrition/targets';
+import { calorieFloor, computeTargets, macrosFor } from '@/lib/nutrition/targets';
 import { generatePlan, dayMinutes } from '@/lib/workouts/generator';
 import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { nowISO, toISODate, WEEKDAY_SHORT } from '@/lib/dates';
 import { newId } from '@/lib/id';
-import { cmToFtIn, ftInToCm, kgToLb, lbToKg, round } from '@/lib/units';
+import { displayWeight, kgToLb, lbToKg, round } from '@/lib/units';
+import { MAX_CALORIES } from '@/lib/inputRules';
+import { ACTIVITY_LABEL, formatHeight, SEX_LABEL } from '@/lib/uiText';
 import { buildSampleState } from '@/lib/sampleData';
 import { useLayout } from '@/hooks/useLayout';
 import { AccountCard } from '@/components/AccountCard';
@@ -60,6 +62,7 @@ export default function Onboarding() {
   const [sex, setSex] = useState<Sex>('unspecified');
   const [age, setAge] = useState<number | undefined>();
   const [heightCm, setHeightCm] = useState<number | undefined>();
+  const [heightBad, setHeightBad] = useState(false);
   const [weightKg, setWeightKg] = useState<number | undefined>();
   const [experience, setExperience] = useState<Experience>('beginner');
   const [equipment, setEquipment] = useState<Equipment>('full_gym');
@@ -71,8 +74,6 @@ export default function Onboarding() {
   const [limitNote, setLimitNote] = useState('');
   const [calorieOverride, setCalorieOverride] = useState<number | undefined>();
   const [wantPlan, setWantPlan] = useState(true);
-
-  const ft = cmToFtIn(heightCm ?? 0);
 
   const profile: Profile | undefined = useMemo(() => {
     if (!age || !heightCm || !weightKg) return undefined;
@@ -101,7 +102,12 @@ export default function Onboarding() {
 
   if (state.profile && state.targets) return <Redirect href="/" />;
 
-  const validBody = age !== undefined && age >= 16 && age <= 90 && heightCm !== undefined && heightCm > 120 && heightCm < 230 && weightKg !== undefined && weightKg > 35 && weightKg < 300;
+  const ageBad = age !== undefined && (age < 16 || age > 90);
+  const weightBad = weightKg !== undefined && (weightKg <= 35 || weightKg >= 300);
+  const validBody = age !== undefined && !ageBad && heightCm !== undefined && !heightBad && weightKg !== undefined && !weightBad;
+  const floor = calorieFloor(sex);
+  const calorieError = calorieOverride !== undefined && (calorieOverride < floor || calorieOverride > MAX_CALORIES) ? `Enter ${floor.toLocaleString()}–${MAX_CALORIES.toLocaleString()} kcal, or leave it empty.` : undefined;
+  const calories = calorieError ? undefined : calorieOverride;
   const canNext = step !== 2 || validBody;
   // Signed in but the first sync of this session hasn't finished: a profile may still be on its
   // way from the server, and finishing now would overwrite it. A failed sync releases the hold.
@@ -110,8 +116,8 @@ export default function Onboarding() {
   const back = () => setStep((s) => Math.max(0, s - 1));
 
   const finish = () => {
-    if (!profile || !targets || firstSyncPending) return;
-    const finalTargets = calorieOverride && Math.abs(calorieOverride - targets.calories) >= 10 ? { ...targets, ...macrosFor(calorieOverride, profile.startWeightKg, profile.goal), method: `${targets.method} · adjusted by you` } : targets;
+    if (!profile || !targets || firstSyncPending || calorieError) return;
+    const finalTargets = calories && Math.abs(calories - targets.calories) >= 10 ? { ...targets, ...macrosFor(calories, profile.startWeightKg, profile.goal), method: `${targets.method} · adjusted by you` } : targets;
     doAct({ type: 'UPDATE_SETTINGS', patch: { units }, now: nowISO() });
     const ok = doAct({
       type: 'COMPLETE_ONBOARDING',
@@ -136,7 +142,7 @@ export default function Onboarding() {
           <Row>
             <Muted variant="small" style={{ flex: 1 }}>Step {step} of {STEPS.length - 1} · {STEPS[step]}</Muted>
           </Row>
-          <ProgressBar value={step} max={STEPS.length - 1} />
+          <ProgressBar value={step} max={STEPS.length - 1} label="Setup progress" />
         </Stack>
       ) : null}
 
@@ -191,28 +197,21 @@ export default function Onboarding() {
         <Stack gap={Space.md}>
           <Text variant="h1">About you</Text>
           <Why>Height, weight, age and sex are used to estimate how much energy your body uses. They stay private to your account.</Why>
-          <Segmented label="Units" value={units} onChange={setUnits} options={[{ value: 'imperial', label: 'lb / ft' }, { value: 'metric', label: 'kg / cm' }]} />
+          <Segmented label="Units" value={units} onChange={(u) => { setUnits(u); setHeightBad(false); }} options={[{ value: 'imperial', label: 'lb / ft' }, { value: 'metric', label: 'kg / cm' }]} />
           <Columns>
             {[
-              <NumberField key="age" label="Age" value={age} onChange={setAge} suffix="years" placeholder="e.g. 30" error={age !== undefined && (age < 16 || age > 90) ? 'This app is for ages 16–90.' : undefined} />,
+              <NumberField key="age" label="Age" value={age} onChange={setAge} suffix="years" placeholder="e.g. 30" error={ageBad ? 'This app is for ages 16–90.' : undefined} />,
               units === 'imperial' ? (
-                <NumberField key="w" label="Weight" value={weightKg ? round(kgToLb(weightKg), 1) : undefined} onChange={(v) => setWeightKg(v ? lbToKg(v) : undefined)} suffix="lb" placeholder="e.g. 175" error={weightKg !== undefined && (weightKg <= 35 || weightKg >= 300) ? 'Enter a weight between 80 and 660 lb.' : undefined} />
+                <NumberField key="w" label="Weight" value={weightKg ? round(kgToLb(weightKg), 1) : undefined} onChange={(v) => setWeightKg(v ? lbToKg(v) : undefined)} suffix="lb" placeholder="e.g. 175" error={weightBad ? 'Enter a weight between 80 and 660 lb.' : undefined} />
               ) : (
-                <NumberField key="w" label="Weight" value={weightKg ? round(weightKg, 1) : undefined} onChange={setWeightKg} suffix="kg" placeholder="e.g. 80" error={weightKg !== undefined && (weightKg <= 35 || weightKg >= 300) ? 'Enter a weight between 36 and 299 kg.' : undefined} />
+                <NumberField key="w" label="Weight" value={weightKg ? round(weightKg, 1) : undefined} onChange={setWeightKg} suffix="kg" placeholder="e.g. 80" error={weightBad ? 'Enter a weight between 36 and 299 kg.' : undefined} />
               ),
             ]}
           </Columns>
-          {units === 'imperial' ? (
-            <Row gap={Space.md}>
-              <NumberField label="Height" accessibilityLabel="Height, feet" value={heightCm ? ft.ft : undefined} placeholder="5" onChange={(v) => setHeightCm(ftInToCm(v ?? 0, ft.inch))} suffix="ft" style={{ flex: 1 }} />
-              <NumberField label=" " accessibilityLabel="Height, inches" value={heightCm ? ft.inch : undefined} placeholder="9" onChange={(v) => setHeightCm(ftInToCm(ft.ft, Math.min(11, v ?? 0)))} suffix="in" style={{ flex: 1 }} />
-            </Row>
-          ) : (
-            <NumberField label="Height" value={heightCm ? Math.round(heightCm) : undefined} onChange={setHeightCm} suffix="cm" placeholder="e.g. 175" error={heightCm !== undefined && (heightCm <= 120 || heightCm >= 230) ? 'Enter a height between 121 and 229 cm.' : undefined} />
-          )}
+          <HeightField key={units} units={units} value={heightCm} onChange={(cm, bad) => { setHeightCm(cm); setHeightBad(bad); }} />
           <Text variant="smallStrong">Sex (for the calorie equation)</Text>
-          <Segmented label="Sex" value={sex} onChange={setSex} options={[{ value: 'female', label: 'Female' }, { value: 'male', label: 'Male' }, { value: 'unspecified', label: 'Prefer not to say' }]} />
-          {!validBody ? <Muted variant="small">Please fill in age, height and weight to continue.</Muted> : null}
+          <Segmented label="Sex" value={sex} onChange={setSex} options={[{ value: 'female', label: 'Female' }, { value: 'male', label: 'Male' }, { value: 'unspecified', label: 'Not saying' }]} />
+          {!validBody ? <Muted variant="small" accessibilityLiveRegion="polite">{ageBad || heightBad || weightBad ? 'Fix the highlighted fields to continue.' : 'Please fill in age, height and weight to continue.'}</Muted> : null}
         </Stack>
       )}
 
@@ -284,7 +283,7 @@ export default function Onboarding() {
           <Text variant="h1">Here&apos;s your starting plan</Text>
           <Muted>These are starting estimates. Your coach will suggest adjustments as your real weight trend comes in, and you approve each one.</Muted>
           <Card tone="muted" style={{ gap: Space.sm }}>
-            <Muted variant="small">Based on age {age}, {Math.round(heightCm ?? 0)} cm, {Math.round(weightKg ?? 0)} kg, {sex.replace('_', ' ')}, and {activity.replace('_', ' ')}.</Muted>
+            <Muted variant="small">Based on age {age}, {formatHeight(profile.heightCm, units)}, {displayWeight(profile.startWeightKg, units, 0)}, {SEX_LABEL[sex]}, and {ACTIVITY_LABEL[activity]}.</Muted>
             <Button title="Edit body stats" kind="ghost" size="sm" onPress={() => setStep(2)} />
           </Card>
           <Card tone="pending" style={{ gap: Space.md }}>
@@ -294,9 +293,9 @@ export default function Onboarding() {
             </Row>
             <Text variant="h3">Daily nutrition target</Text>
             <Row wrap gap={Space.xl}>
-              <Stack gap={0}><Text variant="number">{(calorieOverride ?? targets.calories).toLocaleString()}</Text><Muted variant="small">kcal / day</Muted></Stack>
+              <Stack gap={0}><Text variant="number">{(calories ?? targets.calories).toLocaleString()}</Text><Muted variant="small">kcal / day</Muted></Stack>
               {(() => {
-                const m = calorieOverride ? macrosFor(calorieOverride, profile.startWeightKg, goal) : targets;
+                const m = calories ? macrosFor(calories, profile.startWeightKg, goal) : targets;
                 return (
                   <Row gap={Space.lg}>
                     <Stack gap={0}><Text variant="numberSm" color={C.protein}>{m.proteinG} g</Text><Muted variant="small">protein</Muted></Stack>
@@ -312,7 +311,7 @@ export default function Onboarding() {
               <Muted variant="small">{targets.method}</Muted>
               <Muted variant="small">These equations are usually accurate to within about 10%, which is why the coach adjusts from your real results.</Muted>
             </Expandable>
-            <NumberField label="Prefer a different calorie target? (optional)" value={calorieOverride} onChange={setCalorieOverride} suffix="kcal" hint="Leave empty to use the suggested number." />
+            <NumberField label="Prefer a different calorie target? (optional)" value={calorieOverride} onChange={setCalorieOverride} suffix="kcal" hint="Leave empty to use the suggested number." error={calorieError} />
           </Card>
 
           <Card tone={wantPlan ? 'pending' : 'muted'} style={{ gap: Space.md }}>
@@ -338,7 +337,7 @@ export default function Onboarding() {
             )}
             <Segmented label="Plan choice" value={wantPlan && plan ? 'yes' : 'no'} onChange={(v) => setWantPlan(v === 'yes')} options={[{ value: 'yes', label: 'Use this plan' }, { value: 'no', label: "I'll build my own" }]} />
           </Card>
-          <Button title="Accept and start" size="lg" icon="checkmark" onPress={finish} full={isPhone} loading={firstSyncPending} disabled={firstSyncPending} />
+          <Button title="Accept and start" size="lg" icon="checkmark" onPress={finish} full={isPhone} loading={firstSyncPending} disabled={firstSyncPending || !!calorieError} />
           {firstSyncPending ? <Muted variant="small" accessibilityLiveRegion="polite">Waiting for your account to finish syncing, so existing data isn&apos;t overwritten…</Muted> : null}
         </Stack>
       )}

@@ -1,4 +1,6 @@
 import { parseNumberText, rangeMessage, type Bounds } from '@/lib/inputRules';
+import { cmToFtIn, ftInToCm } from '@/lib/units';
+import type { UnitSystem } from '@/lib/types';
 import React from 'react';
 import {
   ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text as RNText, TextInput, View,
@@ -391,7 +393,7 @@ export function Field({ label, hint, error, suffix, style, inputStyle, ...rest }
   );
 }
 
-export function NumberField({ value, onChange, min, max, exclusiveMin, error, ...rest }: Omit<React.ComponentProps<typeof Field>, 'value' | 'onChangeText' | 'onChange'> & { value: number | undefined; onChange: (v: number | undefined) => void } & Bounds) {
+export function NumberField({ value, onChange, min, max, exclusiveMin, error, ...rest }: Omit<React.ComponentProps<typeof Field>, 'value' | 'onChangeText' | 'onChange'> & { value: number | undefined; onChange: (v: number | undefined, error?: string) => void } & Bounds) {
   const [text, setText] = React.useState(value === undefined || Number.isNaN(value) ? '' : String(value));
   const [typedError, setTypedError] = React.useState<string | undefined>();
   // Sync the text when the value is changed from outside (e.g. +/- buttons), without an effect.
@@ -415,9 +417,42 @@ export function NumberField({ value, onChange, min, max, exclusiveMin, error, ..
         const msg = r.error ?? (r.value !== undefined ? rangeMessage(r.value, { min, max, exclusiveMin }) : undefined);
         setTypedError(msg);
         // invalid or out-of-range input reports "no value" so callers keep their submit buttons disabled
-        onChange(msg ? undefined : r.value);
+        onChange(msg ? undefined : r.value, msg);
       }}
     />
+  );
+}
+
+const HEIGHT_MIN_CM = 120;
+const HEIGHT_MAX_CM = 230;
+const heightOk = (cm: number) => cm > HEIGHT_MIN_CM && cm < HEIGHT_MAX_CM;
+
+/** Height entered in cm or ft + in (stored as cm). Reports undefined plus invalid=true for out-of-range input. */
+export function HeightField({ units, value, onChange }: { units: UnitSystem; value: number | undefined; onChange: (cm: number | undefined, invalid: boolean) => void }) {
+  if (units === 'metric') {
+    return <NumberField label="Height" value={value ? Math.round(value) : undefined} onChange={(v, err) => onChange(v, !!err)} min={HEIGHT_MIN_CM + 1} max={HEIGHT_MAX_CM - 1} suffix="cm" placeholder="e.g. 175" />;
+  }
+  return <FtInField value={value} onChange={onChange} />;
+}
+
+function FtInField({ value, onChange }: { value: number | undefined; onChange: (cm: number | undefined, invalid: boolean) => void }) {
+  const [init] = React.useState(() => (value ? cmToFtIn(value) : undefined));
+  // Typed-in values plus whether each box currently holds invalid text.
+  const [h, setH] = React.useState({ ft: init?.ft, inch: init?.inch, ftBad: false, inchBad: false });
+  const cm = h.ft === undefined ? undefined : ftInToCm(h.ft, h.inch ?? 0);
+  const update = (patch: Partial<typeof h>) => {
+    const n = { ...h, ...patch };
+    setH(n);
+    const c = n.ft === undefined ? undefined : ftInToCm(n.ft, n.inch ?? 0);
+    const invalid = n.ftBad || n.inchBad || (c !== undefined && !heightOk(c));
+    onChange(invalid ? undefined : c, invalid);
+  };
+  return (
+    <Row gap={Space.md} align="flex-start">
+      <NumberField label="Height (feet)" value={h.ft} onChange={(ft, err) => update({ ft, ftBad: !!err })} suffix="ft" placeholder="5" style={{ flex: 1 }}
+        error={cm !== undefined && !h.inchBad && !heightOk(cm) ? 'Enter a height between 4 ft and 7 ft 6 in.' : undefined} />
+      <NumberField label="Inches" value={h.inch} onChange={(inch, err) => update({ inch, inchBad: !!err })} max={11} suffix="in" placeholder="9" style={{ flex: 1 }} />
+    </Row>
   );
 }
 
@@ -428,6 +463,8 @@ export function Chip({ label, selected, onPress, icon, asButton, disabled }: { l
       disabled={disabled}
       accessibilityRole={asButton ? 'button' : 'checkbox'}
       accessibilityState={asButton ? { disabled } : { checked: !!selected, disabled }}
+      aria-checked={asButton ? undefined : !!selected}
+      aria-disabled={disabled}
       accessibilityLabel={label}
       style={({ pressed, hovered }: PState) => [styles.chip, hovered && !selected && !disabled ? { borderColor: C.borderStrong, backgroundColor: C.surfaceRaised } : null, selected ? { backgroundColor: C.primarySoft, borderColor: C.primaryBorder } : null, disabled ? { opacity: 0.45 } : pressed ? { opacity: 0.8 } : null]}>
       {icon ? <Ionicons name={icon} size={15} color={selected ? C.primary : C.textSecondary} /> : null}
@@ -450,6 +487,7 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
             accessibilityRole="radio"
             accessibilityLabel={o.label}
             accessibilityState={{ selected: sel }}
+            aria-checked={sel}
             style={({ hovered }: PState) => [styles.segmentItem, sel ? styles.segmentItemSel : hovered ? { backgroundColor: C.surfaceHover } : null]}>
             <Text variant="smallStrong" color={sel ? C.text : C.textSecondary} numberOfLines={1}>
               {o.label}
@@ -468,6 +506,7 @@ export function OptionCard({ title, body, selected, onPress, icon }: { title: st
       accessibilityRole="radio"
       accessibilityLabel={body ? `${title}. ${body}` : title}
       accessibilityState={{ selected: !!selected }}
+      aria-checked={!!selected}
       style={({ pressed, hovered }: PState) => [styles.card, { padding: Space.md, flexDirection: 'row', gap: Space.md, alignItems: 'center', borderColor: selected ? C.primaryBorder : hovered ? C.borderStrong : C.border, backgroundColor: selected ? C.primarySoft : hovered ? C.surfaceHover : C.surface, opacity: pressed ? 0.9 : 1 }]}>
       {icon ? <Ionicons name={icon} size={22} color={selected ? C.primary : C.textSecondary} /> : null}
       <Stack gap={2} style={{ flex: 1 }}>
@@ -493,7 +532,7 @@ export function Stepper({ value, onChange, step = 1, min = 0, max = 9999, format
 
 export function Toggle({ value, onChange, label, description }: { value: boolean; onChange: (v: boolean) => void; label: string; description?: string }) {
   return (
-    <Pressable onPress={() => onChange(!value)} accessibilityRole="switch" accessibilityState={{ checked: value }} accessibilityLabel={label} style={{ flexDirection: 'row', alignItems: 'center', gap: Space.md, paddingVertical: Space.sm }}>
+    <Pressable onPress={() => onChange(!value)} accessibilityRole="switch" accessibilityState={{ checked: value }} aria-checked={value} accessibilityLabel={label} style={{ flexDirection: 'row', alignItems: 'center', gap: Space.md, paddingVertical: Space.sm }}>
       <Stack gap={2} style={{ flex: 1 }}>
         <Text variant="bodyStrong">{label}</Text>
         {description ? <Muted variant="small">{description}</Muted> : null}
@@ -507,10 +546,10 @@ export function Toggle({ value, onChange, label, description }: { value: boolean
 
 // ---------- Data display ----------
 
-export function ProgressBar({ value, max, color = C.primary, height = 8, over }: { value: number; max: number; color?: string; height?: number; over?: boolean }) {
+export function ProgressBar({ value, max, color = C.primary, height = 8, over, label = 'Progress' }: { value: number; max: number; color?: string; height?: number; over?: boolean; label?: string }) {
   const pct = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
   return (
-    <View style={{ height, borderRadius: height, backgroundColor: C.surfaceRaised, overflow: 'hidden' }} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: Math.round(max), now: Math.round(value) }}>
+    <View style={{ height, borderRadius: height, backgroundColor: C.surfaceRaised, overflow: 'hidden' }} accessibilityRole="progressbar" accessibilityLabel={label} accessibilityValue={{ min: 0, max: Math.round(max), now: Math.round(value) }} aria-valuemin={0} aria-valuemax={Math.round(max)} aria-valuenow={Math.round(value)}>
       <View style={{ width: `${pct * 100}%`, height, borderRadius: height, backgroundColor: over ? C.warning : color }} />
     </View>
   );
@@ -545,7 +584,7 @@ export function Expandable({ title, children, initiallyOpen = false, icon }: { t
   const [open, setOpen] = React.useState(initiallyOpen);
   return (
     <View>
-      <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} style={({ hovered }: PState) => [{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, borderRadius: Radius.sm }, hovered ? { opacity: 0.8 } : null]}>
+      <Pressable onPress={() => setOpen((o) => !o)} accessibilityRole="button" accessibilityState={{ expanded: open }} aria-expanded={open} style={({ hovered }: PState) => [{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, minHeight: 44, borderRadius: Radius.sm }, hovered ? { opacity: 0.8 } : null]}>
         {icon ? <Ionicons name={icon} size={15} color={C.textSecondary} /> : null}
         <Text variant="smallStrong" color={C.textSecondary} style={{ flex: 1 }}>
           {title}
