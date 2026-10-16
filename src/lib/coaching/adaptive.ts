@@ -1,5 +1,5 @@
 import type { AppState } from '../state';
-import type { Insight, ISODate, Proposal, WorkoutSession } from '../types';
+import type { Insight, ISODate, MacroTargets, Proposal, ProposalChange, WorkoutSession } from '../types';
 import { addDays, daysBetween, lastNDates, nowISO, toISODate, weekday } from '../dates';
 import { newId } from '../id';
 import { calorieFloor, macrosFor, roundTo } from '../nutrition/targets';
@@ -19,6 +19,20 @@ export const MAX_ACTIVITY_BONUS = 400;
 export interface EngineOutput {
   proposals: Proposal[];
   insights: Insight[];
+}
+
+export const macrosOf = (t: MacroTargets): MacroTargets => ({ calories: t.calories, proteinG: t.proteinG, carbsG: t.carbsG, fatG: t.fatG });
+
+/** Before/after rows for a target or goal card. `before` comes from the proposal; current targets are
+ *  only a fallback while pending, because after accepting they already equal `next`. */
+export function targetChangeRows(change: Extract<ProposalChange, { type: 'target_change' | 'goal_change' }>, current: MacroTargets | undefined, pending: boolean): [string, number | undefined, number][] {
+  const from = change.before ?? (pending ? current : undefined);
+  return [
+    ['Calories', from?.calories, change.next.calories],
+    ['Protein (g)', from?.proteinG, change.next.proteinG],
+    ['Carbs (g)', from?.carbsG, change.next.carbsG],
+    ['Fat (g)', from?.fatG, change.next.fatG],
+  ];
 }
 
 function proposal(p: Omit<Proposal, 'id' | 'status' | 'createdAt' | 'updatedAt'>): Proposal {
@@ -161,7 +175,7 @@ export function trendAdjustment(state: AppState, today: ISODate): { proposal?: P
         `A small ${Math.abs(delta)} kcal step avoids over-correcting; the coach will re-check in 2 weeks.`,
         `New macros: ${next.proteinG} g protein, ${next.carbsG} g carbs, ${next.fatG} g fat.`,
       ],
-      change: { type: 'target_change', next },
+      change: { type: 'target_change', next, before: macrosOf(targets) },
       dedupeKey: `trend-${today}`,
       origin: 'adaptive_engine',
     }),

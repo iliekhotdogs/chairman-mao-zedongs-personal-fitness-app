@@ -9,6 +9,8 @@ import { remainingForDay, workoutForDay, latestWeight, live } from '../selectors
 import { exerciseName, findExercise, formatPrescription } from '../workouts/exercises';
 import { ACTION_INTENT_TYPES, validateActionIntent, type ActionIntent } from '../../../supabase/functions/ai/foodValidation';
 import { prepareImageForAI, type ImageSetting } from './image';
+import { z } from 'zod';
+import { log } from '../log';
 
 /** Signed-in accounts use the server-side AI gateway (supabase/functions/ai). The
  * gateway resolves each user's saved choice; model ids never accompany coach calls.
@@ -167,6 +169,15 @@ function intentPhrase(i: Exclude<CoachIntent, ActionIntent>): string {
 
 const isAction = (i: { type: string }): i is ActionIntent => ACTION_INTENT_TYPES.includes(i.type);
 
+// Same bounds as the server prompt; the app re-validates because the gateway is not trusted blindly.
+const coachIntentSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('short_on_time'), minutes: z.number().int().min(10).max(120) }),
+  z.object({ type: z.literal('pain'), area: z.enum(['knee', 'lower_back', 'shoulder', 'wrist', 'elbow', 'hip', 'ankle', 'neck']), red_flags: z.boolean() }),
+  z.object({ type: z.literal('low_energy') }),
+  z.object({ type: z.literal('goal_change'), goal: z.enum(['fat_loss', 'muscle_gain', 'strength', 'maintenance']) }),
+  z.object({ type: z.literal('training_days'), days: z.number().int().min(1).max(6) }),
+]);
+
 /** Builds a pending proposal for a log/edit intent, or null when it is invalid or refers to something missing. */
 function actionProposal(state: AppState, raw: ActionIntent, today: ISODate): Proposal | null {
   const i = validateActionIntent(raw); // the app re-validates; the server is not trusted blindly
@@ -208,9 +219,14 @@ function actionProposal(state: AppState, raw: ActionIntent, today: ISODate): Pro
 
 export function proposalsForIntents(state: AppState, intents: CoachIntent[], today: ISODate): Proposal[] {
   return intents.flatMap((i) => {
-    if (!i || typeof i !== 'object') return [];
-    if (isAction(i)) { const p = actionProposal(state, i, today); return p ? [p] : []; }
-    return simulateCoachReply(state, intentPhrase(i), today).proposals;
+    if (i && typeof i === 'object' && isAction(i)) {
+      const p = actionProposal(state, i, today);
+      if (!p) log.warn('coach', `Dropped invalid or stale ${i.type} intent.`);
+      return p ? [p] : [];
+    }
+    const parsed = coachIntentSchema.safeParse(i);
+    if (!parsed.success) { log.warn('coach', 'Dropped invalid coach intent.', parsed.error); return []; }
+    return simulateCoachReply(state, intentPhrase(parsed.data), today).proposals;
   });
 }
 
