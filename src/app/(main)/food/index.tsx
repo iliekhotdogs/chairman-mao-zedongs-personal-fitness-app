@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Pressable } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
@@ -131,11 +131,14 @@ function EntryCard({ entry, onDelete, onEdit, onRelog }: { entry: FoodEntry; onD
     <Card style={{ padding: Space.md }}>
       <Row align="flex-start" gap={Space.md}>
         {entry.origin === 'photo' ? <PhotoThumb uri={entry.photoUri} /> : null}
-        <Pressable style={{ flex: 1, gap: 4 }} onPress={() => router.push({ pathname: '/food/manual', params: { id: entry.id } })} accessibilityRole="button" accessibilityLabel={`Edit ${entry.items.map((i) => i.name).join(', ')}`}>
-          <Text variant="bodyStrong" numberOfLines={2}>{entry.items.map((i) => i.name).join(', ')}</Text>
-          <Muted variant="small">
-            {Math.round(tot.calories)} kcal · P {Math.round(tot.proteinG)} · C {Math.round(tot.carbsG)} · F {Math.round(tot.fatG)} · {formatTime(entry.createdAt)}
-          </Muted>
+        <View style={{ flex: 1, gap: 4 }}>
+          <Pressable style={{ gap: 4 }} onPress={() => router.push({ pathname: '/food/manual', params: { id: entry.id } })} accessibilityRole="button" accessibilityLabel={`Edit ${entry.items.map((i) => i.name).join(', ')}`}>
+            <Text variant="bodyStrong" numberOfLines={2}>{entry.items.map((i) => i.name).join(', ')}</Text>
+            <Muted variant="small">
+              {Math.round(tot.calories)} kcal · P {Math.round(tot.proteinG)} · C {Math.round(tot.carbsG)} · F {Math.round(tot.fatG)} · {formatTime(entry.createdAt)}
+            </Muted>
+          </Pressable>
+          {/* Outside the Pressable: on web a nested button is invalid HTML. */}
           <Expandable title="Details">
             <Row wrap gap={4}>
               {entry.origin === 'photo' ? <Badge kind="saved" label="Confirmed photo estimate" /> : null}
@@ -144,7 +147,7 @@ function EntryCard({ entry, onDelete, onEdit, onRelog }: { entry: FoodEntry; onD
               ))}
             </Row>
           </Expandable>
-        </Pressable>
+        </View>
         <Menu title="Meal options" label="Meal options" items={[{ label: 'Edit', icon: 'create-outline', onPress: onEdit }, ...(onRelog ? [{ label: 'Log again today', icon: 'copy-outline' as const, onPress: onRelog }] : []),{ label: 'Delete', icon: 'trash-outline', danger: true, onPress: onDelete }]} />
       </Row>
     </Card>
