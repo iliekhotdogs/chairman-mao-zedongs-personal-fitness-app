@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
 import { C, Space } from '@/constants/theme';
 import { Badge, Banner, Button, Card, Chip, Expandable, Field, IconButton, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Toggle } from '@/components/ui';
@@ -63,6 +65,9 @@ export default function Settings() {
       <Accordion title="Privacy and data" icon="lock-closed-outline">
         <PrivacySection />
         <DeleteAccountSection />
+      </Accordion>
+      <Accordion title="Report a bug" icon="bug-outline">
+        <BugReportSection />
       </Accordion>
       <Accordion title="Advanced" icon="options-outline">
         <CoachSection />
@@ -348,6 +353,64 @@ function QuietHours({ start, end, onSave }: { start: string; end: string; onSave
   );
 }
 
+
+type OwnBug = { id: string; body: string; status: string; created_at: string };
+
+/** Sends route, app version and platform with the text; nothing from app state. */
+function BugReportSection() {
+  const { sync } = useStore();
+  const toast = useToast();
+  const pathname = usePathname();
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [mine, setMine] = useState<OwnBug[]>([]);
+  const userId = sync.session?.user.id;
+
+  const load = async () => {
+    const sb = supabase();
+    if (!sb || !userId) return;
+    const { data } = await sb.from('bug_reports').select('id, body, status, created_at').order('created_at', { ascending: false }).limit(10);
+    setMine((data as OwnBug[] | null) ?? []);
+  };
+  useEffect(() => {
+    void Promise.resolve().then(load);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  if (!sync.configured || !userId) return <Muted>Sign in to send a bug report.</Muted>;
+
+  const send = async () => {
+    const sb = supabase();
+    if (!sb || !body.trim()) return;
+    setBusy(true);
+    setError('');
+    const { error: e } = await sb.from('bug_reports').insert({
+      user_id: userId, body: body.trim().slice(0, 2000), route: pathname.slice(0, 200),
+      app_version: String(Constants.expoConfig?.version ?? '').slice(0, 40), platform: Platform.OS,
+    });
+    setBusy(false);
+    if (e) {
+      setError(e.message.includes('limit') ? 'You have reached the limit of 10 reports per day.' : 'Could not send the report. Try again.');
+      return;
+    }
+    setBody('');
+    toast('Thanks, bug report sent');
+    await load();
+  };
+
+  return (
+    <Stack gap={Space.sm}>
+      <Field label="What went wrong?" value={body} onChangeText={setBody} multiline maxLength={2000} placeholder="Describe the problem" />
+      <Muted variant="small">Sends your text plus the current screen, app version and platform. Nothing else.</Muted>
+      {error ? <Banner kind="warning">{error}</Banner> : null}
+      <Button title="Send report" loading={busy} disabled={!body.trim()} onPress={send} />
+      {mine.map((b) => (
+        <Muted key={b.id} variant="small">{`${new Date(b.created_at).toLocaleDateString()} · ${b.status} · ${b.body.slice(0, 80)}`}</Muted>
+      ))}
+    </Stack>
+  );
+}
 
 function PrivacySection() {
   const { state, sync } = useStore();

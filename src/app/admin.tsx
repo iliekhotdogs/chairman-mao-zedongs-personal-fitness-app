@@ -18,6 +18,8 @@ type Model = { id: string; label: string };
 type ProviderEntry = { id: string; label: string; keyEnv: string; keySet: boolean; chatModels: Model[]; visionModels: Model[] };
 type AiConfig = { provider: string; chat_model: string; vision_model: string; per_user_daily_limit: number; global_daily_limit: number; per_ip_daily_limit?: number; ai_enabled: boolean; allowed_providers: string[]; allow_user_choice: boolean };
 type Invite = { code: string; created_at: string; expires_at: string | null; used_at: string | null; used_email: string | null; note: string | null; status: 'open' | 'used' | 'expired' | 'burned' };
+type BugReport = { id: string; userId: string; body: string; route: string | null; appVersion: string | null; platform: string | null; status: 'open' | 'triaged' | 'closed'; createdAt: string };
+type UserStats = { userId: string; signedUpAt: string | null; lastActiveAt: string | null; foodEntries: number; sessions: number; weighIns: number; currentStreak: number; goal: string | null; avgKcal7d: number | null; targetKcal: number | null; aiRequestsTotal: number; disabled: boolean };
 type AdminUser = { user_id: string; email: string; created_at: string; last_sign_in_at: string | null; email_confirmed_at: string | null; role: 'admin' | 'user'; disabled: boolean; ai_requests_today: number; ai_provider: string | null; ai_chat_model: string | null };
 
 /** Calls one action of the admin Edge Function and returns its JSON, or throws the server's reason. */
@@ -77,6 +79,7 @@ function AdminConsole() {
             <AiConfigSection />
           </Stack>,
           <Stack key="r" gap={Space.lg}>
+            <BugsSection />
             <InvitesSection />
             <UsersSection />
           </Stack>,
@@ -266,8 +269,76 @@ function InvitesSection() {
   );
 }
 
+const BUG_FILTERS = ['open', 'triaged', 'closed', 'all'] as const;
+
+function BugsSection() {
+  const toast = useToast();
+  const [filter, setFilter] = useState<(typeof BUG_FILTERS)[number]>('open');
+  const [bugs, setBugs] = useState<BugReport[]>([]);
+  const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const data = await adminCall<{ bugs: BugReport[] }>('list_bugs', { status: filter });
+      setBugs(data.bugs ?? []);
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not load bug reports.'); }
+  }, [filter]);
+  useEffect(() => { void Promise.resolve().then(load); }, [load]);
+  const setStatus = async (id: string, status: BugReport['status']) => {
+    try {
+      await adminCall('set_bug_status', { id, status });
+      toast(`Marked ${status}`);
+      await load();
+    } catch (e) { setError(e instanceof Error ? e.message : 'Could not update the report.'); }
+  };
+  return (
+    <Card style={{ gap: Space.md }}>
+      <Text variant="h3">Bug reports</Text>
+      <Row wrap gap={6}>{BUG_FILTERS.map((f) => <Chip key={f} label={f} selected={filter === f} onPress={() => setFilter(f)} />)}</Row>
+      {error ? <Banner kind="warning">{error}</Banner> : null}
+      {!bugs.length && !error ? <Muted variant="small">No reports.</Muted> : null}
+      {bugs.map((bug, index) => (
+        <Stack key={bug.id} gap={6}>
+          {index ? <Divider /> : null}
+          <Text>{bug.body}</Text>
+          <Muted variant="small">{[date(bug.createdAt), bug.route, bug.appVersion, bug.platform, `user ${bug.userId.slice(0, 8)}`].filter(Boolean).join(' · ')}</Muted>
+          <Row wrap gap={Space.sm}>
+            <Badge kind={bug.status === 'open' ? 'pending' : bug.status === 'triaged' ? 'info' : 'neutral'} label={bug.status} />
+            {(['open', 'triaged', 'closed'] as const).filter((s) => s !== bug.status).map((s) => <Button key={s} title={`Mark ${s}`} kind="ghost" size="sm" onPress={() => setStatus(bug.id, s)} />)}
+          </Row>
+        </Stack>
+      ))}
+    </Card>
+  );
+}
+
+function UserStatsDetail({ userId }: { userId: string }) {
+  const [stats, setStats] = useState<UserStats>();
+  const [error, setError] = useState('');
+  useEffect(() => {
+    adminCall<{ stats: UserStats }>('user_stats', { userId }).then((d) => setStats(d.stats)).catch((e) => setError(e instanceof Error ? e.message : 'Could not load stats.'));
+  }, [userId]);
+  if (error) return <Banner kind="warning">{error}</Banner>;
+  if (!stats) return <Muted variant="small">Loading…</Muted>;
+  return (
+    <Stack gap={4}>
+      <KeyValue k="Signed up" v={date(stats.signedUpAt)} />
+      <KeyValue k="Last active" v={date(stats.lastActiveAt)} />
+      <KeyValue k="Food entries" v={stats.foodEntries.toLocaleString()} />
+      <KeyValue k="Sessions" v={stats.sessions.toLocaleString()} />
+      <KeyValue k="Weigh-ins" v={stats.weighIns.toLocaleString()} />
+      <KeyValue k="Current streak" v={`${stats.currentStreak} days`} />
+      <KeyValue k="Goal" v={stats.goal ?? '—'} />
+      <KeyValue k="Avg kcal (7d) vs target" v={`${stats.avgKcal7d ?? '—'} / ${stats.targetKcal ?? '—'}`} />
+      <KeyValue k="AI requests (all time)" v={stats.aiRequestsTotal.toLocaleString()} />
+      <KeyValue k="Disabled" v={stats.disabled ? 'yes' : 'no'} />
+    </Stack>
+  );
+}
+
 function UsersSection() {
   const toast = useToast();
+  const [detail, setDetail] = useState<string>();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState('');
@@ -314,11 +385,13 @@ function UsersSection() {
           <Row wrap gap={Space.sm}>
             <Button title={user.disabled ? 'Enable' : 'Disable'} kind={user.disabled ? 'secondary' : 'danger'} size="sm" loading={busy === user.user_id + 'set_disabled'}
               onPress={() => act(user.user_id, 'set_disabled', { disabled: !user.disabled }, user.disabled ? 'Account enabled' : 'Account disabled')} />
+            <Button title={detail === user.user_id ? 'Hide stats' : 'Stats'} kind="ghost" size="sm" onPress={() => setDetail(detail === user.user_id ? undefined : user.user_id)} />
             <Button title="Reset AI quota" kind="ghost" size="sm" loading={busy === user.user_id + 'reset_quota'} disabled={!user.ai_requests_today}
               onPress={() => act(user.user_id, 'reset_quota', {}, 'Quota reset for today')} />
             <Button title={user.role === 'admin' ? 'Remove admin' : 'Make admin'} kind="ghost" size="sm" loading={busy === user.user_id + 'set_role'}
               onPress={() => act(user.user_id, 'set_role', { role: user.role === 'admin' ? 'user' : 'admin' }, 'Role updated')} />
           </Row>
+          {detail === user.user_id ? <UserStatsDetail userId={user.user_id} /> : null}
         </Stack>
       ))}
       {hasMore ? <Button title="Load more" kind="secondary" onPress={() => void load(true)} /> : null}

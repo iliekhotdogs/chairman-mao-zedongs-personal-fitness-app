@@ -1,5 +1,14 @@
 # Change log
 
+## 2026-10-15 12:00 PDT — Claude
+
+- Added `bug_reports` migration (RLS: own insert/select, admin select/update; 10 per day limit) and an idempotent seed of the owner email into `admin_bootstrap_emails`.
+- Added `admin_user_stats` RPC and the `list_bugs`, `set_bug_status` and `user_stats` admin-stats actions; stats go through a server-side key whitelist (`_shared/userStats.ts`), and status changes and stat views are written to `admin_audit`.
+- Added a Bug reports section and per-user stats detail to the admin console, and a Report a bug form in Settings that attaches only route, app version and platform.
+- Migration is not applied and the function is not deployed.
+
+Signed off: Claude
+
 ## 2026-10-15 00:43 PDT — Codex
 
 - Replaced the user-selectable Gemini gateway with OpenRouter and added GLM 5.3 Flash, Nemotron 3.5 Lightning, and DeepSeek V4.1 Flash choices, with image-capable meal models and short DeepSeek responses.
