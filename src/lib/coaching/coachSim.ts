@@ -9,6 +9,7 @@ import { computeTargets } from '../nutrition/targets';
 import { weightSlopePerDay } from './adaptive';
 import { displayWeight } from '../units';
 import { hasInjuryRedFlag, isUrgentSymptom } from '../../../supabase/functions/_shared/coachSafety';
+import { isOffTopic, OFF_TOPIC_REPLY } from '../../../supabase/functions/_shared/coachPrompt';
 export { hasInjuryRedFlag, isUrgentSymptom } from '../../../supabase/functions/_shared/coachSafety';
 
 /**
@@ -116,6 +117,9 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
     }
     return { safety: true, proposals, text: lines.join('\n') };
   }
+
+  // 1b. Scope: coaching only (same gate as the server prompt)
+  if (isOffTopic(t)) return { safety: false, proposals: [], text: OFF_TOPIC_REPLY };
 
   // 2. Short on time
   const minM = t.match(/(\d+)\s*(?:min|mins|minutes)\b/);
