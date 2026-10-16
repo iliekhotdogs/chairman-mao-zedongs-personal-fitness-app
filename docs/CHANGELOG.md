@@ -8,7 +8,8 @@
   - Today: desktop right column holds workout, activity and weight, then the Coach row.
   - Progress: average intake, protein and days near target show "—" until 3 completed logged days ("N of 3 logged days needed", today excluded); responsive 320 px range control, tabs, axis labels and round y-ticks.
   - Food: "Add meal" in empty states; recent meals use two lines with "+N items" and a full accessible label; Recent meals no longer lose older meals to the selected day.
-- Visual redesign toward the FC88 look: #181818 base with grain, mint-green accent (#5BEB94), uppercase Barlow Condensed headings, blob-cornered buttons and cards, hover wiggle (off under reduced motion), hidden scrollbars, landing marquee. New tokens `Blob`, `Ease`, `glyph`; `chartBar` recoloured.
+- Visual redesign toward the FC88 look: #181818 base with grain, soft sage-mint accent (#9BD8B3), uppercase Barlow Condensed headings, blob-cornered buttons and cards, hover wiggle (off under reduced motion), hidden scrollbars, landing marquee. New tokens `Blob`, `Ease`, `glyph`; `chartBar` recoloured.
+- Softened the palette (sage-mint accent #9BD8B3, slightly warmer text) and rewrote landing copy from first person ("I train. I eat.") to second person ("Train. Eat. Feel better.").
 - Local verification: TypeScript, 440 Jest tests, web export, Deno typecheck and 6 Edge Function tests passed; lint has 0 errors (1 existing warning in usda.test.ts). Not run against a real account or deployed.
 
 Signed off: Claude

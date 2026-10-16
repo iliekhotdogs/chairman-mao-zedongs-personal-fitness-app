@@ -23,23 +23,23 @@ const LINKS: { id: SectionId; label: string }[] = [
 ];
 
 const STATS: { value: number; suffix?: string; label: string; body: string }[] = [
-  { value: 1, label: 'Photo', body: 'is all it takes for me to log a meal with full macros.' },
-  { value: 3, label: 'Macros', body: 'tracked against targets that adapt to my real trend.' },
-  { value: 0, label: 'Surprises', body: 'every coaching change waits for my OK before it applies.' },
-  { value: 7, label: 'Day trend', body: 'of weigh-ins smooths out the noise before anything moves.' },
+  { value: 1, label: 'Photo', body: 'is all it takes to log a meal with full macros.' },
+  { value: 3, label: 'Macros', body: 'tracked against targets that adapt to your real trend.' },
+  { value: 0, label: 'Surprises', body: 'every coaching change waits for your OK before it applies.' },
+  { value: 7, label: 'Day trend', body: 'of weigh-ins smooths out the noise before anything changes.' },
 ];
 
 const FEATURES: { icon: IconName; eyebrow: string; title: string; body: string; visual: 'food' | 'train' | 'coach' | 'progress' }[] = [
-  { icon: 'camera-outline', eyebrow: 'Food', title: 'I snap it. It counts it.', body: 'A photo of my plate becomes an itemised estimate with calories and macros. I check it, tweak a portion, and only then does it hit my log.', visual: 'food' },
-  { icon: 'barbell-outline', eyebrow: 'Training', title: 'A plan built around my week.', body: 'Workouts fit my schedule, my equipment and my limits. I log sets by tap or by voice, and weights progress when I earn it.', visual: 'train' },
-  { icon: 'chatbubbles-outline', eyebrow: 'Coach', title: 'A coach that asks first.', body: 'It reads my food, training and weight trend and suggests changes with the reasoning attached. I accept or reject. Nothing changes behind my back.', visual: 'coach' },
-  { icon: 'trending-up-outline', eyebrow: 'Progress', title: 'Proof I am getting better.', body: 'Weight trend, estimated 1-rep maxes, streaks and milestones, on my phone and on the web, synced.', visual: 'progress' },
+  { icon: 'camera-outline', eyebrow: 'Food', title: 'Snap a photo. We do the counting.', body: 'A photo of your plate becomes an estimate of calories and macros. You review it, adjust a portion if needed, and only then does it go in your log.', visual: 'food' },
+  { icon: 'barbell-outline', eyebrow: 'Training', title: 'A plan that fits your week.', body: 'Workouts fit your schedule, your equipment and your limits. Log sets with a tap or your voice, and the weights go up when you are ready.', visual: 'train' },
+  { icon: 'chatbubbles-outline', eyebrow: 'Coach', title: 'A coach that checks with you first.', body: 'It looks at your food, training and weight trend and suggests changes, with the reasons. You accept or decline. Nothing changes without you.', visual: 'coach' },
+  { icon: 'trending-up-outline', eyebrow: 'Progress', title: 'See your progress.', body: 'Weight trend, estimated 1-rep maxes, streaks and milestones, on your phone and on the web, always in sync.', visual: 'progress' },
 ];
 
 const STEPS: { title: string; body: string }[] = [
-  { title: 'Get my invite', body: 'FitCoach is invite-only while in beta. My code unlocks an account.' },
-  { title: 'Tell it about me', body: 'Two minutes: goal, schedule, equipment, any injuries. It builds my targets and my plan.' },
-  { title: 'Log, train, adjust', body: 'I log meals and sets. Every week the coach checks my trend and proposes what to change.' },
+  { title: 'Get your invite', body: 'FitCoach is invite-only while in beta. Your code unlocks an account.' },
+  { title: 'Tell us about you', body: 'Two minutes: goal, schedule, equipment, any injuries. We build your targets and your plan.' },
+  { title: 'Log, train, adjust', body: 'You log meals and sets. Each week the coach checks your trend and suggests what to change.' },
 ];
 
 /** Public landing page for logged-out visitors (also reachable at /welcome). */
@@ -106,8 +106,8 @@ export function Landing() {
               </Reveal>
               <Reveal index={1}>
                 <Text variant="hero" accessibilityRole="header" style={{ fontSize: heroSize, lineHeight: heroSize * 0.88 }}>
-                  I train.{'\n'}I eat.{'\n'}
-                  <Text variant="hero" color={C.accent} style={{ fontSize: heroSize, lineHeight: heroSize * 0.88 }}>I get better.</Text>
+                  Train.{'\n'}Eat.{'\n'}
+                  <Text variant="hero" color={C.accent} style={{ fontSize: heroSize, lineHeight: heroSize * 0.88 }}>Feel better.</Text>
                 </Text>
               </Reveal>
               <Reveal index={2}>
@@ -115,7 +115,7 @@ export function Landing() {
               </Reveal>
               <Reveal index={3}>
                 <Text color={C.textSecondary} style={{ fontSize: isPhone ? 17 : 20, lineHeight: isPhone ? 26 : 30, maxWidth: 620 }}>
-                  I snap my meals, follow a plan built around my week, and my coach adjusts the numbers as my body changes. Nothing changes without my OK.
+                  Photograph your meals, follow a plan built around your week, and let your coach adjust the numbers as your body changes. Nothing changes without your OK.
                 </Text>
               </Reveal>
               <Reveal index={4}>
@@ -155,7 +155,7 @@ export function Landing() {
         {/* ---------- Features ---------- */}
         <View onLayout={(e) => onSectionLayout('features', e)} style={[styles.inner, { paddingHorizontal: gutter, paddingTop: isPhone ? Space.huge : 120 }]}>
           <FadeIn shown={!!seen.features}>
-            <SectionHeading eyebrow="What I get" title="Built for the way I actually train." />
+            <SectionHeading eyebrow="What you get" title="Built for the way you actually train." />
             <Stack gap={isPhone ? Space.xxxl : Space.huge} style={{ marginTop: isPhone ? Space.xxl : Space.huge }}>
               {FEATURES.map((f, i) => (
                 <View key={f.title} style={{ flexDirection: isPhone ? 'column' : i % 2 ? 'row-reverse' : 'row', gap: isPhone ? Space.xl : Space.huge, alignItems: isPhone ? 'stretch' : 'center' }}>
@@ -180,7 +180,7 @@ export function Landing() {
         {/* ---------- How it works ---------- */}
         <View onLayout={(e) => onSectionLayout('how', e)} style={[styles.inner, { paddingHorizontal: gutter, paddingTop: isPhone ? Space.huge : 140 }]}>
           <FadeIn shown={!!seen.how}>
-            <SectionHeading eyebrow="How it works" title="Three steps. Then I just show up." />
+            <SectionHeading eyebrow="How it works" title="Three steps. Then just show up." />
             <View style={{ flexDirection: isPhone ? 'column' : 'row', gap: Space.lg, marginTop: Space.xxl }}>
               {STEPS.map((s, i) => (
                 <View key={s.title} style={[styles.step, { flex: isPhone ? undefined : 1 }]}>
@@ -199,13 +199,13 @@ export function Landing() {
             <View style={[styles.joinPanel, { flexDirection: isPhone ? 'column' : 'row', padding: isPhone ? Space.xl : Space.xxxl, gap: isPhone ? Space.xl : Space.xxxl }]}>
               <Stack gap={Space.lg} style={isPhone ? undefined : { flex: 1 }}>
                 <Text variant="eyebrow" color={C.accent}>Join</Text>
-                <Text variant="display" style={isPhone ? { fontSize: 38, lineHeight: 40 } : { fontSize: 56, lineHeight: 56 }}>I&apos;m ready.{'\n'}Let&apos;s go.</Text>
+                <Text variant="display" style={isPhone ? { fontSize: 38, lineHeight: 40 } : { fontSize: 56, lineHeight: 56 }}>Ready when{'\n'}you are.</Text>
                 <AccentRule width={48} />
                 <Stack gap={Space.md}>
                   {[
-                    ['key-outline', 'Invite-only while in beta. Got a code? I create my account with it.'],
-                    ['sync-outline', 'My data syncs between my phone and the web.'],
-                    ['lock-closed-outline', 'My log is private to me, and I can export or delete it any time.'],
+                    ['key-outline', 'Invite-only while in beta. Got a code? Use it to create your account.'],
+                    ['sync-outline', 'Your data syncs between your phone and the web.'],
+                    ['lock-closed-outline', 'Your log is private to you, and you can export or delete it any time.'],
                   ].map(([icon, t]) => (
                     <Row key={t} gap={Space.md} align="flex-start">
                       <Ionicons name={icon as IconName} size={18} color={C.textSecondary} style={{ marginTop: 2 }} />

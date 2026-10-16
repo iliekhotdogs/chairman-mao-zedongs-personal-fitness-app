@@ -23,17 +23,17 @@ export const C = {
   border: '#3A413A',
   borderStrong: '#73836F', // sage
   // text
-  text: '#F4F1E8',
-  textSecondary: '#C4CCBF',
-  textMuted: '#8FB79B', // mint
+  text: '#EBE7DC',
+  textSecondary: '#BFC6BB',
+  textMuted: '#8DAE98', // mint
   // accent (kelly mint green)
-  primary: '#5BEB94',
-  primaryPressed: '#43CF7B',
-  primaryHover: '#8CF5B3',
-  primarySoft: '#14281D',
-  primaryBorder: '#2F6B49',
+  primary: '#9BD8B3',
+  primaryPressed: '#80C39C',
+  primaryHover: '#B3E5C7',
+  primarySoft: '#1B2A22',
+  primaryBorder: '#44695A',
   onPrimary: '#181818',
-  accent: '#5BEB94',
+  accent: '#9BD8B3',
   glyph: '#00554B', // deep green glyph colour for use on mint fills
   // status (muted)
   danger: '#FF8F85',
@@ -57,9 +57,9 @@ export const C = {
   protein: '#86B1EC',
   carbs: '#E6BA78',
   fat: '#D3A9E6',
-  calories: '#5BEB94',
+  calories: '#9BD8B3',
   // misc
-  focus: '#5BEB94',
+  focus: '#9BD8B3',
   overlay: 'rgba(0,0,0,0.7)',
   glass: 'rgba(24,24,24,0.94)',
   toast: '#2F2F2B',

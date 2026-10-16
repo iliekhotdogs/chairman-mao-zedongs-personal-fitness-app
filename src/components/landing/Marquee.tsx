@@ -2,7 +2,7 @@ import React from 'react';
 import { Platform, Text, View } from 'react-native';
 import { C, DisplayFont } from '@/constants/theme';
 
-const WORDS = ['Invite-only', 'Snap your plate', 'Lift heavier', 'Coach asks first', 'Prove it'];
+const WORDS = ['Invite-only', 'Snap your plate', 'Train smarter', 'Coach checks first', 'See your progress'];
 
 /** Looping banner (CSS marquee on web, a static strip on native). Decorative, hidden from assistive tech. */
 export function Marquee() {
