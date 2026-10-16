@@ -9,6 +9,11 @@
 - Voice/text parser rejects unparseable input and 0 reps, and parses "@ rpe 9", "135x8" and "3x10@50" (RPE is saved on the set).
 - Pure rules live in src/lib/inputRules.ts with tests in src/lib/__tests__/inputRules.test.ts.
 
+- Added `bug_reports` migration (RLS: own insert/select, admin select/update; 10 per day limit) and an idempotent seed of the owner email into `admin_bootstrap_emails`.
+- Added `admin_user_stats` RPC and the `list_bugs`, `set_bug_status` and `user_stats` admin-stats actions; stats go through a server-side key whitelist (`_shared/userStats.ts`), and status changes and stat views are written to `admin_audit`.
+- Added a Bug reports section and per-user stats detail to the admin console, and a Report a bug form in Settings that attaches only route, app version and platform.
+- Migration is not applied and the function is not deployed.
+
 Signed off: Claude
 
 ## 2026-10-15 00:43 PDT — Codex

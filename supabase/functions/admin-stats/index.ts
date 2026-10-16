@@ -1,11 +1,12 @@
 // Admin API for the owner screen (src/app/admin.tsx). Deploy with JWT verification on.
 // Admin = profiles.role 'admin', or the bootstrap owner in the ADMIN_USER_ID secret.
 // Actions: check, stats, list_users, create_invite, list_invites, revoke_invite,
-// set_disabled, reset_quota, get_config, set_config.
+// set_disabled, reset_quota, get_config, set_config, list_bugs, set_bug_status, user_stats.
 // No health data, records or chat content leave this function.
 import { admin, isAdmin, isOwner, ownerId, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
 import { describeRegistry, resolveConfig, validateConfigUpdate } from '../_shared/providers.ts';
+import { isBugStatus, pickBugReport, pickUserStats } from '../_shared/userStats.ts';
 import { generateInviteCode, inviteExpiry, normalizeInviteCode } from '../_shared/invite.ts';
 
 const randomBytes = (length: number) => crypto.getRandomValues(new Uint8Array(length));
@@ -121,6 +122,38 @@ Deno.serve(async (request) => {
       if (data === 'protected' || data === 'last_admin') return json({ error: 'That admin role is protected.' }, 403);
       if (data !== 'ok') return json({ error: 'Could not change the role.' }, 400);
       return json({ ok: true });
+    }
+
+    case 'list_bugs': {
+      let query = admin.from('bug_reports').select('id, user_id, body, route, app_version, platform, status, created_at').order('created_at', { ascending: false }).limit(200);
+      if (input.status !== undefined && input.status !== 'all') {
+        if (!isBugStatus(input.status)) return json({ error: 'Unknown status.' }, 400);
+        query = query.eq('status', input.status);
+      }
+      const { data, error } = await query;
+      if (error) return json({ error: 'Could not load bug reports. Apply the latest SQL migration first.' }, 502);
+      return json({ bugs: (data ?? []).map(pickBugReport).filter(Boolean) });
+    }
+
+    case 'set_bug_status': {
+      if (!isUuid(input.id) || !isBugStatus(input.status)) return json({ error: 'id and a valid status are required.' }, 400);
+      const { data, error } = await admin.from('bug_reports').update({ status: input.status }).eq('id', input.id).select('user_id');
+      if (error) return json({ error: 'Could not update the bug report.' }, 502);
+      if (!data?.length) return json({ error: 'Bug report not found.' }, 404);
+      const { error: auditError } = await admin.from('admin_audit').insert({ actor: user.id, action: `bug_status:${input.status}:${input.id}`, target: data[0].user_id });
+      if (auditError) console.error(`admin_audit bug_status: ${auditError.message}`);
+      return json({ ok: true });
+    }
+
+    case 'user_stats': {
+      if (!isUuid(input.userId)) return json({ error: 'userId is required.' }, 400);
+      const { data, error } = await admin.rpc('admin_user_stats', { p_user: input.userId });
+      if (error) return json({ error: 'Could not load user stats. Apply the latest SQL migration first.' }, 502);
+      const stats = pickUserStats(data);
+      if (!stats) return json({ error: 'User not found.' }, 404);
+      const { error: auditError } = await admin.from('admin_audit').insert({ actor: user.id, action: 'view_user_stats', target: input.userId });
+      if (auditError) console.error(`admin_audit view_user_stats: ${auditError.message}`);
+      return json({ stats });
     }
 
     case 'get_config': {
