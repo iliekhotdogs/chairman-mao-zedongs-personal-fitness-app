@@ -166,7 +166,7 @@ async function main() {
   check(Boolean(roleRpc.error), 'B cannot call admin_set_role directly', roleRpc.error ? '' : 'RPC ran');
 
   console.log('\nServer-only tables are closed to B');
-  for (const table of ['app_config', 'invites', 'ai_global_usage', 'signup_attempts', 'ai_ip_usage', 'food_search_global_usage', 'user_ai_prefs', 'admin_audit', 'admin_bootstrap_emails']) {
+  for (const table of ['app_config', 'invites', 'ai_global_usage', 'signup_attempts', 'ai_ip_usage', 'food_search_global_usage', 'user_ai_prefs', 'admin_audit', 'admin_bootstrap_emails', 'bug_report_counts']) {
     const result = await b.client.from(table).select('*').limit(5);
     check(denied(result), `B cannot read ${table}`, describe(result));
   }

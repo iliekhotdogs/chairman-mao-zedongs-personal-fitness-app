@@ -1,5 +1,14 @@
 # Change log
 
+## 2026-10-15 18:02 PDT — Claude
+
+- New migration `20261015000500_admin_stats_safe_casts_bug_delete.sql` (not applied): `admin_user_stats` reads record dates and numbers through `safe_date` / `safe_numeric` (null on bad values) and ignores non-array `items`, so one malformed record no longer breaks a user's stats. Still service role only.
+- Users can delete their own bug reports (owner delete policy and grant; trash button with a confirm sheet in Settings). The daily cap of 10 now counts sends in `bug_report_counts` (UTC day), so deleting does not free quota. The Settings list shows only the signed-in user's reports (admins could see everyone's there).
+- `admin-stats` audits fail closed (503): `list_bugs` now writes an audit row; `set_bug_status`, `set_disabled` and `reset_quota` write the audit row before the change and stop if it cannot be saved. `set_role` was already audited inside its RPC.
+- `rls-check` also confirms `bug_report_counts` is closed to users.
+
+Signed off: Claude
+
 ## 2026-10-15 15:10 PDT — Claude
 
 - Security audit fixes: bug report insert is column-limited (no client `id`/`created_at`, so the daily cap cannot be bypassed), `user_stats` fails closed when the audit row cannot be written, and `<` is escaped in the coach prompt's user-data fence.

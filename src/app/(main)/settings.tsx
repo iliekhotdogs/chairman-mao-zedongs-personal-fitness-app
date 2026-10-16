@@ -365,12 +365,14 @@ function BugReportSection() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [mine, setMine] = useState<OwnBug[]>([]);
+  const [deleting, setDeleting] = useState<OwnBug | null>(null);
   const userId = sync.session?.user.id;
 
   const load = async () => {
     const sb = supabase();
     if (!sb || !userId) return;
-    const { data } = await sb.from('bug_reports').select('id, body, status, created_at').order('created_at', { ascending: false }).limit(10);
+    // Filter by owner: RLS also lets admins read everyone's reports.
+    const { data } = await sb.from('bug_reports').select('id, body, status, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10);
     setMine((data as OwnBug[] | null) ?? []);
   };
   useEffect(() => {
@@ -399,6 +401,19 @@ function BugReportSection() {
     await load();
   };
 
+  const remove = async () => {
+    const sb = supabase();
+    if (!sb || !deleting) return;
+    const { error: e } = await sb.from('bug_reports').delete().eq('id', deleting.id).eq('user_id', userId);
+    setDeleting(null);
+    if (e) {
+      toast('Could not delete the report. Try again.', 'error');
+      return;
+    }
+    toast('Report deleted');
+    await load();
+  };
+
   return (
     <Stack gap={Space.sm}>
       <Field label="What went wrong?" value={body} onChangeText={setBody} multiline maxLength={2000} placeholder="Describe the problem" />
@@ -406,8 +421,23 @@ function BugReportSection() {
       {error ? <Banner kind="warning">{error}</Banner> : null}
       <Button title="Send report" loading={busy} disabled={!body.trim()} onPress={send} />
       {mine.map((b) => (
-        <Muted key={b.id} variant="small">{`${new Date(b.created_at).toLocaleDateString()} · ${b.status} · ${b.body.slice(0, 80)}`}</Muted>
+        <Row key={b.id} gap={Space.xs} style={{ alignItems: 'center' }}>
+          <Muted variant="small" style={{ flex: 1 }}>{`${new Date(b.created_at).toLocaleDateString()} · ${b.status} · ${b.body.slice(0, 80)}`}</Muted>
+          <IconButton icon="trash-outline" label="Delete report" size={18} color={C.danger} onPress={() => setDeleting(b)} />
+        </Row>
       ))}
+      <Sheet
+        visible={!!deleting}
+        onClose={() => setDeleting(null)}
+        title="Delete this report?"
+        footer={
+          <Row gap={Space.sm}>
+            <Button title="Cancel" kind="secondary" style={{ flex: 1 }} onPress={() => setDeleting(null)} />
+            <Button title="Delete" kind="danger" style={{ flex: 1 }} onPress={remove} />
+          </Row>
+        }>
+        <Muted>The report is removed for good. It still counts toward the daily limit of 10.</Muted>
+      </Sheet>
     </Stack>
   );
 }
