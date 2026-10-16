@@ -43,7 +43,7 @@ export function FoodItemEditor({ item, onChange, onRemove, extra }: { item: Food
             title="Save changes"
             icon="checkmark"
             full
-            disabled={!draft.name.trim() || !Number.isFinite(draft.calories)}
+            disabled={!draft.name.trim() || !(draft.calories > 0)}
             onPress={() => {
               onChange(markEdited(item, draft));
               setEditing(false);
@@ -62,7 +62,7 @@ export function FoodItemEditor({ item, onChange, onRemove, extra }: { item: Food
           />
         ) : null}
         <Row gap={Space.sm}>
-          <NumberField label="Calories" suffix="kcal" value={draft.calories} onChange={(v) => setDraft({ ...draft, calories: Math.round(v ?? 0) })} style={{ flex: 1 }} />
+          <NumberField label="Calories" suffix="kcal" value={draft.calories || undefined} min={0} max={5000} exclusiveMin onChange={(v) => setDraft({ ...draft, calories: Math.round(v ?? 0) })} style={{ flex: 1 }} />
           <NumberField label="Protein" suffix="g" value={draft.proteinG} onChange={(v) => setDraft({ ...draft, proteinG: v ?? 0 })} style={{ flex: 1 }} />
         </Row>
         <Row gap={Space.sm}>

@@ -154,7 +154,7 @@ function TargetsSection() {
         <Button title="Recalculate from latest weight" kind="ghost" size="sm" icon="refresh" onPress={() => setRecalc(computeTargets(state.profile!, w))} />
       </Row>
       <Sheet visible={edit} onClose={() => setEdit(false)} title="Edit targets" footer={<Button title="Save targets" icon="checkmark" full onPress={saveManual} disabled={!cal || cal < 1000 || !prot} />}>
-        <NumberField label="Daily calories" value={cal} onChange={setCal} suffix="kcal" error={cal !== undefined && cal < 1000 ? 'Below 1,000 kcal is not supported. Please talk to a professional.' : undefined} />
+        <NumberField label="Daily calories" value={cal} onChange={setCal} min={0} max={10000} exclusiveMin suffix="kcal" error={cal !== undefined && cal < 1000 ? 'Below 1,000 kcal is not supported. Please talk to a professional.' : undefined} />
         <NumberField label="Protein" value={prot} onChange={setProt} suffix="g" />
         <Muted variant="small">Fat is set to ~27% of calories and carbs fill the rest.</Muted>
       </Sheet>

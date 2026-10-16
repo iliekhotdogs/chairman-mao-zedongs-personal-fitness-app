@@ -1,5 +1,16 @@
 # Change log
 
+## 2026-10-15 12:00 PDT — Claude
+
+- NumberField no longer strips characters: '-', repeated dots and junk show an inline message; per-field min/max (calories, set weight, body weight, food item kcal).
+- Set logging: weight/reps bounds checked in the UI (reducer now also caps a set at 700 kg), warning on a >50% jump vs last session, reducer rule violations shown inline, 400 ms double-tap guard and an Undo button.
+- Reps prefill from the last set or the plan minimum so it matches the "fell short of N reps" copy.
+- Food item editor requires kcal > 0 like custom add.
+- Voice/text parser rejects unparseable input and 0 reps, and parses "@ rpe 9", "135x8" and "3x10@50" (RPE is saved on the set).
+- Pure rules live in src/lib/inputRules.ts with tests in src/lib/__tests__/inputRules.test.ts.
+
+Signed off: Claude
+
 ## 2026-10-15 00:43 PDT — Codex
 
 - Replaced the user-selectable Gemini gateway with OpenRouter and added GLM 5.3 Flash, Nemotron 3.5 Lightning, and DeepSeek V4.1 Flash choices, with image-capable meal models and short DeepSeek responses.

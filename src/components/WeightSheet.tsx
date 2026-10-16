@@ -19,7 +19,7 @@ export function WeightSheet({ visible, onClose }: { visible: boolean; onClose: (
   };
   return (
     <Sheet visible={visible} onClose={onClose} title="Log today's weight" footer={<Button title="Save weight" icon="checkmark" onPress={save} disabled={!v} full />}>
-      <NumberField label="Body weight" value={v} onChange={setV} suffix={weightUnit(units)} autoFocus />
+      <NumberField label="Body weight" value={v} onChange={setV} min={units === 'imperial' ? 45 : 20} max={units === 'imperial' ? 880 : 400} suffix={weightUnit(units)} autoFocus />
       <Muted variant="small">Tip: weigh in the morning after the bathroom, before eating. Daily numbers swing 1–2 {weightUnit(units)}; the coach uses the trend, not single days.</Muted>
     </Sheet>
   );
