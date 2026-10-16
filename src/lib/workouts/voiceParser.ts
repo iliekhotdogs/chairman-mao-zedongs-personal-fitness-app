@@ -79,6 +79,9 @@ export interface ParsedSet {
   reps?: number;
   sets: number;
   repeatLast: boolean;
+  rpe?: number;
+  /** false when nothing set-like was heard (e.g. "asdf"); the UI should not offer to save it */
+  understood: boolean;
   issues: string[];
 }
 
@@ -88,9 +91,17 @@ export interface ParsedSet {
  * Never saves anything — the UI shows the result for review first.
  */
 export function parseSetUtterance(input: string, ctx: { units: UnitSystem; currentExerciseId?: string }): ParsedSet {
-  const text = wordsToDigits(input);
   const issues: string[] = [];
-  const result: ParsedSet = { raw: input, exerciseFromContext: false, sets: 1, repeatLast: false, issues };
+  const result: ParsedSet = { raw: input, exerciseFromContext: false, sets: 1, repeatLast: false, understood: true, issues };
+  // "3x10@50" = sets x reps @ weight; must run before '@' is stripped
+  const compact = input.match(/(\d+)\s*x\s*(\d+)\s*@\s*(\d+(?:\.\d+)?)\s*(pounds?|lbs?|kilos?|kilograms?|kgs?)?\b/i);
+  if (compact) {
+    result.sets = Math.min(10, parseInt(compact[1], 10));
+    result.reps = parseInt(compact[2], 10);
+    result.weight = parseFloat(compact[3]);
+    if (compact[4]) result.unit = /^(pound|lb)/i.test(compact[4]) ? 'lb' : 'kg';
+  }
+  const text = wordsToDigits(compact ? input.replace(compact[0], ' ') : input);
 
   if (/\b(same again|same as last|repeat( that| last)?|another (one|set))\b/.test(text)) {
     result.repeatLast = true;
@@ -107,6 +118,13 @@ export function parseSetUtterance(input: string, ctx: { units: UnitSystem; curre
   } else issues.push('Exercise not recognised — choose it below.');
 
   let rest = text;
+  const rpeM = rest.match(/\brpe\s*(\d+(?:\.\d+)?)\b/);
+  if (rpeM) {
+    rest = rest.replace(rpeM[0], ' ');
+    const r = parseFloat(rpeM[1]);
+    if (r >= 1 && r <= 10) result.rpe = r;
+    else issues.push('RPE must be between 1 and 10.');
+  }
   const take = (re: RegExp) => {
     const m = rest.match(re);
     if (m) rest = rest.replace(m[0], ' ');
@@ -126,17 +144,17 @@ export function parseSetUtterance(input: string, ctx: { units: UnitSystem; curre
     result.unit = ctx.units === 'imperial' ? 'lb' : 'kg';
   }
 
-  const rM = take(/\b(\d+)\s*(reps?|repetitions?|times)\b/) ?? take(/\b(?:for|by|x|times)\s*(\d+)\b/);
+  const rM = compact ? null : take(/\b(\d+)\s*(reps?|repetitions?|times)\b/) ?? take(/\b(?:for|by|x|times)\s*(\d+)\b/);
   if (rM) result.reps = parseInt(rM[1], 10);
 
-  const xM = !wM && !rM ? take(/\b(\d+(?:\.\d+)?)\s*x\s*(\d+)\b/) : null;
+  const xM = !compact && !wM && !rM ? take(/\b(\d+(?:\.\d+)?)\s*x\s*(\d+)\b/) : null;
   if (xM) {
     result.weight = parseFloat(xM[1]);
     result.reps = parseInt(xM[2], 10);
   }
 
   // Remaining bare numbers: large → weight, small → reps
-  const bare = (rest.match(/\b\d+(?:\.\d+)?\b/g) ?? []).map(Number);
+  const bare = compact ? [] : (rest.match(/\b\d+(?:\.\d+)?\b/g) ?? []).map(Number);
   for (const n of bare) {
     if (result.weight === undefined && n >= 15) result.weight = n;
     else if (result.reps === undefined && n > 0 && n <= 50 && Number.isInteger(n)) result.reps = n;
@@ -148,7 +166,16 @@ export function parseSetUtterance(input: string, ctx: { units: UnitSystem; curre
   }
   if (result.weight !== undefined && result.unit) result.weightKg = toKg(result.weight, result.unit === 'lb' ? 'imperial' : 'metric');
   if (result.weight === undefined) issues.push('Weight not heard.');
-  if (result.reps === undefined) issues.push('Reps not heard.');
+  if (result.reps !== undefined && result.reps < 1) {
+    result.reps = undefined;
+    issues.push('Reps must be at least 1.');
+  }
+  if (result.reps === undefined && !issues.some((i) => i.startsWith('Reps must'))) issues.push('Reps not heard.');
+  if (result.weight === undefined && result.reps === undefined && !rpeM && !ex) {
+    result.understood = false;
+    issues.length = 0;
+    issues.push("Couldn't understand that. Try something like \"bench press 135 pounds 8 reps\".");
+  }
   if (result.reps !== undefined && result.reps > 50) issues.push('That rep count looks unusually high — please check.');
   if (result.weight !== undefined && result.weight > 1000) issues.push('That weight looks unusually high — please check.');
   return result;

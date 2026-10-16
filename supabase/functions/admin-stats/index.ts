@@ -1,11 +1,13 @@
 // Admin API for the owner screen (src/app/admin.tsx). Deploy with JWT verification on.
 // Admin = profiles.role 'admin', or the bootstrap owner in the ADMIN_USER_ID secret.
 // Actions: check, stats, list_users, create_invite, list_invites, revoke_invite,
-// set_disabled, reset_quota, get_config, set_config.
+// set_disabled, reset_quota, set_role, get_config, set_config, list_bugs, set_bug_status, user_stats.
+// Audited (fail closed): set_disabled, reset_quota, set_role (in its RPC), list_bugs, set_bug_status, user_stats.
 // No health data, records or chat content leave this function.
 import { admin, isAdmin, isOwner, ownerId, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
 import { describeRegistry, resolveConfig, validateConfigUpdate } from '../_shared/providers.ts';
+import { isBugStatus, pickBugReport, pickUserStats } from '../_shared/userStats.ts';
 import { generateInviteCode, inviteExpiry, normalizeInviteCode } from '../_shared/invite.ts';
 
 const randomBytes = (length: number) => crypto.getRandomValues(new Uint8Array(length));
@@ -26,6 +28,13 @@ Deno.serve(async (request) => {
     return error instanceof BodyError ? json({ error: error.message }, error.status) : json({ error: 'Invalid request.' }, 400);
   }
   const action = typeof input.action === 'string' ? input.action : 'stats';
+  // Fail closed: callers stop (503) when the audit row cannot be written. Mutations audit first.
+  const audit = async (entry: string, target: string | null) => {
+    const { error } = await admin.from('admin_audit').insert({ actor: user.id, action: entry, target });
+    if (error) console.error(`admin_audit ${entry}: ${error.message}`);
+    return !error;
+  };
+  const auditFailed = () => json({ error: 'Could not record the audit entry.' }, 503);
 
   switch (action) {
     case 'check':
@@ -84,6 +93,7 @@ Deno.serve(async (request) => {
       try { target = await profileOf(input.userId); } catch { return json({ error: 'Account status is unavailable.' }, 503); }
       if (!target) return json({ error: 'Account profile is missing.' }, 404);
       if (target.role === 'admin' && !isOwner(user.id)) return json({ error: 'Only the app owner can disable or enable an admin.' }, 403);
+      if (!await audit(input.disabled ? 'disable' : 'enable', input.userId)) return auditFailed();
       const { error } = await admin.from('profiles').upsert({ user_id: input.userId, disabled: input.disabled }, { onConflict: 'user_id' });
       if (error) return json({ error: 'Could not update the account.' }, 502);
       // A ban blocks new sign-ins and token refresh.
@@ -105,6 +115,7 @@ Deno.serve(async (request) => {
 
     case 'reset_quota': {
       if (!isUuid(input.userId)) return json({ error: 'userId is required.' }, 400);
+      if (!await audit('reset_quota', input.userId)) return auditFailed();
       const { error } = await admin.rpc('admin_reset_ai_quota', { p_user: input.userId, p_day: utcDay() });
       if (error) return json({ error: 'Could not reset the quota.' }, 502);
       return json({ ok: true });
@@ -121,6 +132,42 @@ Deno.serve(async (request) => {
       if (data === 'protected' || data === 'last_admin') return json({ error: 'That admin role is protected.' }, 403);
       if (data !== 'ok') return json({ error: 'Could not change the role.' }, 400);
       return json({ ok: true });
+    }
+
+    case 'list_bugs': {
+      let query = admin.from('bug_reports').select('id, user_id, body, route, app_version, platform, status, created_at').order('created_at', { ascending: false }).limit(200);
+      if (input.status !== undefined && input.status !== 'all') {
+        if (!isBugStatus(input.status)) return json({ error: 'Unknown status.' }, 400);
+        query = query.eq('status', input.status);
+      }
+      const { data, error } = await query;
+      if (error) return json({ error: 'Could not load bug reports. Apply the latest SQL migration first.' }, 502);
+      if (!await audit(`list_bugs:${input.status ?? 'all'}`, null)) return auditFailed();
+      return json({ bugs: (data ?? []).map(pickBugReport).filter(Boolean) });
+    }
+
+    case 'set_bug_status': {
+      if (!isUuid(input.id) || !isBugStatus(input.status)) return json({ error: 'id and a valid status are required.' }, 400);
+      const { data: bug, error: findError } = await admin.from('bug_reports').select('user_id').eq('id', input.id).maybeSingle();
+      if (findError) return json({ error: 'Could not update the bug report.' }, 502);
+      if (!bug) return json({ error: 'Bug report not found.' }, 404);
+      if (!await audit(`bug_status:${input.status}:${input.id}`, bug.user_id)) return auditFailed();
+      const { data, error } = await admin.from('bug_reports').update({ status: input.status }).eq('id', input.id).select('id');
+      if (error) return json({ error: 'Could not update the bug report.' }, 502);
+      // Deleted by its owner between the lookup and the update.
+      if (!data?.length) return json({ error: 'Bug report not found.' }, 404);
+      return json({ ok: true });
+    }
+
+    case 'user_stats': {
+      if (!isUuid(input.userId)) return json({ error: 'userId is required.' }, 400);
+      const { data, error } = await admin.rpc('admin_user_stats', { p_user: input.userId });
+      if (error) return json({ error: 'Could not load user stats. Apply the latest SQL migration first.' }, 502);
+      const stats = pickUserStats(data);
+      if (!stats) return json({ error: 'User not found.' }, 404);
+      // Fail closed: never return per-user stats that were not audited.
+      if (!await audit('view_user_stats', input.userId)) return auditFailed();
+      return json({ stats });
     }
 
     case 'get_config': {

@@ -186,6 +186,8 @@ export interface WorkoutPlan extends SyncMeta {
   source: 'ai_generated' | 'user_created';
   days: WorkoutDay[];
   rationale: string[];
+  /** the profile goal the plan was generated for (absent on user routines and older plans) */
+  goal?: GoalPriority;
   createdAt: ISODateTime;
 }
 
@@ -195,6 +197,8 @@ export interface LoggedSet {
   weightKg: number;
   reps: number;
   rpe?: number;
+  /** warm-up sets are kept in the log but ignored by volume and progression */
+  warmup?: boolean;
   via: 'manual' | 'voice';
   loggedAt: ISODateTime;
 }
@@ -245,12 +249,18 @@ export type ProposalStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
 
 export type ProposalChange =
   | { type: 'day_calorie_adjustment'; date: ISODate; calorieDelta: number; carbsDeltaG: number }
-  | { type: 'target_change'; next: MacroTargets }
+  // `before` is the target when the proposal was made; older proposals lack it.
+  | { type: 'target_change'; next: MacroTargets; before?: MacroTargets }
   | { type: 'plan_weight_update'; planId: string; updates: { dayId: string; exerciseId: string; targetWeightKg: number; repMin?: number; repMax?: number }[] }
   | { type: 'today_workout_swap'; date: ISODate; day: WorkoutDay }
   | { type: 'add_limitation'; limitation: Limitation }
-  | { type: 'goal_change'; goal: GoalPriority; next: MacroTargets }
-  | { type: 'new_plan'; plan: WorkoutPlan };
+  | { type: 'goal_change'; goal: GoalPriority; next: MacroTargets; before?: MacroTargets }
+  | { type: 'new_plan'; plan: WorkoutPlan }
+  // Coach log edits (F2). Applied through LOG_FOOD / UPDATE_FOOD / DELETE_FOOD / START_SESSION + ADD_SETS on accept.
+  | { type: 'log_food'; entry: FoodEntry }
+  | { type: 'edit_food'; entryId: string; itemIndex: number; calories: number; before: number }
+  | { type: 'delete_food'; entryId: string }
+  | { type: 'log_workout'; date: ISODate; sessionId: string; name: string; sets: { exerciseId: string; weightKg: number; reps: number; rpe?: number }[] };
 
 export interface Proposal extends SyncMeta {
   kind: ProposalChange['type'];
@@ -311,6 +321,8 @@ export interface NotificationRecord extends SyncMeta {
 export interface Settings {
   units: UnitSystem;
   coachTone: CoachTone;
+  /** optional display name the coach introduces itself with (sanitized server-side) */
+  coachName?: string;
   notifications: NotificationPrefs;
   aiMode: 'simulated' | 'server';
   /** Retained for old saved settings; the server picks the photo model. */

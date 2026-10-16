@@ -3,9 +3,8 @@ import { Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Columns, Muted, PageHeader, Row, SectionTitle, Screen, Stack, Text, Ionicons, ProgressBar } from '@/components/ui';
+import { Badge, Banner, Button, Card, Columns, Muted, PageHeader, Row, Screen, Stack, Text, Ionicons, ProgressBar } from '@/components/ui';
 import { CaloriesRing, MacroBars } from '@/components/nutrition';
-import { InsightCard, ProposalCard } from '@/components/coaching';
 import { WeightSheet } from '@/components/WeightSheet';
 import { LogMealSheet } from '@/components/LogMealSheet';
 import { useStore } from '@/store/AppStore';
@@ -50,22 +49,21 @@ export default function Dashboard() {
     </Card>
   );
 
+  // One summary row instead of a stack of coach cards; details live on the Coach tab.
+  const coachCount = pending.length + (insight ? 1 : 0);
   const coach = (
-    <Stack gap={Space.md}>
-      <SectionTitle right={pending.length > 1 ? <Button title={`All ${pending.length}`} kind="ghost" size="sm" onPress={() => router.push('/coach')} /> : undefined}>Coach</SectionTitle>
-      {pending.slice(0, isDesktop ? 2 : 1).map((p) => (
-        <ProposalCard key={p.id} proposal={p} compact />
-      ))}
-      {insight ? <InsightCard insight={insight} /> : null}
-      {!pending.length && !insight ? (
-        <Card tone="muted">
-          <Row>
-            <Ionicons name="checkmark-done" size={18} color={C.success} />
-            <Text variant="small" style={{ flex: 1 }}>Nothing needs your attention. Keep logging and the coach will speak up when something is worth changing.</Text>
-          </Row>
-        </Card>
-      ) : null}
-    </Stack>
+    <Pressable onPress={() => router.push('/coach')} accessibilityRole="button" accessibilityLabel="Open coach">
+      <Card tone={pending.length ? 'suggestion' : 'muted'}>
+        <Row>
+          <Ionicons name={coachCount ? 'chatbubbles-outline' : 'checkmark-done'} size={18} color={coachCount ? C.primary : C.success} />
+          <Stack gap={0} style={{ flex: 1 }}>
+            <Text variant="bodyStrong">{pending.length ? `Coach: ${pending.length} suggestion${pending.length > 1 ? 's' : ''} waiting for your OK` : insight ? 'Coach: 1 new insight' : 'Coach: nothing needs your attention'}</Text>
+            {pending[0] ? <Muted variant="small" numberOfLines={1}>{pending[0].title}</Muted> : insight ? <Muted variant="small" numberOfLines={1}>{insight.title}</Muted> : null}
+          </Stack>
+          <Ionicons name="chevron-forward" size={18} color={C.textSecondary} />
+        </Row>
+      </Card>
+    </Pressable>
   );
 
   return (
@@ -74,6 +72,11 @@ export default function Dashboard() {
         title={`${greeting()}${name}`}
         subtitle={dateLabel}
       />
+      {activeSession(state) ? (
+        <Banner kind="info" title="Workout in progress" action={<Button title="Resume workout" size="sm" icon="play" onPress={() => router.push('/workouts/session')} />}>
+          {activeSession(state)?.name}
+        </Banner>
+      ) : null}
       {storageError ? <Banner kind="danger" title="Storage problem">{storageError}</Banner> : null}
       {isDesktop ? (
         <Row align="flex-start" gap={Space.lg}>

@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, Radius, Space } from '@/constants/theme';
 import { Ionicons, Text } from './ui';
@@ -20,9 +20,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     (msg: string, kind: Kind = 'success') => {
       setToast({ msg, kind });
       clearTimeout(timer.current);
-      Animated.timing(opacity, { toValue: 1, duration: 150, useNativeDriver: true }).start();
+      Animated.timing(opacity, { toValue: 1, duration: 150, useNativeDriver: Platform.OS !== 'web' }).start();
       timer.current = setTimeout(() => {
-        Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: true }).start(() => setToast(null));
+        Animated.timing(opacity, { toValue: 0, duration: 200, useNativeDriver: Platform.OS !== 'web' }).start(() => setToast(null));
       }, 2800);
     },
     [opacity],
@@ -33,7 +33,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
     <Ctx.Provider value={show}>
       {children}
       {toast ? (
-        <View pointerEvents="none" style={[styles.wrap, { bottom: Math.max(insets.bottom, 12) + 76 }]}>
+        <View style={[styles.wrap, { bottom: Math.max(insets.bottom, 12) + 76, pointerEvents: 'none' }]}>
           <Animated.View style={[styles.toast, { opacity }]} accessibilityLiveRegion="polite" accessibilityRole={toast.kind === 'error' ? 'alert' : undefined}>
             <Ionicons name={toast.kind === 'error' ? 'alert-circle' : toast.kind === 'info' ? 'information-circle' : 'checkmark-circle'} size={18} color={color} />
             <Text variant="smallStrong" color={C.text} style={{ flexShrink: 1 }}>

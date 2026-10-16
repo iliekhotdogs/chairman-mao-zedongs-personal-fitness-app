@@ -54,3 +54,62 @@ export function matchingFood(item: VisionItem, hits: FoodHit[]): FoodHit | null 
   }
   return null;
 }
+
+// ---------- Coach log/edit intents (F2). Pure; shared by the gateway and the app. ----------
+
+export type FoodIntentItem = { name: string; calories: number; protein_g: number; carbs_g: number; fat_g: number; grams?: number };
+export type WorkoutIntentSet = { exercise: string; reps: number; weight_kg: number; rpe?: number };
+export type ActionIntent =
+  | { type: 'log_food'; meal?: 'breakfast' | 'lunch' | 'dinner' | 'snack'; items: FoodIntentItem[] }
+  | { type: 'edit_food'; entry_id: string; item_index: number; calories: number }
+  | { type: 'delete_food'; entry_id: string }
+  | { type: 'log_workout'; name?: string; sets: WorkoutIntentSet[] };
+
+export const ACTION_INTENT_TYPES = ['log_food', 'edit_food', 'delete_food', 'log_workout'];
+const inRange = (v: unknown, min: number, max: number): v is number => typeof v === 'number' && Number.isFinite(v) && v >= min && v <= max;
+
+/** Returns a cleaned intent, or null when anything is missing or out of bounds. Reject, never clamp. */
+export function validateActionIntent(raw: unknown): ActionIntent | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const r = raw as Record<string, unknown>;
+  const id = short(r.entry_id, 64);
+  switch (r.type) {
+    case 'log_food': {
+      if (!Array.isArray(r.items) || r.items.length < 1 || r.items.length > 10) return null;
+      const items: FoodIntentItem[] = [];
+      for (const it of r.items) {
+        const o = (it ?? {}) as Record<string, unknown>;
+        const name = short(o.name, 100);
+        const protein = o.protein_g === undefined ? 0 : o.protein_g;
+        const carbs = o.carbs_g === undefined ? 0 : o.carbs_g;
+        const fat = o.fat_g === undefined ? 0 : o.fat_g;
+        if (!name || !inRange(o.calories, 0, 5000) || !inRange(protein, 0, 1000) || !inRange(carbs, 0, 2000) || !inRange(fat, 0, 1000)) return null;
+        if (o.grams !== undefined && !inRange(o.grams, 1, 5000)) return null;
+        items.push({ name, calories: Math.round(o.calories), protein_g: protein, carbs_g: carbs, fat_g: fat, ...(typeof o.grams === 'number' ? { grams: o.grams } : {}) });
+      }
+      const meal = ['breakfast', 'lunch', 'dinner', 'snack'].includes(String(r.meal)) ? (r.meal as 'breakfast') : undefined;
+      return { type: 'log_food', meal, items };
+    }
+    case 'edit_food': {
+      const index = r.item_index === undefined ? 0 : r.item_index;
+      if (!id || !inRange(r.calories, 0, 5000) || !Number.isInteger(index) || !inRange(index, 0, 9)) return null;
+      return { type: 'edit_food', entry_id: id, item_index: index as number, calories: Math.round(r.calories) };
+    }
+    case 'delete_food':
+      return id ? { type: 'delete_food', entry_id: id } : null;
+    case 'log_workout': {
+      if (!Array.isArray(r.sets) || r.sets.length < 1 || r.sets.length > 30) return null;
+      const sets: WorkoutIntentSet[] = [];
+      for (const s of r.sets) {
+        const o = (s ?? {}) as Record<string, unknown>;
+        const exercise = short(o.exercise, 80);
+        if (!exercise || !Number.isInteger(o.reps) || !inRange(o.reps, 1, 300) || !inRange(o.weight_kg, 20, 400)) return null;
+        if (o.rpe !== undefined && !inRange(o.rpe, 1, 10)) return null;
+        sets.push({ exercise, reps: o.reps as number, weight_kg: o.weight_kg, ...(typeof o.rpe === 'number' ? { rpe: o.rpe } : {}) });
+      }
+      return { type: 'log_workout', name: short(r.name, 60) || undefined, sets };
+    }
+    default:
+      return null;
+  }
+}

@@ -117,10 +117,15 @@ export function Landing() {
                 </Text>
               </Reveal>
               <Reveal index={4}>
+                <Stack gap={Space.sm}>
                 <Row wrap gap={Space.md}>
-                  <Button title="Sign in" icon="arrow-forward" size="lg" onPress={() => goTo('join')} />
+                  <Button title="Get started" icon="arrow-forward" size="lg" onPress={() => goTo('join')} />
                   <Button title="How it works" kind="secondary" size="lg" onPress={() => goTo('how')} />
                 </Row>
+                <Muted variant="small" style={{ maxWidth: 520 }}>
+                  Meal photo analysis needs an account. Without one you can explore with sample data: made-up meals and workouts so you can try every screen.
+                </Muted>
+                </Stack>
               </Reveal>
             </Stack>
           </View>

@@ -6,7 +6,8 @@ import type { User } from 'npm:@supabase/supabase-js@2.117.2';
 import { admin, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, clientIpHash, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
 import { effectiveConfig, findModel, modelLabel, PROVIDERS, resolveConfig, validPreference, type AiConfig } from '../_shared/providers.ts';
-import { matchingFood, validateVisionItem, type VisionItem } from './foodValidation.ts';
+import { ACTION_INTENT_TYPES, matchingFood, validateActionIntent, validateVisionItem, type VisionItem } from './foodValidation.ts';
+import { buildCoachSystem, buildCoachUserTurn, isOffTopic, OFF_TOPIC_REPLY } from '../_shared/coachPrompt.ts';
 import { hasInjuryRedFlag, isUrgentSymptom } from '../_shared/coachSafety.ts';
 import { profileGate } from '../_shared/profile.ts';
 
@@ -125,8 +126,9 @@ function parseObject(reply: string): Record<string, unknown> {
 
 function validatedIntents(value: unknown): unknown[] {
   if (!Array.isArray(value)) return [];
-  return value.slice(0, 3).filter((intent) => {
+  return value.slice(0, 3).map((intent) => ACTION_INTENT_TYPES.includes(intent?.type) ? validateActionIntent(intent) : intent).filter((intent) => {
     if (!intent || typeof intent !== 'object') return false;
+    if (ACTION_INTENT_TYPES.includes(intent.type)) return true;
     if (intent.type === 'short_on_time') return Number.isInteger(intent.minutes) && intent.minutes >= 10 && intent.minutes <= 120;
     if (intent.type === 'training_days') return Number.isInteger(intent.days) && intent.days >= 1 && intent.days <= 6;
     if (intent.type === 'goal_change') return ['fat_loss', 'muscle_gain', 'strength', 'maintenance'].includes(intent.goal);
@@ -145,19 +147,11 @@ async function coach(config: AiConfig, meter: Meter, body: Record<string, unknow
   if (hasInjuryRedFlag(message)) {
     return { result: { reply: 'Stop movements that hurt. Swelling, numbness, sharp pain, a pop, or trouble bearing weight should be checked by a doctor or physiotherapist before training that area again. I cannot assess an injury here.', safety: true, intents: [] }, tokens: { input: 0, output: 0 } };
   }
-  const context = body.context && typeof body.context === 'object' ? JSON.stringify(body.context).slice(0, 6000) : '{}';
-  const history = Array.isArray(body.history) ? body.history.slice(-12).map((turn) => ({
-    role: turn?.role === 'assistant' ? 'assistant' : 'user', content: text(turn?.content, 2000),
-  })) : [];
-  if (history.at(-1)?.role === 'user') history.pop();
-  while (history.length && history[0].role !== 'user') history.shift();
-  const system = [
-    'You are FitCoach, a concise fitness and nutrition coach. Respond ONLY with a JSON object: {"reply":string,"safety":boolean,"intents":array}. Keep reply under 150 words.',
-    'Never claim to edit a plan or log. Changes require the user to accept a card. Each intent is a flat object with a "type" field, exactly one of: {"type":"short_on_time","minutes":10-120}, {"type":"pain","area":"knee"|"lower_back"|"shoulder"|"wrist"|"elbow"|"hip"|"ankle"|"neck","red_flags":boolean}, {"type":"low_energy"}, {"type":"goal_change","goal":"fat_loss"|"muscle_gain"|"strength"|"maintenance"}, {"type":"training_days","days":1-6}. Use [] when no change is needed.',
-    'Do not diagnose injuries, recommend extreme diets, or tell users to train through pain. For chest pain, fainting or trouble breathing, urge emergency medical help and return no intents.',
-    `User context: ${context}`,
-  ].join('\n');
-  const response = await complete(config, meter, 'chat', [{ role: 'system', content: system }, ...history, { role: 'user', content: message }], 4096);
+  // Scope gate: off-topic asks get a fixed redirect without a provider call (the quota claim is refunded).
+  if (isOffTopic(message)) return { result: { reply: OFF_TOPIC_REPLY, safety: false, intents: [] }, tokens: { input: 0, output: 0 } };
+  // History is folded into one quoted user turn, so forged "assistant" turns are never replayed as the model's own.
+  const system = buildCoachSystem(body.context);
+  const response = await complete(config, meter, 'chat', [{ role: 'system', content: system }, { role: 'user', content: buildCoachUserTurn(body.history, message) }], 4096);
   let value: Record<string, unknown>;
   try {
     value = parseObject(response.text);

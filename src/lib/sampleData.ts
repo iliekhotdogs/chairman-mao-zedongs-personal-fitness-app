@@ -131,6 +131,7 @@ export function buildSampleState(deviceId: string, today = toISODate()): AppStat
 
   return {
     ...state,
+    sample: true,
     profile,
     targets,
     weights,

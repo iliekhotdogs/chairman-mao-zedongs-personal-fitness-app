@@ -3,7 +3,8 @@ import { Pressable } from 'react-native';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Button, Card, EmptyState, Expandable, IconButton, Menu, Muted, PageHeader, Row, Screen, Sheet, Stack, Text, Columns } from '@/components/ui';
+import { newId } from '@/lib/id';
+import { Badge, Banner, Button, Card, EmptyState, Expandable, IconButton, Menu, Muted, PageHeader, Row, Screen, Sheet, Stack, Text, Columns } from '@/components/ui';
 import { CaloriesRing, MacroBars, PhotoThumb, sourceBadge } from '@/components/nutrition';
 import { LogMealSheet } from '@/components/LogMealSheet';
 import { useStore } from '@/store/AppStore';
@@ -23,6 +24,13 @@ export default function FoodLog() {
   const [date, setDate] = useState(today);
   const [toDelete, setToDelete] = useState<FoodEntry | null>(null);
   const [mealOpen, setMealOpen] = useState(false);
+  // last deleted meal, so Undo can restore it; its local photo is discarded only when a newer delete replaces it
+  const [undo, setUndo] = useState<FoodEntry | null>(null);
+  const relog = (e: FoodEntry) => {
+    const now = nowISO();
+    // a copy for today; the photo stays with the original meal
+    doAct({ type: 'LOG_FOOD', entry: { ...e, id: newId(), date: today, photoUri: undefined, origin: 'manual', confirmedAt: now, createdAt: now, updatedAt: now } }, 'Logged again for today');
+  };
   const entries = foodForDay(state, date);
   const rem = remainingForDay(state, date)!;
 
@@ -43,6 +51,11 @@ export default function FoodLog() {
         subtitle="Everything here was confirmed by you."
         right={<Button title="Add meal" icon="add" onPress={() => setMealOpen(true)} />}
       />
+      {undo ? (
+        <Banner kind="info" title="Meal deleted" action={<Button title="Undo" size="sm" kind="secondary" onPress={() => { if (doAct({ type: 'LOG_FOOD', entry: { ...undo, deleted: false, updatedAt: nowISO() } }, 'Meal restored')) setUndo(null); }} />}>
+          {undo.items.map((i) => i.name).join(', ')}
+        </Banner>
+      ) : null}
       <Row>
         <IconButton icon="chevron-back" label="Previous day" onPress={() => setDate(addDays(date, -1))} />
         <Text variant="h3" style={{ flex: 1, textAlign: 'center' }}>{formatDateLabel(date, today)}</Text>
@@ -71,7 +84,7 @@ export default function FoodLog() {
                       <Muted variant="smallStrong">{Math.round(tot.calories)} kcal</Muted>
                     </Row>
                     {list.map((e) => (
-                      <EntryCard key={e.id} entry={e} onDelete={() => setToDelete(e)} onEdit={() => router.push({ pathname: '/food/manual', params: { id: e.id } })} />
+                      <EntryCard key={e.id} entry={e} onRelog={e.date !== today ? () => relog(e) : undefined} onDelete={() => setToDelete(e)} onEdit={() => router.push({ pathname: '/food/manual', params: { id: e.id } })} />
                     ))}
                   </Stack>
                 );
@@ -96,7 +109,10 @@ export default function FoodLog() {
               icon="trash-outline"
               style={{ flex: 1 }}
               onPress={() => {
-                if (toDelete && doAct({ type: 'DELETE_FOOD', id: toDelete.id, now: nowISO() }, 'Meal deleted')) void discardLocalPhoto(toDelete.photoUri);
+                if (toDelete && doAct({ type: 'DELETE_FOOD', id: toDelete.id, now: nowISO() })) {
+                  if (undo) void discardLocalPhoto(undo.photoUri);
+                  setUndo(toDelete);
+                }
                 setToDelete(null);
               }}
             />
@@ -108,7 +124,7 @@ export default function FoodLog() {
   );
 }
 
-function EntryCard({ entry, onDelete, onEdit }: { entry: FoodEntry; onDelete: () => void; onEdit: () => void }) {
+function EntryCard({ entry, onDelete, onEdit, onRelog }: { entry: FoodEntry; onDelete: () => void; onEdit: () => void; onRelog?: () => void }) {
   const tot = sumItems(entry.items);
   const kinds = [...new Set(entry.items.map((i) => i.source.kind))];
   return (
@@ -129,7 +145,7 @@ function EntryCard({ entry, onDelete, onEdit }: { entry: FoodEntry; onDelete: ()
             </Row>
           </Expandable>
         </Pressable>
-        <Menu title="Meal options" label="Meal options" items={[{ label: 'Edit', icon: 'create-outline', onPress: onEdit }, { label: 'Delete', icon: 'trash-outline', danger: true, onPress: onDelete }]} />
+        <Menu title="Meal options" label="Meal options" items={[{ label: 'Edit', icon: 'create-outline', onPress: onEdit }, ...(onRelog ? [{ label: 'Log again today', icon: 'copy-outline' as const, onPress: onRelog }] : []),{ label: 'Delete', icon: 'trash-outline', danger: true, onPress: onDelete }]} />
       </Row>
     </Card>
   );

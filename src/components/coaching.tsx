@@ -7,6 +7,7 @@ import { useAct } from './Toast';
 import { useStore } from '@/store/AppStore';
 import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { nowISO } from '@/lib/dates';
+import { targetChangeRows } from '@/lib/coaching/adaptive';
 
 const STATUS = {
   pending: { tone: 'pending' as const, badge: 'pending' as const, label: 'Needs your approval' },
@@ -68,13 +69,7 @@ function ChangeDetails({ proposal }: { proposal: Proposal }) {
   const { state } = useStore();
   const c = proposal.change;
   if (c.type === 'target_change' || c.type === 'goal_change') {
-    const t = state.targets;
-    const rows: [string, number | undefined, number][] = [
-      ['Calories', t?.calories, c.next.calories],
-      ['Protein (g)', t?.proteinG, c.next.proteinG],
-      ['Carbs (g)', t?.carbsG, c.next.carbsG],
-      ['Fat (g)', t?.fatG, c.next.fatG],
-    ];
+    const rows = targetChangeRows(c, state.targets, proposal.status === 'pending');
     return (
       <Card style={{ padding: Space.md, gap: 4 }}>
         {rows.map(([k, from, to]) => (
@@ -105,6 +100,46 @@ function ChangeDetails({ proposal }: { proposal: Proposal }) {
         {c.day.exercises.map((e, i) => (
           <Muted key={i} variant="small">
             {exerciseName(e.exerciseId)} · {formatPrescription(e, ' × ')}
+          </Muted>
+        ))}
+      </Card>
+    );
+  }
+  if (c.type === 'log_food') {
+    return (
+      <Card style={{ padding: Space.md, gap: 4 }}>
+        {c.entry.items.map((it, i) => (
+          <Row key={i}>
+            <Muted variant="small" style={{ flex: 1 }}>{it.name} ({it.portionLabel})</Muted>
+            <Text variant="smallStrong">{it.calories} kcal · {it.proteinG}P {it.carbsG}C {it.fatG}F</Text>
+          </Row>
+        ))}
+      </Card>
+    );
+  }
+  if (c.type === 'edit_food') {
+    return (
+      <Card style={{ padding: Space.md }}>
+        <Row>
+          <Muted variant="small" style={{ flex: 1 }}>Calories</Muted>
+          <Text variant="smallStrong">{c.before} → {c.calories} kcal</Text>
+        </Row>
+      </Card>
+    );
+  }
+  if (c.type === 'delete_food') {
+    return (
+      <Card style={{ padding: Space.md }}>
+        <Muted variant="small">This food entry will be removed from your log.</Muted>
+      </Card>
+    );
+  }
+  if (c.type === 'log_workout') {
+    return (
+      <Card style={{ padding: Space.md, gap: 4 }}>
+        {c.sets.map((s, i) => (
+          <Muted key={i} variant="small">
+            {exerciseName(s.exerciseId)} · {s.reps} × {s.weightKg} kg{s.rpe ? ` · RPE ${s.rpe}` : ''}
           </Muted>
         ))}
       </Card>

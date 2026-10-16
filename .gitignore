@@ -49,3 +49,4 @@ pilot/private/
 
 # Claude Code agent worktrees
 .claude/worktrees/
+.vercel

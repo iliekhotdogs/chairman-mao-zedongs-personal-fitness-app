@@ -1,9 +1,10 @@
-import { activityBonus, missedWorkoutInsight, runEngine, trendAdjustment, weightSlopePerDay, progressionProposal } from '../coaching/adaptive';
+import { activityBonus, missedWorkoutInsight, runEngine, targetChangeRows, trendAdjustment, weightSlopePerDay, progressionProposal } from '../coaching/adaptive';
+import { reducer } from '../reducer';
 import { simulateCoachReply } from '../coaching/coachSim';
 import { buildSampleState } from '../sampleData';
 import { emptyState, type AppState } from '../state';
 import { decide, inQuietHours, MAX_COACH_NOTIFICATIONS_PER_DAY, type Candidate } from '../notifications/policy';
-import { generatePlan } from '../workouts/generator';
+import { generatePlan, planGoal, stalePlanGoal } from '../workouts/generator';
 import type { NotificationPrefs, NotificationRecord } from '../types';
 
 const TODAY = '2026-10-02';
@@ -53,6 +54,20 @@ describe('weight trend adjustment', () => {
     expect(r.proposal!.scope).toBe('ongoing');
     const next = (r.proposal!.change as { type: 'target_change'; next: { calories: number } }).next.calories;
     expect(next).toBe(s.targets!.calories - 150);
+  });
+  it('the accepted card compares against the target captured on the proposal, not the applied one', () => {
+    const s = sample();
+    const before = s.targets!.calories;
+    const p = trendAdjustment(s, TODAY).proposal!;
+    const done = reducer({ ...s, proposals: [p] }, { type: 'ACCEPT_PROPOSAL', id: p.id, now: '2026-10-15T12:00:00.000Z', today: TODAY });
+    const accepted = done.proposals.find((x) => x.id === p.id)!;
+    if (accepted.change.type !== 'target_change') throw new Error('expected target_change');
+    expect(done.targets!.calories).toBe(before - 150);
+    const [label, from, to] = targetChangeRows(accepted.change, done.targets, false)[0];
+    expect([label, from, to]).toEqual(['Calories', before, before - 150]);
+    // An old accepted proposal without `before` shows no "from" rather than the already-applied value.
+    expect(targetChangeRows({ type: 'target_change', next: accepted.change.next }, done.targets, false)[0][1]).toBeUndefined();
+    expect(targetChangeRows({ type: 'target_change', next: accepted.change.next }, s.targets, true)[0][1]).toBe(before);
   });
   it('does not create a target change below the configured floor', () => {
     const s = sample();
@@ -208,5 +223,22 @@ describe('plan generator', () => {
   it('fits the time budget and schedules on chosen weekdays', () => {
     const plan = generatePlan({ ...base, sessionMinutes: 30, trainingDays: [2, 4] }, TODAY);
     expect(plan.days.map((d) => d.weekday)).toEqual([2, 4]);
+  });
+
+  it('stores the goal and flags a plan built for a different goal', () => {
+    const plan = generatePlan({ ...base, goal: 'fat_loss' }, TODAY);
+    expect(plan.goal).toBe('fat_loss');
+    expect(plan.rationale.join(' ')).toContain('lose fat');
+    expect(stalePlanGoal(plan, { goal: 'fat_loss' })).toBeUndefined();
+    expect(stalePlanGoal(plan, { goal: 'muscle_gain' })).toBe('fat_loss');
+    expect(stalePlanGoal(undefined, { goal: 'muscle_gain' })).toBeUndefined();
+  });
+
+  it('reads the goal of older plans from their rationale, ignores user routines', () => {
+    const { goal: _goal, ...plan } = generatePlan({ ...base, goal: 'fat_loss' }, TODAY);
+    const legacy = { ...plan, rationale: ['Rep ranges are set for fat loss at a beginner level.'] };
+    expect(planGoal(legacy)).toBe('fat_loss');
+    expect(stalePlanGoal(legacy, { goal: 'strength' })).toBe('fat_loss');
+    expect(stalePlanGoal({ ...legacy, source: 'user_created' }, { goal: 'strength' })).toBeUndefined();
   });
 });

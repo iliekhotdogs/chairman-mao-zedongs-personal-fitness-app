@@ -69,7 +69,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             )}
           </View>
         </View>
-        <View style={{ flex: 1 }}>{children}</View>
+        <View style={{ flex: 1 }}>
+      {state.sample ? (
+        <Row gap={Space.sm} style={{ paddingHorizontal: Space.md, paddingVertical: Space.sm, backgroundColor: C.warningSoft }}>
+          <Ionicons name="flask" size={16} color={C.warning} />
+          <Muted variant="small" style={{ flex: 1 }}>Sample data: made-up entries for exploring the app. Not your real log.</Muted>
+          <Button title="Replace" kind="ghost" size="sm" onPress={() => router.navigate('/settings' as never)} />
+        </Row>
+      ) : null}
+          <View style={{ flex: 1 }}>{children}</View>
+        </View>
       </View>
     );
   }
@@ -84,6 +93,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Row gap={Space.sm} style={{ paddingHorizontal: Space.md, paddingVertical: Space.sm, backgroundColor: C.warningSoft }} accessibilityRole="alert">
           <Muted variant="small" style={{ flex: 1 }}>{sync.status === 'offline' ? 'Offline. Changes will sync when connected.' : 'Sync failed. Your changes are saved here.'}</Muted>
           <Button title="Retry" kind="ghost" size="sm" onPress={() => void sync.syncNow()} />
+        </Row>
+      ) : null}
+      {state.sample ? (
+        <Row gap={Space.sm} style={{ paddingHorizontal: Space.md, paddingVertical: Space.sm, backgroundColor: C.warningSoft }}>
+          <Ionicons name="flask" size={16} color={C.warning} />
+          <Muted variant="small" style={{ flex: 1 }}>Sample data: made-up entries for exploring the app. Not your real log.</Muted>
+          <Button title="Replace" kind="ghost" size="sm" onPress={() => router.navigate('/settings' as never)} />
         </Row>
       ) : null}
       <View style={{ flex: 1 }}>{children}</View>

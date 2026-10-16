@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
+import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 
 import { C, Space } from '@/constants/theme';
 import { Badge, Banner, Button, Card, Chip, Expandable, Field, IconButton, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Toggle } from '@/components/ui';
@@ -26,6 +28,7 @@ import { csvExports, jsonExport } from '@/lib/export';
 import { saveExportFile } from '@/lib/exportFile';
 import { clearIntegrationConfig } from '@/lib/integrations/config';
 import { formatRest, REST_MAX_SEC, REST_MIN_SEC, REST_STEP_SEC, sanitizeRestPrefs } from '@/lib/workouts/restTimer';
+import { GOAL_LABEL, stalePlanGoal } from '@/lib/workouts/generator';
 import type { BodyArea, DailyActivity, GoalPriority, NutritionTargets, Profile, Sex } from '@/lib/types';
 
 const GOALS: { value: GoalPriority; label: string }[] = [
@@ -64,6 +67,9 @@ export default function Settings() {
         <PrivacySection />
         <DeleteAccountSection />
       </Accordion>
+      <Accordion title="Report a bug" icon="bug-outline">
+        <BugReportSection />
+      </Accordion>
       <Accordion title="Advanced" icon="options-outline">
         <CoachSection />
         <RestSection />
@@ -79,8 +85,8 @@ function GoalSection() {
   const { state } = useStore();
   const doAct = useAct();
   const [preview, setPreview] = useState<{ goal: GoalPriority; t: NutritionTargets } | null>(null);
-  const [offerPlan, setOfferPlan] = useState(false);
   const p = state.profile!;
+  const staleGoal = stalePlanGoal(state.plan, p);
   const w = latestWeight(state)?.weightKg ?? p.startWeightKg;
   return (
     <Card style={[FLAT, { gap: Space.md }]}>
@@ -98,7 +104,7 @@ function GoalSection() {
         footer={
           <Row gap={Space.sm}>
             <Button title="Keep current" kind="reject" style={{ flex: 1 }} onPress={() => setPreview(null)} />
-            <Button title="Confirm change" kind="accept" icon="checkmark" style={{ flex: 1 }} onPress={() => { if (preview && doAct({ type: 'SET_GOAL', goal: preview.goal, targets: preview.t, now: nowISO(), confirmed: true })) { setPreview(null); setOfferPlan(true); } }} />
+            <Button title="Confirm change" kind="accept" icon="checkmark" style={{ flex: 1 }} onPress={() => { if (preview && doAct({ type: 'SET_GOAL', goal: preview.goal, targets: preview.t, now: nowISO(), confirmed: true })) setPreview(null); }} />
           </Row>
         }>
         {preview ? (
@@ -112,7 +118,7 @@ function GoalSection() {
           </>
         ) : null}
       </Sheet>
-      {offerPlan ? <Banner kind="info" title="Priority updated"><Button title="Update your plan" kind="secondary" size="sm" onPress={() => { setOfferPlan(false); router.push('/workouts?preview=1'); }} /></Banner> : null}
+      {staleGoal ? <Banner kind="info" title={`Your plan was built for ${GOAL_LABEL[staleGoal].toLowerCase()}. Regenerate?`}><Button title="Regenerate plan" kind="secondary" size="sm" icon="sparkles-outline" onPress={() => router.push('/workouts?preview=1')} /></Banner> : null}
     </Card>
   );
 }
@@ -154,7 +160,7 @@ function TargetsSection() {
         <Button title="Recalculate from latest weight" kind="ghost" size="sm" icon="refresh" onPress={() => setRecalc(computeTargets(state.profile!, w))} />
       </Row>
       <Sheet visible={edit} onClose={() => setEdit(false)} title="Edit targets" footer={<Button title="Save targets" icon="checkmark" full onPress={saveManual} disabled={!cal || cal < 1000 || !prot} />}>
-        <NumberField label="Daily calories" value={cal} onChange={setCal} suffix="kcal" error={cal !== undefined && cal < 1000 ? 'Below 1,000 kcal is not supported. Please talk to a professional.' : undefined} />
+        <NumberField label="Daily calories" value={cal} onChange={setCal} min={0} max={10000} exclusiveMin suffix="kcal" error={cal !== undefined && cal < 1000 ? 'Below 1,000 kcal is not supported. Please talk to a professional.' : undefined} />
         <NumberField label="Protein" value={prot} onChange={setProt} suffix="g" />
         <Muted variant="small">Fat is set to ~27% of calories and carbs fill the rest.</Muted>
       </Sheet>
@@ -349,6 +355,94 @@ function QuietHours({ start, end, onSave }: { start: string; end: string; onSave
 }
 
 
+type OwnBug = { id: string; body: string; status: string; created_at: string };
+
+/** Sends route, app version and platform with the text; nothing from app state. */
+function BugReportSection() {
+  const { sync } = useStore();
+  const toast = useToast();
+  const pathname = usePathname();
+  const [body, setBody] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [mine, setMine] = useState<OwnBug[]>([]);
+  const [deleting, setDeleting] = useState<OwnBug | null>(null);
+  const userId = sync.session?.user.id;
+
+  const load = async () => {
+    const sb = supabase();
+    if (!sb || !userId) return;
+    // Filter by owner: RLS also lets admins read everyone's reports.
+    const { data } = await sb.from('bug_reports').select('id, body, status, created_at').eq('user_id', userId).order('created_at', { ascending: false }).limit(10);
+    setMine((data as OwnBug[] | null) ?? []);
+  };
+  useEffect(() => {
+    void Promise.resolve().then(load);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
+  if (!sync.configured || !userId) return <Muted>Sign in to send a bug report.</Muted>;
+
+  const send = async () => {
+    const sb = supabase();
+    if (!sb || !body.trim()) return;
+    setBusy(true);
+    setError('');
+    const { error: e } = await sb.from('bug_reports').insert({
+      user_id: userId, body: body.trim().slice(0, 2000), route: pathname.slice(0, 200),
+      app_version: String(Constants.expoConfig?.version ?? '').slice(0, 40), platform: Platform.OS,
+    });
+    setBusy(false);
+    if (e) {
+      setError(e.message.includes('limit') ? 'You have reached the limit of 10 reports per day.' : 'Could not send the report. Try again.');
+      return;
+    }
+    setBody('');
+    toast('Thanks, bug report sent');
+    await load();
+  };
+
+  const remove = async () => {
+    const sb = supabase();
+    if (!sb || !deleting) return;
+    const { error: e } = await sb.from('bug_reports').delete().eq('id', deleting.id).eq('user_id', userId);
+    setDeleting(null);
+    if (e) {
+      toast('Could not delete the report. Try again.', 'error');
+      return;
+    }
+    toast('Report deleted');
+    await load();
+  };
+
+  return (
+    <Stack gap={Space.sm}>
+      <Field label="What went wrong?" value={body} onChangeText={setBody} multiline maxLength={2000} placeholder="Describe the problem" />
+      <Muted variant="small">Sends your text plus the current screen, app version and platform. Nothing else.</Muted>
+      {error ? <Banner kind="warning">{error}</Banner> : null}
+      <Button title="Send report" loading={busy} disabled={!body.trim()} onPress={send} />
+      {mine.map((b) => (
+        <Row key={b.id} gap={Space.xs} style={{ alignItems: 'center' }}>
+          <Muted variant="small" style={{ flex: 1 }}>{`${new Date(b.created_at).toLocaleDateString()} · ${b.status} · ${b.body.slice(0, 80)}`}</Muted>
+          <IconButton icon="trash-outline" label="Delete report" size={18} color={C.danger} onPress={() => setDeleting(b)} />
+        </Row>
+      ))}
+      <Sheet
+        visible={!!deleting}
+        onClose={() => setDeleting(null)}
+        title="Delete this report?"
+        footer={
+          <Row gap={Space.sm}>
+            <Button title="Cancel" kind="secondary" style={{ flex: 1 }} onPress={() => setDeleting(null)} />
+            <Button title="Delete" kind="danger" style={{ flex: 1 }} onPress={remove} />
+          </Row>
+        }>
+        <Muted>The report is removed for good. It still counts toward the daily limit of 10.</Muted>
+      </Sheet>
+    </Stack>
+  );
+}
+
 function PrivacySection() {
   const { state, sync } = useStore();
   const doAct = useAct();
@@ -396,6 +490,7 @@ function PrivacySection() {
       </Row>
       <Stack gap={Space.sm} style={{ marginTop: Space.md, paddingTop: Space.md, borderTopWidth: 1, borderTopColor: C.border }}>
         <Text variant="smallStrong" color={C.danger}>Danger zone</Text>
+        <Muted variant="small">{sync.session ? '"Delete data on this device" clears only this browser or phone; your cloud copy stays and downloads again when you sign in. "Delete my cloud data" removes the server copy too.' : 'This clears only this browser or phone. You have no cloud copy.'}</Muted>
         <Row wrap gap={Space.sm}>
           <Button title="Delete data on this device" kind="danger" size="sm" onPress={() => setConfirm('local')} />
           {sync.session ? <Button title="Delete my cloud data" kind="danger" size="sm" onPress={() => setConfirm('cloud')} /> : null}
