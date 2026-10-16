@@ -63,6 +63,13 @@ describe('activity de-duplication', () => {
     expect(c.updated).toBe(1);
   });
 
+  it('re-entering a deleted manual day with the same steps restores it', () => {
+    const deleted = { ...rec({ source: 'manual', origin: 'You', steps: 5000 }), deleted: true };
+    const r = mergeActivity([deleted], [rec({ source: 'manual', origin: 'You', steps: 5000 })]);
+    expect(r.records[0].deleted).toBeUndefined();
+    expect(dailyActivity(r.records, '2026-10-02').steps).toBe(5000);
+  });
+
   it('counts one source per day: manual first, then most steps', () => {
     const records = [rec({ externalId: 'p', origin: 'Phone', steps: 8000 }), rec({ externalId: 'w', origin: 'Watch', steps: 9000 })];
     const d = dailyActivity(records, '2026-10-02');

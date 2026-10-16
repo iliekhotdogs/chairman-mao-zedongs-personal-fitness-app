@@ -9,6 +9,7 @@ import { remainingForDay, workoutForDay, latestWeight, live } from '../selectors
 import { exerciseName, findExercise, formatPrescription } from '../workouts/exercises';
 import { ACTION_INTENT_TYPES, validateActionIntent, type ActionIntent } from '../../../supabase/functions/ai/foodValidation';
 import { prepareImageForAI, type ImageSetting } from './image';
+import { recentFoodSummary, recentSessionSummary } from './coachHistory';
 import { z } from 'zod';
 import { log } from '../log';
 
@@ -251,6 +252,8 @@ export function coachContext(state: AppState, today: ISODate) {
     latest_weight_kg: latestWeight(state)?.weightKg,
     weights_14d: live(state.weights).filter((w) => w.date > addDays(today, -14)).map((w) => [w.date, w.weightKg]),
     sessions_14d: live(state.sessions).filter((s) => s.finishedAt && s.date > addDays(today, -14)).length,
+    food_14d: recentFoodSummary(state, today),
+    recent_sessions: recentSessionSummary(state, today),
   };
 }
 

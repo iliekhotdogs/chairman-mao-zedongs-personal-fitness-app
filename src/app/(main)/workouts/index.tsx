@@ -222,7 +222,7 @@ function History() {
                 <Muted variant="small">{formatDateLabel(s.date, today)}</Muted>
               </Row>
               <Muted variant="small">
-                {exercises.length} exercises · {s.sets.length} sets · {displayWeight(volume, state.settings.units, 0)} total volume
+                {exercises.length} exercise{exercises.length === 1 ? '' : 's'} · {s.sets.length} set{s.sets.length === 1 ? '' : 's'} · {displayWeight(volume, state.settings.units, 0)} total volume
               </Muted>
               <Muted variant="small" numberOfLines={1}>{exercises.map(exerciseName).join(', ')}</Muted>
             </Card>

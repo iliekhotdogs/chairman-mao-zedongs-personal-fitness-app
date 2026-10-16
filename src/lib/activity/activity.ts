@@ -20,7 +20,7 @@ export function mergeActivity(existing: ActivityRecord[], incoming: ActivityReco
     if (!prev) {
       byKey.set(k, r);
       added++;
-    } else if (prev.steps !== r.steps || prev.activeKcal !== r.activeKcal || prev.exerciseMinutes !== r.exerciseMinutes) {
+    } else if (prev.deleted || prev.steps !== r.steps || prev.activeKcal !== r.activeKcal || prev.exerciseMinutes !== r.exerciseMinutes) {
       byKey.set(k, { ...r, id: prev.id });
       updated++;
     } else duplicates++;

@@ -18,6 +18,7 @@ import { weightSlopePerDay } from '@/lib/coaching/adaptive';
 import { progressionSeries } from '@/lib/workouts/progression';
 import { exerciseName } from '@/lib/workouts/exercises';
 import { weeklyMuscleVolume } from '@/lib/workouts/sessionStats';
+import type { WeightEntry } from '@/lib/types';
 
 type Tab = 'calories' | 'weight' | 'strength' | 'photos';
 const TABS: Tab[] = ['calories', 'weight', 'strength', 'photos'];
@@ -30,7 +31,7 @@ export default function Progress() {
   return (
     <Screen>
       <PageHeader title="Progress" subtitle="Calories, body weight, strength and photos" right={hasActivitySource(state) ? <Button title="Activity" kind="secondary" icon="footsteps-outline" onPress={() => router.push('/activity')} /> : undefined} />
-      <Segmented label="Progress view" value={tab} onChange={setTab} options={[{ value: 'calories', label: 'Calories' }, { value: 'weight', label: 'Weight' }, { value: 'strength', label: 'Strength' }, { value: 'photos', label: 'Photos' }]} />
+      <Segmented label="Progress view" value={tab} onChange={(t) => { setTab(t); router.setParams({ tab: t }); }} options={[{ value: 'calories', label: 'Calories' }, { value: 'weight', label: 'Weight' }, { value: 'strength', label: 'Strength' }, { value: 'photos', label: 'Photos' }]} />
       {tab === 'calories' && <Calories />}
       {tab === 'weight' && <Weight />}
       {tab === 'strength' && <Strength />}
@@ -105,6 +106,7 @@ function Weight() {
   const { state, today } = useStore();
   const doAct = useAct();
   const [open, setOpen] = useState(false);
+  const [removed, setRemoved] = useState<WeightEntry | undefined>();
   const units = state.settings.units;
   const weights = live(state.weights).sort((a, b) => a.date.localeCompare(b.date)).filter((w) => w.date > addDays(today, -60));
   const points = weights.map((w) => ({ x: shortDate(w.date), y: weightValue(w.weightKg, units) }));
@@ -128,7 +130,7 @@ function Weight() {
           <Button title="Log weight" size="sm" icon="add" onPress={() => setOpen(true)} />
         </Row>
         {points.length < 2 ? (
-          <EmptyState icon="scale-outline" title="Not enough weigh-ins yet" body="Weigh in a few mornings a week. The trend matters more than any single day." action={<Button title="Log weight" icon="add" onPress={() => setOpen(true)} />} />
+          <EmptyState icon="scale-outline" title="Not enough weigh-ins yet" body="Weigh in a few mornings a week. The trend matters more than any single day." />
         ) : (
           <>
             <LineChart label="Body weight over time with 7-day average" points={points} trend={trend} format={(v) => v.toFixed(0)} />
@@ -139,7 +141,7 @@ function Weight() {
         {[
           <Card key="a"><Stat label="Latest" value={last ? weightValue(last.weightKg, units) : '—'} unit={weightUnit(units)} sub={last ? formatDateLabel(last.date, today) : undefined} /></Card>,
           <Card key="b"><Stat label="3-week trend" value={perWeek !== undefined ? `${perWeek >= 0 ? '+' : ''}${weightValue(perWeek, units, 2)}` : '—'} unit={`${weightUnit(units)}/wk`} sub={perWeek === undefined ? 'Needs 4+ weigh-ins' : undefined} /></Card>,
-          <Card key="c"><Stat label="Change (60 days)" value={first && last ? `${last.weightKg - first.weightKg >= 0 ? '+' : ''}${weightValue(last.weightKg - first.weightKg, units)}` : '—'} unit={weightUnit(units)} /></Card>,
+          <Card key="c"><Stat label="Change (60 days)" value={first && last && first !== last ? `${last.weightKg - first.weightKg >= 0 ? '+' : ''}${weightValue(last.weightKg - first.weightKg, units)}` : '—'} unit={weightUnit(units)} /></Card>,
         ]}
       </Columns>
       {weights.length ? (
@@ -149,9 +151,18 @@ function Weight() {
             <Row key={w.id}>
               <Muted variant="small" style={{ flex: 1 }}>{shortDate(w.date)}</Muted>
               <Text variant="smallStrong">{displayWeight(w.weightKg, units)}</Text>
-              <IconButton icon="trash-outline" label={`Delete weigh-in on ${w.date}`} size={16} color={C.textSecondary} onPress={() => doAct({ type: 'DELETE_WEIGHT', id: w.id, now: nowISO() }, 'Weigh-in deleted')} />
+              <IconButton icon="trash-outline" label={`Delete weigh-in on ${w.date}`} size={16} color={C.textSecondary} onPress={() => { if (doAct({ type: 'DELETE_WEIGHT', id: w.id, now: nowISO() })) setRemoved(w); }} />
             </Row>
           ))}
+        </Card>
+      ) : null}
+      {removed ? (
+        <Card tone="muted" style={{ padding: Space.md }}>
+          <Row gap={Space.sm}>
+            <Muted variant="small" style={{ flex: 1 }}>Weigh-in on {shortDate(removed.date)} deleted.</Muted>
+            <Button title="Undo" kind="secondary" size="sm" onPress={() => { if (doAct({ type: 'LOG_WEIGHT', entry: { ...removed, updatedAt: nowISO() } }, 'Weigh-in restored')) setRemoved(undefined); }} />
+            <IconButton icon="close" label="Dismiss" size={16} color={C.textSecondary} onPress={() => setRemoved(undefined)} />
+          </Row>
         </Card>
       ) : null}
       <WeightSheet visible={open} onClose={() => setOpen(false)} />

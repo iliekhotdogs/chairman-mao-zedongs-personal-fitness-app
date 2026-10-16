@@ -25,9 +25,13 @@ export default function RoutineEditor() {
   const [days, setDays] = useState<WorkoutDay[]>(existing?.days ?? [blankDay(1)]);
   const [pickFor, setPickFor] = useState<string | null>(null);
   const [q, setQ] = useState('');
+  const [confirmLeave, setConfirmLeave] = useState(false);
+  const [initial] = useState(() => JSON.stringify({ name, days }));
+  const dirty = JSON.stringify({ name, days }) !== initial;
 
   const updateDay = (dayId: string, fn: (d: WorkoutDay) => WorkoutDay) => setDays(days.map((d) => (d.id === dayId ? fn(d) : d)));
-  const valid = name.trim() && days.length && days.every((d) => d.exercises.length && d.name.trim());
+  const problem = routineProblem(name, days);
+  const valid = !problem;
 
   const save = (makeActive: boolean) => {
     const now = nowISO();
@@ -47,7 +51,7 @@ export default function RoutineEditor() {
 
   return (
     <Screen size="medium">
-      <PageHeader title={existing ? 'Edit routine' : 'New routine'} right={<Button title="Cancel" kind="ghost" onPress={() => goBack('/workouts')} />} />
+      <PageHeader title={existing ? 'Edit routine' : 'New routine'} right={<Button title="Cancel" kind="ghost" onPress={() => (dirty ? setConfirmLeave(true) : goBack('/workouts'))} />} />
       <Field label="Routine name" value={name} onChangeText={setName} />
       {days.map((d, di) => (
         <Card key={d.id} style={{ gap: Space.sm }}>
@@ -92,9 +96,9 @@ export default function RoutineEditor() {
         </Card>
       ))}
       <Button title="Add a day" kind="ghost" icon="add" onPress={() => setDays([...days, blankDay(days.length + 1)])} />
-      {!valid ? <Muted variant="small">Each day needs a name and at least one exercise.</Muted> : null}
+      {problem ? <Muted variant="small">{problem}</Muted> : null}
       <Row wrap gap={Space.sm}>
-        <Button title="Save routine" icon="checkmark" onPress={() => save(false)} disabled={!valid || days.some((d) => d.exercises.some((e) => e.repMin > e.repMax))} />
+        <Button title="Save routine" icon="checkmark" onPress={() => save(false)} disabled={!valid} />
         {state.plan?.id !== existing?.id ? <Button title="Save & use as my plan" kind="secondary" onPress={() => save(true)} disabled={!valid} /> : null}
       </Row>
 
@@ -121,6 +125,30 @@ export default function RoutineEditor() {
           ))}
         </Stack>
       </Sheet>
+      <Sheet
+        visible={confirmLeave}
+        onClose={() => setConfirmLeave(false)}
+        title="Discard changes?"
+        footer={
+          <Row gap={Space.sm}>
+            <Button title="Keep editing" kind="secondary" style={{ flex: 1 }} onPress={() => setConfirmLeave(false)} />
+            <Button title="Discard" kind="danger" style={{ flex: 1 }} onPress={() => { setConfirmLeave(false); goBack('/workouts'); }} />
+          </Row>
+        }>
+        <Muted>Your unsaved changes to this routine will be lost.</Muted>
+      </Sheet>
     </Screen>
   );
+}
+
+/** The first thing blocking save, named so the user knows what to fix. */
+function routineProblem(name: string, days: WorkoutDay[]): string | undefined {
+  if (!name.trim()) return 'Add a routine name to save.';
+  if (!days.length) return 'Add at least one day to save.';
+  for (const [i, d] of days.entries()) {
+    if (!d.name.trim()) return `Day ${i + 1} needs a name.`;
+    if (!d.exercises.length) return `${d.name} needs at least one exercise.`;
+    if (d.exercises.some((e) => e.repMin > e.repMax)) return `${d.name}: min reps should be ≤ max reps.`;
+  }
+  return undefined;
 }

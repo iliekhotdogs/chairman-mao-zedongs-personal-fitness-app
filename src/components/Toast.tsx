@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Animated, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, Radius, Space } from '@/constants/theme';
@@ -9,9 +9,11 @@ import type { Action } from '@/lib/reducer';
 
 type Kind = 'success' | 'error' | 'info';
 const Ctx = createContext<(msg: string, kind?: Kind) => void>(() => {});
+const LiftCtx = createContext<(px: number) => void>(() => {});
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toast, setToast] = useState<{ msg: string; kind: Kind } | null>(null);
+  const [lift, setLift] = useState(0);
   const [opacity] = useState(() => new Animated.Value(0));
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const insets = useSafeAreaInsets();
@@ -31,9 +33,9 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   const color = toast?.kind === 'error' ? C.danger : toast?.kind === 'info' ? C.info : C.success;
   return (
     <Ctx.Provider value={show}>
-      {children}
+      <LiftCtx.Provider value={setLift}>{children}</LiftCtx.Provider>
       {toast ? (
-        <View style={[styles.wrap, { bottom: Math.max(insets.bottom, 12) + 76, pointerEvents: 'none' }]}>
+        <View style={[styles.wrap, { bottom: Math.max(insets.bottom, 12) + 76 + lift, pointerEvents: 'none' }]}>
           <Animated.View style={[styles.toast, { opacity }]} accessibilityLiveRegion="polite" accessibilityRole={toast.kind === 'error' ? 'alert' : undefined}>
             <Ionicons name={toast.kind === 'error' ? 'alert-circle' : toast.kind === 'info' ? 'information-circle' : 'checkmark-circle'} size={18} color={color} />
             <Text variant="smallStrong" color={C.text} style={{ flexShrink: 1 }}>
@@ -47,6 +49,15 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
 }
 
 export const useToast = () => useContext(Ctx);
+
+/** Raise toasts while a screen with a bottom composer is mounted, so they don't cover its input. */
+export function useToastLift(px: number) {
+  const setLift = useContext(LiftCtx);
+  useEffect(() => {
+    setLift(px);
+    return () => setLift(0);
+  }, [px, setLift]);
+}
 
 /** Dispatch an action; show rule violations as an error toast. Returns true on success. */
 export function useAct() {

@@ -6,7 +6,7 @@ import { C, Radius, Space } from '@/constants/theme';
 import { AccentRule, Badge, Banner, Button, Card, Chip, EmptyState, IconButton, Menu, Muted, Row, Sheet, Stack, Text, ErrorState } from '@/components/ui';
 import { InsightCard, ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
-import { useAct } from '@/components/Toast';
+import { useAct, useToastLift } from '@/components/Toast';
 import { useAiEngine } from '@/hooks/useAiEngine';
 import { useLayout } from '@/hooks/useLayout';
 import { router } from 'expo-router';
@@ -17,6 +17,7 @@ import { formatTime, nowISO } from '@/lib/dates';
 import type { ChatMessage } from '@/lib/types';
 import { PrivacyNotice } from '@/components/PrivacyNotice';
 
+const MAX_MESSAGE = 2000; // matches the server's message cap
 const PROMPTS = ['How am I doing?', 'I only have 20 minutes today', "I'm eating out tonight", 'My knee hurts', 'What should I eat for dinner?'];
 
 export default function Coach() {
@@ -39,6 +40,7 @@ export default function Coach() {
   const decided = state.proposals.filter((p) => p.status !== 'pending').sort((a, b) => (b.decidedAt ?? b.updatedAt).localeCompare(a.decidedAt ?? a.updatedAt)).slice(0, 6);
   const engine = useAiEngine('chat');
   const simulated = engine === 'simulated';
+  useToastLift(isDesktop ? 120 : 130);
 
   useEffect(() => {
     const t = setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 50);
@@ -103,7 +105,7 @@ export default function Coach() {
         ) : null}
         {messages.length === 0 ? <EmptyState icon="chatbubbles-outline" title="Ask your coach anything" body="It knows your goal, plan, food log and recent progress." /> : null}
         {messages.map((m) => (
-          <Bubble key={m.id} m={m} />
+          <Bubble key={m.id} m={m} hidePending={isDesktop} />
         ))}
         {thinking ? (
           <Row gap={6} accessibilityLiveRegion="polite">
@@ -138,11 +140,13 @@ export default function Coach() {
             placeholderTextColor={C.textMuted}
             onSubmitEditing={() => send(text)}
             returnKeyType="send"
+            maxLength={MAX_MESSAGE}
             accessibilityLabel="Message your coach"
             style={[styles.input, inputFocused ? { borderColor: C.primary, borderWidth: 2 } : null]}
           />
           <IconButton icon="send" label="Send" color={text.trim() ? C.primary : C.borderStrong} onPress={() => send(text)} disabled={!text.trim() || thinking} />
         </Row>
+        {text.length > MAX_MESSAGE - 200 ? <Muted variant="small" style={{ textAlign: 'right' }} accessibilityLiveRegion="polite">{text.length}/{MAX_MESSAGE}</Muted> : null}
       </View>
     </View>
   );
@@ -199,10 +203,12 @@ export default function Coach() {
   );
 }
 
-function Bubble({ m }: { m: ChatMessage }) {
+function Bubble({ m, hidePending }: { m: ChatMessage; hidePending: boolean }) {
   const { state } = useStore();
   const mine = m.role === 'user';
-  const proposals = (m.proposalIds ?? []).map((id) => state.proposals.find((p) => p.id === id)).filter(Boolean);
+  // on desktop, pending suggestions live in the side panel; showing them here too duplicates Accept/Decline
+  const all = (m.proposalIds ?? []).map((id) => state.proposals.find((p) => p.id === id)).filter(Boolean);
+  const proposals = all.filter((p) => !(hidePending && p!.status === 'pending'));
   return (
     <Stack gap={Space.sm} style={{ alignItems: mine ? 'flex-end' : 'flex-start' }}>
       <View style={[styles.bubble, mine ? styles.bubbleMine : null]}>
@@ -215,6 +221,7 @@ function Bubble({ m }: { m: ChatMessage }) {
         <Text color={mine ? C.onPrimary : C.text}>{m.text}</Text>
         <Text variant="caption" color={mine ? C.onPrimary : C.textMuted} style={mine ? { opacity: 0.65 } : undefined}>{formatTime(m.createdAt)}</Text>
       </View>
+      {proposals.length < all.length ? <Muted variant="small">Suggestion waiting in the panel on the right.</Muted> : null}
       {proposals.map((p) => (
         <View key={p!.id} style={{ width: '100%', maxWidth: 560 }}>
           <ProposalCard proposal={p!} compact />
