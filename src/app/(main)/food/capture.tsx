@@ -9,10 +9,11 @@ import { Badge, Banner, Button, Card, ErrorState, Expandable, Field, LoadingStat
 import { FoodItemEditor, FoodSearch, ItemSourceDetails } from '@/components/FoodItemEditor';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
-import { estimateFood, AIUnavailableError } from '@/lib/ai/provider';
+import { estimateFood, AIUnavailableError, type AiFoodEstimate } from '@/lib/ai/provider';
+import { RestaurantCandidates } from '@/components/LogMealSheet';
 import { confirmEstimate, defaultMealForTime, FoodConfirmationError } from '@/lib/nutrition/estimate';
 import { sumItems } from '@/lib/nutrition/lookup';
-import type { Confidence, EstimateItem, FoodEstimate, FoodItem, MealType } from '@/lib/types';
+import type { Confidence, EstimateItem, FoodItem, MealType } from '@/lib/types';
 import { useLayout } from '@/hooks/useLayout';
 import { persistPhoto } from '@/lib/photo';
 import { useAiEngine } from '@/hooks/useAiEngine';
@@ -43,7 +44,8 @@ export default function CaptureScreen() {
   const [photo, setPhoto] = useState<{ uri: string; width?: number; height?: number } | null>(null);
   const [hint, setHint] = useState('');
   const [meal, setMeal] = useState<MealType>(defaultMealForTime());
-  const [estimate, setEstimate] = useState<FoodEstimate | null>(null);
+  const [estimate, setEstimate] = useState<AiFoodEstimate | null>(null);
+  const [picked, setPicked] = useState<number | null>(null);
   const [items, setItems] = useState<(FoodItem | EstimateItem)[]>([]);
   const [answer, setAnswer] = useState('');
   const [error, setError] = useState<string>();
@@ -88,6 +90,7 @@ export default function CaptureScreen() {
       }
       setEstimate(est);
       setItems(est.items);
+      setPicked(null);
       setAnswer('');
       setPhase('review');
     } catch (e) {
@@ -232,6 +235,7 @@ export default function CaptureScreen() {
                   <Muted variant="small">• Estimated by: {estimate.provider}</Muted>
                 </Expandable>
               </Card>
+              {estimate.restaurant ? <RestaurantCandidates match={estimate.restaurant} selected={picked} onSelect={(i) => { setPicked(i); setItems(i === null ? estimate.items : [estimate.restaurant!.candidates[i].item]); }} /> : null}
               {estimate.followUpQuestion ? (
                 <Card tone="info" style={{ gap: Space.sm }}>
                   <Row gap={6}>

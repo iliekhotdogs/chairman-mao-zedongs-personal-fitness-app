@@ -23,6 +23,11 @@ Apply the migrations in order (Supabase **SQL Editor**, or `supabase db push` af
 9. `supabase/migrations/20261015000100_quota_repairs.sql`: atomic food-search refunds and admin quota reset.
 10. `supabase/migrations/20261015000200_user_ai_preference_admin.sql`: server-only user AI preferences, provider-choice controls, admin role audit and confirmed-email bootstrap.
 11. `supabase/migrations/20261015000300_openrouter_provider.sql`: replace Gemini with OpenRouter as a user choice, migrate saved choices, and set 25 requests per user, 250 shared and 250 per network per UTC day.
+12. `supabase/migrations/20261016000000_restaurant_catalog.sql`: shared restaurant nutrition catalog (`restaurant_sources`, service role only; `restaurant_items`, read-only for signed-in users), the `replace_restaurant_items` RPC (service role), two seeded sources (Boston Pizza, Olive Garden Canada) and, when `pg_cron` and `pg_net` are available, a weekly `restaurant-import` job (Mondays 07:00 UTC).
+    - Both sources are seeded **disabled**: their robots.txt allows the pages but their terms forbid scraping/automated access (see `review_note`). Enable one only with the restaurant's written permission: `update restaurant_sources set enabled = true, status = 'pending' where id = '...'`.
+    - The cron job reads two Vault secrets and does nothing until both exist: `select vault.create_secret('https://<ref>.supabase.co', 'project_url'); select vault.create_secret('<service-role key>', 'service_role_key');`
+    - Without pg_cron/pg_net, run the refresh by hand (or from any weekly scheduler): `curl -X POST https://<ref>.supabase.co/functions/v1/restaurant-import -H "Authorization: Bearer <service-role key>" -H "Content-Type: application/json" -d '{}'`. A signed-in admin's token also works.
+    - A failed parse, or one with fewer than half the stored items or over 20% invalid rows, keeps the previous items and sets `status = 'needs_review'` with a note. Items checked more than 30 days ago are shown to users as "may be out of date".
 
 Apply all migrations before redeploying `ai` and `admin-stats`; the functions now depend on the preference and quota RPCs.
 
@@ -74,6 +79,7 @@ In **Edge Functions → Secrets** (or `supabase secrets set NAME=value --project
    supabase functions deploy admin-stats --project-ref nmovowhobqeaokzdspfp
    supabase functions deploy delete-account --project-ref nmovowhobqeaokzdspfp
    supabase functions deploy notify --project-ref nmovowhobqeaokzdspfp
+   supabase functions deploy restaurant-import --project-ref nmovowhobqeaokzdspfp
    # No account exists yet when someone signs up, so this one runs without JWT verification:
    supabase functions deploy redeem-invite --no-verify-jwt --project-ref nmovowhobqeaokzdspfp
    ```
