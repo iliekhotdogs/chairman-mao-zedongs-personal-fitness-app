@@ -312,9 +312,9 @@ Deno.serve(async (request) => {
     if (searchClaim !== 'ok') return json({ error: 'Food search limit reached. Try again tomorrow.' }, 429);
     try {
       const foods = await searchUsda(query, 8);
-      const result = foods.map((food: { fdcId: number; description: string; brandOwner?: string; dataType: string; foodNutrients?: { nutrientNumber?: string; value?: number }[] }) => {
+      const result = foods.map((food: { fdcId: number; description: string; brandOwner?: string; dataType: string; gtinUpc?: string; foodNutrients?: { nutrientNumber?: string; value?: number }[] }) => {
         const nutrient = (numbers: string[]) => food.foodNutrients?.find((n) => numbers.includes(n.nutrientNumber ?? ''))?.value ?? 0;
-        return { fdcId: food.fdcId, description: food.description, brandOwner: food.brandOwner, dataType: food.dataType,
+        return { fdcId: food.fdcId, description: food.description, brandOwner: food.brandOwner, dataType: food.dataType, gtinUpc: food.gtinUpc,
           per100g: { kcal: nutrient(['208', '957', '958']), p: nutrient(['203']), c: nutrient(['205']), f: nutrient(['204']) } };
       });
       return json({ foods: result });

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { FoodItem } from '../types';
 import { round } from '../units';
 
@@ -40,27 +41,68 @@ export function normalizeBarcode(input: string): string | undefined {
   return digits;
 }
 
-/** GTIN mod-10 check digit validation (EAN-8/UPC-A/EAN-13/GTIN-14). */
-export function hasValidCheckDigit(code: string): boolean {
-  if (!/^\d{8}$|^\d{12,14}$/.test(code)) return false;
+/** Expand an 8-digit UPC-E (number system 0/1) to its 12-digit UPC-A; undefined otherwise. */
+export function expandUpcE(code: string): string | undefined {
+  if (!/^[01]\d{7}$/.test(code)) return undefined;
+  const [ns, a, b, c, d, e, f, chk] = code.split('');
+  let body: string;
+  if ('012'.includes(f)) body = `${a}${b}${f}00` + `00${c}${d}${e}`;
+  else if (f === '3') body = `${a}${b}${c}00` + `000${d}${e}`;
+  else if (f === '4') body = `${a}${b}${c}${d}0` + `0000${e}`;
+  else body = `${a}${b}${c}${d}${e}` + `0000${f}`;
+  return `${ns}${body}${chk}`;
+}
+
+/** Lookup candidates: canonical EAN-13 first, then the raw code if different. */
+export function barcodeCandidates(input: string): string[] {
+  const code = normalizeBarcode(input);
+  if (!code) return [];
+  let canon = code;
+  if (code.length === 12) canon = `0${code}`;
+  else if (code.length === 14 && code.startsWith('0')) canon = code.slice(1);
+  else if (code.length === 8) {
+    const upcA = expandUpcE(code);
+    // An EAN-8 can also start with 0/1; only treat it as UPC-E when the expanded UPC-A check digit holds.
+    if (upcA && mod10Valid(upcA)) canon = `0${upcA}`;
+  }
+  return canon === code ? [code] : [canon, code];
+}
+
+function mod10Valid(code: string): boolean {
   const digits = code.split('').map(Number);
   const check = digits.pop()!;
   const sum = digits.reverse().reduce((s, d, i) => s + d * (i % 2 === 0 ? 3 : 1), 0);
   return (10 - (sum % 10)) % 10 === check;
 }
 
+/** GTIN mod-10 check digit validation (EAN-8/UPC-A/EAN-13/GTIN-14; UPC-E is checked on its UPC-A expansion). */
+export function hasValidCheckDigit(code: string): boolean {
+  if (!/^\d{8}$|^\d{12,14}$/.test(code)) return false;
+  if (mod10Valid(code)) return true;
+  const upcA = expandUpcE(code);
+  return !!upcA && mod10Valid(upcA);
+}
+
 type Nutriments = Record<string, number | string | undefined>;
 
-interface OffProduct {
-  code?: string;
-  product_name?: string;
-  product_name_en?: string;
-  brands?: string;
-  nutriments?: Nutriments;
-  serving_size?: string;
-  serving_quantity?: number | string;
-  serving_quantity_unit?: string;
-}
+const looseStr = z.string().optional().catch(undefined);
+const looseNum = z.union([z.number(), z.string()]).optional().catch(undefined);
+const offProductSchema = z.object({
+  code: looseStr,
+  product_name: looseStr,
+  product_name_en: looseStr,
+  brands: looseStr,
+  nutriments: z.record(z.string(), looseNum).optional().catch(undefined),
+  serving_size: looseStr,
+  serving_quantity: looseNum,
+  serving_quantity_unit: looseStr,
+});
+const offResponseSchema = z.object({
+  status: looseNum,
+  product: offProductSchema.optional().catch(undefined),
+});
+
+type OffProduct = z.infer<typeof offProductSchema>;
 
 const num = (v: unknown): number | undefined => {
   const n = typeof v === 'string' ? parseFloat(v.replace(',', '.')) : typeof v === 'number' ? v : NaN;
@@ -121,17 +163,14 @@ export interface LookupOptions {
   userAgent?: string;
   signal?: AbortSignal;
   fetchImpl?: typeof fetch;
+  /** Give up after this long (default 8000 ms). */
+  timeoutMs?: number;
 }
 
-export async function lookupBarcode(rawCode: string, opts: LookupOptions = {}): Promise<BarcodeLookup> {
-  const code = normalizeBarcode(rawCode);
-  if (!code) throw new BarcodeError('Barcodes are 8, 12, 13 or 14 digits. Check the number and try again.');
-  const doFetch = opts.fetchImpl ?? fetch;
-  const headers: Record<string, string> = { Accept: 'application/json' };
-  if (opts.userAgent) headers['User-Agent'] = opts.userAgent;
+async function lookupOne(code: string, doFetch: typeof fetch, headers: Record<string, string>, signal: AbortSignal): Promise<BarcodeLookup> {
   let res: Response;
   try {
-    res = await doFetch(`${OFF_PRODUCT_URL}${code}.json?fields=${FIELDS}`, { headers, signal: opts.signal });
+    res = await doFetch(`${OFF_PRODUCT_URL}${code}.json?fields=${FIELDS}`, { headers, signal });
   } catch (e) {
     if ((e as Error)?.name === 'AbortError') throw e;
     throw new BarcodeError('Could not reach Open Food Facts. Check your connection, or enter the food by hand.');
@@ -139,12 +178,49 @@ export async function lookupBarcode(rawCode: string, opts: LookupOptions = {}): 
   if (res.status === 404) return { status: 'not_found', code };
   if (res.status === 429) throw new BarcodeError('Open Food Facts is busy right now. Try again in a minute.');
   if (!res.ok) throw new BarcodeError(`Product lookup failed (${res.status}). Try again, or enter the food by hand.`);
-  let body: { status?: number; product?: OffProduct };
+  let body: z.infer<typeof offResponseSchema>;
   try {
-    body = (await res.json()) as typeof body;
-  } catch {
+    body = offResponseSchema.parse(await res.json());
+  } catch (e) {
+    if ((e as Error)?.name === 'AbortError') throw e;
     throw new BarcodeError('Open Food Facts sent an unreadable reply. Try again, or enter the food by hand.');
   }
-  if (body.status !== 1 || !body.product) return { status: 'not_found', code };
+  if (Number(body.status) !== 1 || !body.product) return { status: 'not_found', code };
   return itemFromProduct(code, body.product);
+}
+
+export async function lookupBarcode(rawCode: string, opts: LookupOptions = {}): Promise<BarcodeLookup> {
+  const candidates = barcodeCandidates(rawCode);
+  if (!candidates.length) throw new BarcodeError('Barcodes are 8, 12, 13 or 14 digits. Check the number and try again.');
+  const doFetch = opts.fetchImpl ?? fetch;
+  const headers: Record<string, string> = { Accept: 'application/json' };
+  if (opts.userAgent) headers['User-Agent'] = opts.userAgent;
+
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    ctrl.abort();
+  }, opts.timeoutMs ?? 8000);
+  const onAbort = () => ctrl.abort();
+  if (opts.signal?.aborted) ctrl.abort();
+  else opts.signal?.addEventListener('abort', onAbort);
+  try {
+    let last: BarcodeLookup | undefined;
+    for (const code of candidates) {
+      const r = await lookupOne(code, doFetch, headers, ctrl.signal);
+      if (r.status === 'found') return r;
+      // prefer reporting 'incomplete' (product exists) over a later not_found
+      if (!last || last.status === 'not_found') last = r;
+    }
+    return last ?? { status: 'not_found', code: candidates[0] };
+  } catch (e) {
+    if (timedOut && (e as Error)?.name === 'AbortError') {
+      throw new BarcodeError('Open Food Facts took too long to answer. Try again, or enter the food by hand.');
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    opts.signal?.removeEventListener('abort', onAbort);
+  }
 }
