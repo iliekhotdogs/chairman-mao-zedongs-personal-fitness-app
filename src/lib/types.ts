@@ -247,11 +247,12 @@ export type ProposalStatus = 'pending' | 'accepted' | 'rejected' | 'expired';
 
 export type ProposalChange =
   | { type: 'day_calorie_adjustment'; date: ISODate; calorieDelta: number; carbsDeltaG: number }
-  | { type: 'target_change'; next: MacroTargets }
+  // `before` is the target when the proposal was made; older proposals lack it.
+  | { type: 'target_change'; next: MacroTargets; before?: MacroTargets }
   | { type: 'plan_weight_update'; planId: string; updates: { dayId: string; exerciseId: string; targetWeightKg: number; repMin?: number; repMax?: number }[] }
   | { type: 'today_workout_swap'; date: ISODate; day: WorkoutDay }
   | { type: 'add_limitation'; limitation: Limitation }
-  | { type: 'goal_change'; goal: GoalPriority; next: MacroTargets }
+  | { type: 'goal_change'; goal: GoalPriority; next: MacroTargets; before?: MacroTargets }
   | { type: 'new_plan'; plan: WorkoutPlan }
   // Coach log edits (F2). Applied through LOG_FOOD / UPDATE_FOOD / DELETE_FOOD / START_SESSION + ADD_SETS on accept.
   | { type: 'log_food'; entry: FoodEntry }

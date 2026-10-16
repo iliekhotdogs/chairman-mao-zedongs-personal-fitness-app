@@ -7,6 +7,7 @@ import { useAct } from './Toast';
 import { useStore } from '@/store/AppStore';
 import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { nowISO } from '@/lib/dates';
+import { targetChangeRows } from '@/lib/coaching/adaptive';
 
 const STATUS = {
   pending: { tone: 'pending' as const, badge: 'pending' as const, label: 'Needs your approval' },
@@ -68,13 +69,7 @@ function ChangeDetails({ proposal }: { proposal: Proposal }) {
   const { state } = useStore();
   const c = proposal.change;
   if (c.type === 'target_change' || c.type === 'goal_change') {
-    const t = state.targets;
-    const rows: [string, number | undefined, number][] = [
-      ['Calories', t?.calories, c.next.calories],
-      ['Protein (g)', t?.proteinG, c.next.proteinG],
-      ['Carbs (g)', t?.carbsG, c.next.carbsG],
-      ['Fat (g)', t?.fatG, c.next.fatG],
-    ];
+    const rows = targetChangeRows(c, state.targets, proposal.status === 'pending');
     return (
       <Card style={{ padding: Space.md, gap: 4 }}>
         {rows.map(([k, from, to]) => (

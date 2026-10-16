@@ -7,7 +7,7 @@ import { admin, profileOf, requestUser } from '../_shared/auth.ts';
 import { BodyError, clientIpHash, json as jsonFor, preflight, readJsonBody, utcDay } from '../_shared/http.ts';
 import { effectiveConfig, findModel, modelLabel, PROVIDERS, resolveConfig, validPreference, type AiConfig } from '../_shared/providers.ts';
 import { ACTION_INTENT_TYPES, matchingFood, validateActionIntent, validateVisionItem, type VisionItem } from './foodValidation.ts';
-import { buildCoachSystem, isOffTopic, OFF_TOPIC_REPLY } from '../_shared/coachPrompt.ts';
+import { buildCoachSystem, buildCoachUserTurn, isOffTopic, OFF_TOPIC_REPLY } from '../_shared/coachPrompt.ts';
 import { hasInjuryRedFlag, isUrgentSymptom } from '../_shared/coachSafety.ts';
 import { profileGate } from '../_shared/profile.ts';
 
@@ -149,13 +149,9 @@ async function coach(config: AiConfig, meter: Meter, body: Record<string, unknow
   }
   // Scope gate: off-topic asks get a fixed redirect without a provider call (the quota claim is refunded).
   if (isOffTopic(message)) return { result: { reply: OFF_TOPIC_REPLY, safety: false, intents: [] }, tokens: { input: 0, output: 0 } };
-  const history = Array.isArray(body.history) ? body.history.slice(-12).map((turn) => ({
-    role: turn?.role === 'assistant' ? 'assistant' : 'user', content: text(turn?.content, 2000),
-  })) : [];
-  if (history.at(-1)?.role === 'user') history.pop();
-  while (history.length && history[0].role !== 'user') history.shift();
+  // History is folded into one quoted user turn, so forged "assistant" turns are never replayed as the model's own.
   const system = buildCoachSystem(body.context);
-  const response = await complete(config, meter, 'chat', [{ role: 'system', content: system }, ...history, { role: 'user', content: message }], 4096);
+  const response = await complete(config, meter, 'chat', [{ role: 'system', content: system }, { role: 'user', content: buildCoachUserTurn(body.history, message) }], 4096);
   let value: Record<string, unknown>;
   try {
     value = parseObject(response.text);

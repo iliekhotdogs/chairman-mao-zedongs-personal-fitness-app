@@ -6,7 +6,7 @@ import { condensedDay, dayMinutes, generatePlan, swapForArea } from '../workouts
 import { exerciseName } from '../workouts/exercises';
 import { remainingForDay, workoutForDay, latestWeight, loggedDays, live } from '../selectors';
 import { computeTargets } from '../nutrition/targets';
-import { weightSlopePerDay } from './adaptive';
+import { macrosOf, weightSlopePerDay } from './adaptive';
 import { displayWeight } from '../units';
 import { hasInjuryRedFlag, isUrgentSymptom } from '../../../supabase/functions/_shared/coachSafety';
 import { isOffTopic, OFF_TOPIC_REPLY } from '../../../supabase/functions/_shared/coachPrompt';
@@ -190,7 +190,7 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
             title: `Change priority to ${g.goal.replace('_', ' ')}`,
             summary: `${state.targets?.calories.toLocaleString() ?? '—'} → ${next.calories.toLocaleString()} kcal/day · ${next.proteinG} g protein`,
             rationale: [next.method, 'Your workout plan stays the same. Ask me for a new plan if you also want different training.'],
-            change: { type: 'goal_change', goal: g.goal, next: { calories: next.calories, proteinG: next.proteinG, carbsG: next.carbsG, fatG: next.fatG } },
+            change: { type: 'goal_change', goal: g.goal, next: macrosOf(next), before: state.targets && macrosOf(state.targets) },
             dedupeKey: `goal-${g.goal}-${today}`,
           }),
         ],
@@ -290,11 +290,12 @@ export function simulateCoachReply(state: AppState, message: string, today: ISOD
     };
   }
 
-  // Default
+  // Default. A question we can't match gets an honest "no built-in answer", not a generic status reply.
+  const asked = /\?\s*$|^(?:does|do|is|are|can|should|will|what|why|how|when)\b/.test(t.trim());
   return {
     safety: false,
     proposals: [],
-    text: tone(
+    text: (asked ? tone(tn, "I don't have a built-in answer to that question, sorry. ", "No built-in answer to that question. ") : '') + tone(
       tn,
       `I'm here to help.${day ? ` Today's workout is ${day.name}.` : ' No workout is scheduled today.'}${rem ? ` You have ${Math.max(0, rem.remaining.calories)} kcal left.` : ''}\nYou can ask me things like:\n• "I only have 20 minutes today"\n• "I'm eating out tonight"\n• "My knee hurts"\n• "How am I doing?"\n• "I can only train 3 days a week now"`,
       `${day ? `Today: ${day.name}.` : 'Rest day.'}${rem ? ` ${Math.max(0, rem.remaining.calories)} kcal left.` : ''} Try: "20 minutes today", "eating out tonight", "knee hurts", "how am I doing?", "3 days a week".`,

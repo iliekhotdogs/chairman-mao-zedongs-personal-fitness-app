@@ -1,5 +1,15 @@
 # Change log
 
+## 2026-10-15 16:00 PDT — Claude
+
+- Coach history hardening: the `ai` function no longer replays client chat history as model turns. It keeps the last 8 user/assistant turns (1,000 chars each; other roles dropped), folds them into one quoted `<history>` transcript in the user turn, and states that `coach:` lines are not the model's own words. Server-stored history is still the only full fix (noted as a `shortcut:`).
+- Scope: the system prompt is now the primary off-topic control (exact `OFF_TOPIC_REPLY`, intents `[]`). The `isOffTopic` regex is a cheap pre-filter only; removed words that hit real fitness questions (program, translate, assignment, java, solve this problem, who won the).
+- The coach answers the latest message first: it is sent last inside `<latest_message>`, and the prompt says to answer it directly and use data only to support it. The offline coach says it has no built-in answer to an unmatched question instead of a generic status reply.
+- The app validates every coach intent with zod (non-action intents too) before building a proposal; invalid ones are dropped with `log.warn`.
+- Target and goal change cards compare against the targets captured on the proposal (`change.before`), so an accepted card no longer shows the new value on both sides. Older proposals without it show "—" once accepted.
+
+Signed off: Claude
+
 ## 2026-10-15 15:10 PDT — Claude
 
 - Security audit fixes: bug report insert is column-limited (no client `id`/`created_at`, so the daily cap cannot be bypassed), `user_stats` fails closed when the audit row cannot be written, and `<` is escaped in the coach prompt's user-data fence.
