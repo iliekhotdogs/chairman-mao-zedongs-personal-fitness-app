@@ -20,16 +20,18 @@ See the [change log](docs/CHANGELOG.md) for dated, signed notes on repository ch
 | Notifications | Preferences, quiet hours, **hard cap of 3/day across devices** (enforced locally and in the database). |
 | Privacy | Per-user Row Level Security, private photo storage, data export, delete device data, delete cloud data. |
 
-## Run it (Windows)
+## Run it
 
 ```bash
-npm install
-npm run web
+npm ci
+npx expo start --web --port 8082
 ```
 
-Then open http://localhost:8081. On the first screen choose **Explore with sample data** to see every feature with three weeks of realistic data, or **Get started** to onboard as yourself.
+Then open http://localhost:8082. The default `npm run web` uses port 8081, which can collide with another Expo project on the same machine; pass `--port` to pick a free one.
 
-On an Android phone: install **Expo Go** from the Play Store, run `npx expo start`, and scan the QR code (the phone and PC must be on the same Wi-Fi).
+Without Supabase configured the app runs on this device only and the first screen offers **Explore with sample data** (dev builds): made-up meals and workouts so you can try every screen, marked by a "Sample data" banner. Meal photo analysis and the shared AI coach need an account. Sign-up is **invite-only** while in beta: create the account with an invite code. AI requests go through the Supabase `ai` Edge Function to **OpenRouter** (and Groq); see [docs/AI_PROVIDER.md](docs/AI_PROVIDER.md).
+
+On an Android phone: install **Expo Go** from the Play Store, run `npx expo start`, and scan the QR code (the phone and computer must be on the same Wi-Fi).
 
 ```bash
 npm test          # unit tests (business rules, sync, storage, export)

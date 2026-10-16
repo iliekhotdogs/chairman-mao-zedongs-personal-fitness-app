@@ -11,7 +11,7 @@ import { HERO_IMAGE } from './heroImage';
  */
 export function HeroBackdrop() {
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+    <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
       {HERO_IMAGE ? (
         <Image source={HERO_IMAGE} resizeMode="cover" style={[StyleSheet.absoluteFill, { opacity: 0.6 }, Platform.OS === 'web' ? ({ filter: 'grayscale(1) contrast(1.1)' } as object) : null]} />
       ) : null}

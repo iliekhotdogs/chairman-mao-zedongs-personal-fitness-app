@@ -39,7 +39,7 @@ export function TodayHero({ greeting, dateLabel }: { greeting: string; dateLabel
 
   return (
     <View style={[styles.band, { padding: isPhone ? Space.lg : Space.xxl }]}>
-      <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
         <Svg width="100%" height="100%" viewBox="0 0 1000 400" preserveAspectRatio="xMaxYMid slice">
           <Defs>
             <RadialGradient id="todayGlow" cx="900" cy="40" r="520" gradientUnits="userSpaceOnUse">

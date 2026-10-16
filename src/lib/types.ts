@@ -195,6 +195,8 @@ export interface LoggedSet {
   weightKg: number;
   reps: number;
   rpe?: number;
+  /** warm-up sets are kept in the log but ignored by volume and progression */
+  warmup?: boolean;
   via: 'manual' | 'voice';
   loggedAt: ISODateTime;
 }

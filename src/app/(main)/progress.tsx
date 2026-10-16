@@ -17,6 +17,7 @@ import { displayWeight, weightValue, weightUnit } from '@/lib/units';
 import { weightSlopePerDay } from '@/lib/coaching/adaptive';
 import { progressionSeries } from '@/lib/workouts/progression';
 import { exerciseName } from '@/lib/workouts/exercises';
+import { weeklyMuscleVolume } from '@/lib/workouts/sessionStats';
 
 type Tab = 'calories' | 'weight' | 'strength' | 'photos';
 const TABS: Tab[] = ['calories', 'weight', 'strength', 'photos'];
@@ -158,6 +159,27 @@ function Weight() {
   );
 }
 
+function WeeklyVolume() {
+  const { state, today } = useStore();
+  const rows = weeklyMuscleVolume(live(state.sessions), today);
+  if (!rows.length) return null;
+  return (
+    <Card style={{ gap: 4 }}>
+      <Row>
+        <Text variant="h3" style={{ flex: 1 }}>Weekly volume</Text>
+        <InfoTip title="Weekly volume">Working sets per muscle (warm-ups excluded) in the last 7 days, compared with the 7 days before.</InfoTip>
+      </Row>
+      {rows.map((r) => (
+        <Row key={r.muscle}>
+          <Text variant="small" style={{ flex: 1, textTransform: 'capitalize' }}>{r.muscle.replace('_', ' ')}</Text>
+          <Text variant="smallStrong">{r.sets} sets</Text>
+          <Muted variant="small" style={{ width: 90, textAlign: 'right' }}>prev {r.prevSets}</Muted>
+        </Row>
+      ))}
+    </Card>
+  );
+}
+
 function Strength() {
   const { state } = useStore();
   const units = state.settings.units;
@@ -169,12 +191,13 @@ function Strength() {
   }, [sessions]);
   const [sel, setSel] = useState<string | undefined>();
   const exId = sel ?? exIds[0];
-  if (!exId) return <EmptyState icon="barbell-outline" title="No lifts logged yet" body="Finish a workout and your strength progression shows here." action={<Button title="Start a workout" icon="play" onPress={() => router.push('/workouts/session')} />} />;
+  if (!exId) return <Stack gap={Space.lg}><WeeklyVolume /><EmptyState icon="barbell-outline" title="No lifts logged yet" body="Finish a workout and your strength progression shows here." action={<Button title="Start a workout" icon="play" onPress={() => router.push('/workouts/session')} />} /></Stack>;
   const series = progressionSeries(exId, sessions);
   const best = series.reduce((m, s) => Math.max(m, s.e1rm), 0);
   const firstE = series[0]?.e1rm ?? 0;
   return (
     <Stack gap={Space.lg}>
+      <WeeklyVolume />
       <Row wrap gap={6}>
         {exIds.slice(0, 10).map((id) => (
           <Chip key={id} label={exerciseName(id)} selected={id === exId} onPress={() => setSel(id)} />

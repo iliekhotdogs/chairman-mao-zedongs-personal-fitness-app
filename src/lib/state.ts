@@ -34,6 +34,8 @@ export interface AppState {
   notifications: NotificationRecord[];
   settings: Settings;
   deviceId: string;
+  /** true while the app holds generated sample data (shows a persistent banner) */
+  sample?: boolean;
 }
 
 /** Timestamp older than any real edit, so defaults never overwrite synced settings. */

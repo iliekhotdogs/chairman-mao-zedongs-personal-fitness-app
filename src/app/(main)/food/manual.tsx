@@ -86,6 +86,7 @@ export default function ManualEntry() {
               </Row>
               <Muted variant="small">P {Math.round(total.proteinG)} g · C {Math.round(total.carbsG)} g · F {Math.round(total.fatG)} g</Muted>
             </Card>
+            {!items.length ? <Muted variant="small">Add at least one food above to enable {existing ? 'Save changes' : 'Log meal'}.</Muted> : null}
             <Button title={existing ? 'Save changes' : 'Log meal'} icon="checkmark" size="lg" onPress={save} disabled={!items.length} full />
           </Stack>,
         ]}
