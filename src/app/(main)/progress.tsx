@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Button, Card, Chip, EmptyState, IconButton, Muted, PageHeader, Row, Screen, SectionTitle, Segmented, Stack, Stat, Text, Columns } from '@/components/ui';
+import { Button, Card, Chip, EmptyState, IconButton, InfoTip, Muted, PageHeader, Row, Screen, SectionTitle, Segmented, Stack, Stat, Text, Columns } from '@/components/ui';
 import { Timeline } from '@/components/Timeline';
 import { milestones } from '@/lib/streaks';
 import { BarChart, LineChart } from '@/components/charts';
@@ -11,7 +11,7 @@ import { WeightSheet } from '@/components/WeightSheet';
 import { ProgressPhotosSection } from '@/components/ProgressPhotos';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
-import { dayTargets, live, totalsForDay } from '@/lib/selectors';
+import { dayTargets, hasActivitySource, live, totalsForDay } from '@/lib/selectors';
 import { addDays, formatDateLabel, lastNDates, nowISO, parseISODate } from '@/lib/dates';
 import { displayWeight, weightValue, weightUnit } from '@/lib/units';
 import { weightSlopePerDay } from '@/lib/coaching/adaptive';
@@ -25,9 +25,10 @@ const shortDate = (d: string) => parseISODate(d).toLocaleDateString(undefined, {
 export default function Progress() {
   const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
   const [tab, setTab] = useState<Tab>(TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'calories');
+  const { state } = useStore();
   return (
     <Screen>
-      <PageHeader title="Progress" subtitle="Calories, body weight, strength and photos" right={<Button title="Activity" kind="secondary" icon="footsteps-outline" onPress={() => router.push('/activity')} />} />
+      <PageHeader title="Progress" subtitle="Calories, body weight, strength and photos" right={hasActivitySource(state) ? <Button title="Activity" kind="secondary" icon="footsteps-outline" onPress={() => router.push('/activity')} /> : undefined} />
       <Segmented label="Progress view" value={tab} onChange={setTab} options={[{ value: 'calories', label: 'Calories' }, { value: 'weight', label: 'Weight' }, { value: 'strength', label: 'Strength' }, { value: 'photos', label: 'Photos' }]} />
       {tab === 'calories' && <Calories />}
       {tab === 'weight' && <Weight />}
@@ -68,7 +69,9 @@ function Calories() {
     <Stack gap={Space.lg}>
       <Card style={{ gap: Space.md }}>
         <Row>
-          <Text variant="h3" style={{ flex: 1 }}>Daily calories</Text>
+          <Text variant="h3">Daily calories</Text>
+          <InfoTip title="Reading this chart">{`Dashed line = your ongoing target (${target.toLocaleString()} kcal). Orange bars are more than 10% over that day's target. Grey ticks are days with nothing logged.`}</InfoTip>
+          <View style={{ flex: 1 }} />
           <View style={{ width: 190 }}>
             <Segmented label="Range" value={range} onChange={setRange} options={[{ value: '14', label: '14 days' }, { value: '30', label: '30 days' }]} />
           </View>
@@ -83,14 +86,13 @@ function Calories() {
               target={target}
               format={(v) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(Math.round(v)))}
             />
-            <Muted variant="small">Dashed line = your ongoing target ({target.toLocaleString()} kcal). Orange bars are more than 10% over that day&apos;s target. Grey ticks are days with nothing logged.</Muted>
           </>
         )}
       </Card>
       <Columns>
         {[
           <Card key="a"><Stat label="Average intake" value={avg ? avg.toLocaleString() : '—'} unit="kcal" sub={`${logged.length} logged days (today excluded)`} /></Card>,
-          <Card key="b"><Stat label="Within ±10% of target" value={logged.length ? `${within}/${logged.length}` : '—'} sub="days" /></Card>,
+          <Card key="b"><Stat label="Days near target" value={logged.length ? `${within}/${logged.length}` : '—'} sub="within 10% either way" /></Card>,
           <Card key="c"><Stat label="Average protein" value={avgP || '—'} unit="g" sub={`Goal ${state.targets!.proteinG} g`} color={C.protein} /></Card>,
         ]}
       </Columns>
@@ -119,7 +121,9 @@ function Weight() {
     <Stack gap={Space.lg}>
       <Card style={{ gap: Space.md }}>
         <Row>
-          <Text variant="h3" style={{ flex: 1 }}>Body weight</Text>
+          <Text variant="h3">Body weight</Text>
+          <InfoTip title="Reading this chart">Solid line = daily weigh-ins. Dashed line = 7-day average, which smooths out water and food swings.</InfoTip>
+          <View style={{ flex: 1 }} />
           <Button title="Log weight" size="sm" icon="add" onPress={() => setOpen(true)} />
         </Row>
         {points.length < 2 ? (
@@ -127,7 +131,6 @@ function Weight() {
         ) : (
           <>
             <LineChart label="Body weight over time with 7-day average" points={points} trend={trend} format={(v) => v.toFixed(0)} />
-            <Muted variant="small">Solid line = daily weigh-ins. Dashed line = 7-day average, which smooths out water and food swings.</Muted>
           </>
         )}
       </Card>
@@ -178,13 +181,15 @@ function Strength() {
         ))}
       </Row>
       <Card style={{ gap: Space.md }}>
-        <Text variant="h3">{exerciseName(exId)}: estimated 1-rep max</Text>
-        {series.length < 2 ? <Muted>Log this lift in at least two sessions to see a trend.</Muted> : <LineChart label={`Estimated one rep max for ${exerciseName(exId)}`} points={series.map((s) => ({ x: shortDate(s.date), y: weightValue(s.e1rm, units) }))} format={(v) => v.toFixed(0)} color={C.protein} />}
-        <Muted variant="small">Estimated from your best set each session (Epley formula). It&apos;s a progress indicator, not a max you need to test.</Muted>
+        <Row>
+          <Text variant="h3" style={{ flex: 1 }}>{exerciseName(exId)}: estimated best lift</Text>
+          <InfoTip title="Estimated best lift">Estimated from your best set each session (Epley formula) as the heaviest single rep you could probably lift. It&apos;s a progress indicator, not a max you need to test.</InfoTip>
+        </Row>
+        {series.length < 2 ? <Muted>Log this lift in at least two sessions to see a trend.</Muted> : <LineChart label={`Estimated best lift for ${exerciseName(exId)}`} points={series.map((s) => ({ x: shortDate(s.date), y: weightValue(s.e1rm, units) }))} format={(v) => v.toFixed(0)} color={C.protein} />}
       </Card>
       <Columns>
         {[
-          <Card key="a"><Stat label="Best estimated 1RM" value={weightValue(best, units, 0)} unit={weightUnit(units)} /></Card>,
+          <Card key="a"><Stat label="Best estimated lift" value={weightValue(best, units, 0)} unit={weightUnit(units)} /></Card>,
           <Card key="b"><Stat label="Change since first session" value={`${best - firstE >= 0 ? '+' : ''}${weightValue(best - firstE, units, 0)}`} unit={weightUnit(units)} sub={`${series.length} sessions`} /></Card>,
         ]}
       </Columns>
@@ -194,7 +199,7 @@ function Strength() {
           <Row key={i}>
             <Muted variant="small" style={{ flex: 1 }}>{shortDate(s.date)}</Muted>
             <Text variant="small">Top set {displayWeight(s.topWeightKg, units)}</Text>
-            <Muted variant="small" style={{ width: 110, textAlign: 'right' }}>e1RM {weightValue(s.e1rm, units, 0)}</Muted>
+            <Muted variant="small" style={{ width: 110, textAlign: 'right' }}>Est. best {weightValue(s.e1rm, units, 0)}</Muted>
           </Row>
         ))}
       </Card>

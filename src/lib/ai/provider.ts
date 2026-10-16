@@ -15,14 +15,21 @@ import { prepareImageForAI, type ImageSetting } from './image';
 
 export class AIUnavailableError extends Error {}
 
+export const SIGNED_OUT = 'Sign in to use the AI coach.';
+export const UNAVAILABLE = 'Coach is unavailable right now. Try again.';
+export type AiNoticeKind = 'signed_out' | 'unavailable' | 'other';
+
 /** supabase-js reports any non-2xx as a generic message; the gateway's own reason is in the body. */
 export async function functionErrorMessage(error: unknown, fallback: string): Promise<string> {
+  // Transport failures (CORS, offline, outage) carry developer jargon the user must never see.
+  if ((error as { name?: string } | null)?.name === 'FunctionsFetchError') return UNAVAILABLE;
   const context = (error as { context?: unknown } | null)?.context;
   if (context instanceof Response) {
     const body = await context.clone().json().catch(() => null) as { error?: unknown } | null;
-    if (typeof body?.error === 'string' && body.error) return body.error;
+    if (typeof body?.error === 'string' && body.error) return /supabase|edge function|api_key/i.test(body.error) ? UNAVAILABLE : body.error;
   }
-  return error instanceof Error ? error.message : fallback;
+  const m = error instanceof Error ? error.message : fallback;
+  return /supabase|edge function/i.test(m) ? UNAVAILABLE : m;
 }
 
 export type AIEngine = 'server' | 'simulated';
@@ -182,7 +189,7 @@ export function coachContext(state: AppState, today: ISODate) {
   };
 }
 
-export async function coachReply(state: AppState, message: string, today: ISODate): Promise<CoachReply & { simulated: boolean; aiNotice?: string }> {
+export async function coachReply(state: AppState, message: string, today: ISODate): Promise<CoachReply & { simulated: boolean; aiNotice?: string; aiNoticeKind?: AiNoticeKind }> {
   const engine = aiEngine();
   if (engine === 'simulated') {
     await delay(500);
@@ -192,6 +199,8 @@ export async function coachReply(state: AppState, message: string, today: ISODat
   if (isUrgentSymptom(message) || hasInjuryRedFlag(message)) return { ...simulateCoachReply(state, message, today), simulated: false };
   const sb = supabase();
   if (!sb) throw new AIUnavailableError('Server AI is not configured. Switch to simulated mode in Settings.');
+  const { data: session } = await sb.auth.getSession();
+  if (!session.session) return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice: SIGNED_OUT, aiNoticeKind: 'signed_out' };
   const history = live(state.chat).slice(-12).map((m) => ({ role: m.role === 'coach' ? 'assistant' : 'user', content: m.text }));
   try {
     const { data, error } = await sb.functions.invoke('ai', { body: { action: 'coach', message, history, context: coachContext(state, today) } });
@@ -200,7 +209,8 @@ export async function coachReply(state: AppState, message: string, today: ISODat
     if (!d || typeof d.reply !== 'string') throw new Error('The coach returned an invalid reply.');
     return { text: d.reply, safety: d.safety, proposals: proposalsForIntents(state, d.intents ?? [], today), simulated: false };
   } catch (error) {
-    return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice: await functionErrorMessage(error, 'The chat service is unavailable.') };
+    const aiNotice = await functionErrorMessage(error, UNAVAILABLE);
+    return { ...simulateCoachReply(state, message, today), simulated: true, aiNotice, aiNoticeKind: aiNotice === UNAVAILABLE ? 'unavailable' : 'other' };
   }
 }
 

@@ -5,11 +5,11 @@
 - [ ] Final app name, icon (512×512) and adaptive icon. "FitCoach" is a placeholder, so check trademark availability.
 - [ ] Unique Android package (currently `com.fitcoach.app` in `app.json`). **It cannot change after the first upload.**
 - [ ] Supabase project in production mode, email confirmation on, SMTP configured.
-- [ ] Configure the server AI gateway (provider secret, daily limits; see docs/AI_PROVIDER.md) and deploy the `ai` and `admin-stats` functions (docs/SETUP.md).
+- [ ] Set the shared `GROQ_API_KEY` secret, choose daily limits (see docs/AI_PROVIDER.md) and deploy the `ai` and `admin-stats` functions (docs/SETUP.md).
 - [ ] Replace simulated Health Connect with the real integration (docs/WEARABLES.md), or hide that card for v1.
 - [ ] Push notifications: link the app to EAS and add FCM V1 credentials (see [Push notifications](#push-notifications) below). Token registration and sending are built in.
 - [ ] Optional: crash reporting with Sentry (see [Error reporting](#error-reporting-sentry) below).
-- [ ] Privacy policy URL (required). It must cover health and fitness data, photos, AI processing by the provider behind the server AI gateway, account deletion, and data retention.
+- [ ] Privacy policy URL (required). It must cover health and fitness data, photos, AI processing by Groq (or the provider the admin selects), account deletion, and data retention.
 - [ ] In-app account deletion exists (Settings → Delete my cloud data). Play also requires a **web link** for deletion requests.
 - [ ] Medical disclaimer reviewed (the coach avoids diagnosis; check wording with a professional).
 - [ ] The business model is decided before adding any paywall (none exist now).

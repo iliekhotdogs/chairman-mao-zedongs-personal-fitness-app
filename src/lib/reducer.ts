@@ -1,3 +1,4 @@
+import { MAX_SET_WEIGHT_KG } from './inputRules';
 import type { AppState, WorkoutOverride } from './state';
 import type {
   ActivityRecord, ChatMessage, FoodEntry, GoalPriority, Insight, IntegrationState, LoggedSet, NotificationRecord,
@@ -5,11 +6,11 @@ import type {
 } from './types';
 import { mergeActivity } from './activity/activity';
 import { newId } from './id';
-import { calorieFloor } from './nutrition/targets';
 import {
   applyPhotoUploads, clearStorageRemovals, deletePhotoRecord, importLegacyState, mergeRemote,
   type PhotoUpload, type RemoteRecord, type StorageRemoval,
 } from './sync/merge';
+import { calorieFloor } from './nutrition/targets';
 
 export type Action =
   | { type: 'HYDRATE'; state: AppState }
@@ -98,8 +99,8 @@ export function checkAction(state: AppState, action: Action): void {
     case 'ADD_SETS':
     case 'UPDATE_SET': {
       const sets = action.type === 'ADD_SETS' ? action.sets : [action.set];
-      if (sets.some((s) => !Number.isFinite(s.weightKg) || s.weightKg < 0 || !Number.isInteger(s.reps) || s.reps <= 0 || s.reps > 300)) {
-        throw new RuleViolation('Each set needs a weight (0 or more) and 1–300 reps (or seconds for holds).');
+      if (sets.some((s) => !Number.isFinite(s.weightKg) || s.weightKg < 0 || s.weightKg > MAX_SET_WEIGHT_KG || !Number.isInteger(s.reps) || s.reps <= 0 || s.reps > 300)) {
+        throw new RuleViolation(`Each set needs a weight from 0 to ${MAX_SET_WEIGHT_KG} kg and 1–300 reps (or seconds for holds).`);
       }
       return;
     }

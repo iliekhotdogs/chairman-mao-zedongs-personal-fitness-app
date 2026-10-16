@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { goBack } from '@/lib/nav';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Expandable, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Text, Columns } from '@/components/ui';
+import { Badge, Banner, Button, Card, Expandable, InfoTip, Muted, NumberField, PageHeader, Row, Screen, Sheet, Stack, Text, Columns } from '@/components/ui';
 import { BarChart } from '@/components/charts';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
@@ -30,13 +30,14 @@ export default function Activity() {
   const history = activityHistory(state.activity, 14, today);
   const baseline = state.targets?.baselineSteps ?? 7000;
   const isSim = hc.status === 'connected' && hc.message?.includes('Simulated');
+  // Health Connect is only shown once it is (or was) connected; dev builds keep the simulator reachable.
+  const showHc = __DEV__ || hc.status !== 'not_connected';
   const missing = history.filter((h) => h.missing && h.date !== today).length;
-  const dupDays = history.filter((h) => h.otherSources.length).length;
-
+  
   const connectSimulated = () => {
     const r = simulatedSync(today);
     doAct({ type: 'MERGE_ACTIVITY', records: r.records });
-    doAct({ type: 'SET_INTEGRATION', integration: r.integration }, 'Simulated activity synced');
+    doAct({ type: 'SET_INTEGRATION', integration: r.integration }, 'Sample activity synced');
   };
 
   const saveManual = () => {
@@ -52,10 +53,10 @@ export default function Activity() {
       <Columns ratio={[2, 3]}>
         {[
           <Stack key="l" gap={Space.lg}>
-            <Card style={{ gap: Space.sm }}>
+            {showHc ? <Card style={{ gap: Space.sm }}>
               <Row>
                 <Text variant="h3" style={{ flex: 1 }}>Health Connect</Text>
-                {hc.status === 'connected' ? <Badge kind={isSim ? 'simulated' : 'saved'} label={isSim ? 'Simulated connection' : 'Connected'} /> : hc.status === 'permission_denied' ? <Badge kind="danger" label="Permission denied" /> : <Badge kind="neutral" label="Not connected" />}
+                {hc.status === 'connected' ? <Badge kind={isSim ? 'simulated' : 'saved'} label={isSim ? 'Sample data' : 'Connected'} /> : hc.status === 'permission_denied' ? <Badge kind="danger" label="Permission denied" /> : <Badge kind="neutral" label="Not connected" />}
               </Row>
               <Muted variant="small">{support.reason}</Muted>
               {hc.lastSyncAt ? <Muted variant="small">Last sync: {new Date(hc.lastSyncAt).toLocaleString()}</Muted> : null}
@@ -63,21 +64,21 @@ export default function Activity() {
               <Row wrap gap={Space.sm}>
                 {hc.status === 'connected' ? (
                   <>
-                    {!sync.configured && isSim ? <Button title="Sync now" kind="secondary" size="sm" icon="refresh" onPress={connectSimulated} /> : null}
+                    {!sync.configured ? <Button title="Sync sample data" kind="secondary" size="sm" icon="refresh" onPress={connectSimulated} /> : null}
                     <Button title="Disconnect" kind="danger" size="sm" onPress={() => setDisconnectOpen(true)} />
                   </>
                 ) : (
-                  !sync.configured ? <Button title="Use simulated data" kind="secondary" size="sm" icon="flask-outline" onPress={connectSimulated} /> : null
+                  !sync.configured ? <Button title="Use sample data" kind="secondary" size="sm" icon="flask-outline" onPress={connectSimulated} /> : null
                 )}
                 <Button title="Add steps manually" kind="secondary" size="sm" icon="create-outline" onPress={() => setManualOpen(true)} />
               </Row>
-            </Card>
+            </Card> : <Button title="Add steps manually" kind="secondary" size="sm" icon="create-outline" onPress={() => setManualOpen(true)} />}
             <Card tone="muted" style={{ gap: 6 }}>
               <Text variant="h3">How activity affects your targets</Text>
               <Muted variant="small">Your daily target already assumes about {baseline.toLocaleString()} steps plus your planned workouts. Only activity well above that can trigger a one-day food suggestion, and only half of the device&apos;s calorie estimate is used, because wearables often overestimate.</Muted>
               <Muted variant="small">When several devices report the same day, one is counted (manual entries first, then the source with the most steps) so nothing is double counted.</Muted>
             </Card>
-            <Expandable title="Supported integrations & limitations" icon="information-circle-outline">
+            {__DEV__ ? <Expandable title="Supported integrations & limitations" icon="information-circle-outline">
               {SUPPORT.filter(([n]) => !sync.configured || n !== 'Simulated data').map(([n, s, d]) => (
                 <Stack key={n} gap={2} style={{ paddingVertical: 4 }}>
                   <Row gap={6}>
@@ -87,15 +88,18 @@ export default function Activity() {
                   <Muted variant="small">{d}</Muted>
                 </Stack>
               ))}
-            </Expandable>
+            </Expandable> : null}
           </Stack>,
           <Stack key="r" gap={Space.lg}>
             <Card style={{ gap: Space.md }}>
-              <Text variant="h3">Last 14 days</Text>
+              <Row>
+                <Text variant="h3" style={{ flex: 1 }}>Last 14 days</Text>
+                <InfoTip title="Reading this chart">{`Bars are daily steps. The dashed line is the ~${baseline.toLocaleString()} steps your target assumes. Days with several sources count one, so nothing is double counted.`}</InfoTip>
+              </Row>
               <BarChart label="Daily steps for the last 14 days" bars={history.map((h) => ({ x: parseISODate(h.date).toLocaleDateString(undefined, { day: 'numeric' }), y: h.missing ? null : (h.steps ?? 0) }))} target={baseline} color={C.info} format={(v) => (v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v)))} />
               <Row wrap gap={6}>
                 {missing ? <Badge kind="pending" label={`${missing} day${missing > 1 ? 's' : ''} with no data`} /> : null}
-                {dupDays ? <Badge kind="info" label={`${dupDays} days had multiple sources (de-duplicated)`} /> : null}
+
               </Row>
             </Card>
             {history.length === 0 || history.every((h) => h.missing) ? (

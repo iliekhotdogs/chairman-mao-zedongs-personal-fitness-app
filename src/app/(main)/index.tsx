@@ -3,14 +3,14 @@ import { Pressable, View } from 'react-native';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Columns, Muted, Row, SectionTitle, Screen, Stack, Text, Ionicons, ProgressBar } from '@/components/ui';
-import { TodayHero } from '@/components/TodayHero';
+import { Badge, Banner, Button, Card, Columns, Muted, PageHeader, Row, SectionTitle, Screen, Stack, Text, Ionicons, ProgressBar } from '@/components/ui';
 import { CaloriesRing, MacroBars } from '@/components/nutrition';
 import { InsightCard, ProposalCard } from '@/components/coaching';
 import { WeightSheet } from '@/components/WeightSheet';
+import { LogMealSheet } from '@/components/LogMealSheet';
 import { useStore } from '@/store/AppStore';
 import { useLayout } from '@/hooks/useLayout';
-import { activeSession, activityForDay, latestWeight, pendingProposals, remainingForDay, sessionForDay, workoutForDay } from '@/lib/selectors';
+import { activeSession, activityForDay, hasActivitySource, latestWeight, pendingProposals, remainingForDay, sessionForDay, workoutForDay } from '@/lib/selectors';
 import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { dayMinutes } from '@/lib/workouts/generator';
 import { displayWeight } from '@/lib/units';
@@ -25,6 +25,7 @@ export default function Dashboard() {
   const { state, today, storageError } = useStore();
   const { isPhone, isDesktop } = useLayout();
   const [weightOpen, setWeightOpen] = useState(false);
+  const [mealOpen, setMealOpen] = useState(false);
   const rem = remainingForDay(state, today)!;
   const pending = pendingProposals(state);
   const insight = state.insights[0];
@@ -45,11 +46,7 @@ export default function Dashboard() {
         {Math.round(rem.eaten.calories).toLocaleString()} eaten of {rem.target.calories.toLocaleString()} kcal
         {rem.target.adjustment ? ` (includes today's approved +${rem.target.adjustment.calorieDelta} kcal)` : ''}
       </Muted>
-      <Row wrap gap={Space.sm}>
-        <Button title="Snap a meal" icon="camera" onPress={() => router.push('/food/capture')} />
-        <Button title="Add manually" kind="secondary" icon="add" onPress={() => router.push('/food/manual')} />
-        <Button title="Scan barcode" kind="secondary" icon="barcode-outline" onPress={() => router.push('/food/barcode')} />
-      </Row>
+      <Button title="Log meal" icon="add" onPress={() => setMealOpen(true)} />
     </Card>
   );
 
@@ -68,13 +65,15 @@ export default function Dashboard() {
           </Row>
         </Card>
       ) : null}
-      <Button title="Ask the coach" kind="secondary" icon="chatbubbles-outline" onPress={() => router.push('/coach')} />
     </Stack>
   );
 
   return (
     <Screen>
-      <TodayHero greeting={`${greeting()}${name}`} dateLabel={dateLabel} />
+      <PageHeader
+        title={`${greeting()}${name}`}
+        subtitle={dateLabel}
+      />
       {storageError ? <Banner kind="danger" title="Storage problem">{storageError}</Banner> : null}
       {isDesktop ? (
         <Row align="flex-start" gap={Space.lg}>
@@ -102,6 +101,7 @@ export default function Dashboard() {
         </Columns>
       )}
       <WeightSheet visible={weightOpen} onClose={() => setWeightOpen(false)} />
+      <LogMealSheet visible={mealOpen} onClose={() => setMealOpen(false)} />
     </Screen>
   );
 }
@@ -162,19 +162,16 @@ function WorkoutCard() {
 function ActivityCard({ onLogWeight }: { onLogWeight: () => void }) {
   const { state, today } = useStore();
   const a = activityForDay(state, today);
-  const hc = state.integrations.find((i) => i.id === 'health_connect');
+  const showActivity = hasActivitySource(state);
   const w = latestWeight(state);
   const baseline = state.targets?.baselineSteps ?? 7000;
   return (
     <Card style={{ gap: Space.md }}>
-      <Row>
-        <Text variant="h3" style={{ flex: 1 }}>Daily activity</Text>
-        {__DEV__ && hc?.status === 'connected' && hc.message?.includes('Simulated') ? <Badge kind="simulated" label="Simulated sync" /> : null}
-      </Row>
-      {a.missing ? (
+      {showActivity ? <Text variant="h3">Daily activity</Text> : null}
+      {!showActivity ? null : a.missing ? (
         <Stack gap={Space.sm}>
-          <Muted variant="small">{hc?.status === 'connected' ? 'No activity has synced for today yet.' : 'Add steps manually to see activity here.'}</Muted>
-          <Button title={hc?.status === 'connected' ? 'Review activity' : 'Add activity'} kind="secondary" size="sm" icon="footsteps-outline" onPress={() => router.push('/activity')} />
+          <Muted variant="small">No activity has synced for today yet.</Muted>
+          <Button title="View activity" kind="secondary" size="sm" icon="footsteps-outline" onPress={() => router.push('/activity')} />
         </Stack>
       ) : (
         <Pressable onPress={() => router.push('/activity')} accessibilityRole="button" accessibilityLabel="Open activity details" style={{ gap: Space.sm }}>
@@ -186,10 +183,10 @@ function ActivityCard({ onLogWeight }: { onLogWeight: () => void }) {
           <Muted variant="small">
             Your target assumes ~{baseline.toLocaleString()} steps. {a.activeKcal ? `~${a.activeKcal} active kcal (device estimate)` : ''}
           </Muted>
-          {a.otherSources.length ? <Muted variant="small">Counted from {a.chosen?.origin}; {a.otherSources.length} other source{a.otherSources.length > 1 ? 's' : ''} ignored to avoid double counting.</Muted> : null}
+          
         </Pressable>
       )}
-      <View style={{ height: 1, backgroundColor: C.border }} />
+      {showActivity ? <View style={{ height: 1, backgroundColor: C.border }} /> : null}
       <Row>
         <Stack gap={0} style={{ flex: 1 }}>
           <Muted variant="caption">BODY WEIGHT</Muted>

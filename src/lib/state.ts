@@ -71,6 +71,19 @@ export function emptyState(deviceId: string, now: string): AppState {
   };
 }
 
+export function migrateState(saved: AppState): AppState {
+  const base = emptyState(saved.deviceId ?? 'unknown', new Date().toISOString());
+  return {
+    ...base, ...saved, version: STATE_VERSION,
+    foodLog: (saved.foodLog ?? []).map((entry) => ({
+      ...entry,
+      items: (entry.items ?? []).map((item) => ({ ...item, reviewRequired: item.reviewRequired ?? false })),
+      estimateQuality: entry.estimateQuality ?? (entry.origin === 'photo' ? { provider: 'Earlier estimate', overallConfidence: 'low' as const, corrected: false, notes: ['Estimate quality was not recorded in this version.'] } : undefined),
+    })),
+    sessions: (saved.sessions ?? []).map((session) => ({ ...session, effort: session.effort ?? undefined, pain: session.pain ?? undefined })),
+  };
+}
+
 /** Collections that sync record-by-record (each item has id/updatedAt/deleted). */
 export const SYNCED_COLLECTIONS = ['dayAdjustments', 'workoutOverrides', 'foodLog', 'weights', 'routines', 'sessions', 'activity', 'proposals', 'chat', 'notifications', 'progressPhotos'] as const;
 export type SyncedCollection = (typeof SYNCED_COLLECTIONS)[number];

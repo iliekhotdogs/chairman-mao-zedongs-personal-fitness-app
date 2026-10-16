@@ -3,10 +3,10 @@ import { Pressable } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Button, Card, EmptyState, Expandable, Muted, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, IconButton } from '@/components/ui';
+import { Badge, Button, Card, EmptyState, Expandable, Menu, Muted, PageHeader, Row, Screen, Segmented, Sheet, Stack, Text, IconButton, Ionicons } from '@/components/ui';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
-import { live, activeSession } from '@/lib/selectors';
+import { live, activeSession, workoutForDay } from '@/lib/selectors';
 import { generatePlan, dayMinutes } from '@/lib/workouts/generator';
 import { exerciseName, formatPrescription } from '@/lib/workouts/exercises';
 import { formatDateLabel, nowISO, WEEKDAY_SHORT } from '@/lib/dates';
@@ -27,6 +27,8 @@ export default function Workouts() {
   const openedFromSettings = useRef(false);
   const units = state.settings.units;
   const active = activeSession(state);
+  const [openDay, setOpenDay] = useState<string | null>(null);
+  const todayDayId = workoutForDay(state, today).day?.sourceDayId ?? workoutForDay(state, today).day?.id;
 
   const proposeNewPlan = () => state.profile && setPreview(generatePlan(state.profile, today));
   useEffect(() => {
@@ -43,7 +45,7 @@ export default function Workouts() {
         subtitle={state.plan ? state.plan.name : 'No plan yet'}
         right={<Button title={active ? 'Continue workout' : 'Start workout'} icon="play" onPress={() => router.push('/workouts/session')} />}
       />
-      <Segmented label="Training sections" value={tab} onChange={setTab} options={[{ value: 'plan', label: 'My plan' }, { value: 'routines', label: 'My routines' }, { value: 'history', label: 'History' }]} />
+      <Segmented label="Training sections" value={tab} onChange={setTab} options={[{ value: 'plan', label: 'My plan' }, ...(tab === 'routines' ? [{ value: 'routines' as Tab, label: 'My routines' }] : []), { value: 'history', label: 'History' }]} />
 
       {tab === 'plan' &&
         (state.plan ? (
@@ -51,7 +53,6 @@ export default function Workouts() {
             <Card style={{ gap: Space.sm }}>
               <Row wrap gap={6}>
                 <Badge kind={state.plan.source === 'ai_generated' ? 'suggestion' : 'neutral'} label={state.plan.source === 'ai_generated' ? 'Generated for you' : 'Your routine'} icon={state.plan.source === 'ai_generated' ? 'sparkles' : 'person-outline'} />
-                <Badge kind="saved" label="Active plan" />
               </Row>
               <Text variant="h2">{state.plan.name}</Text>
               <Expandable title="Why this plan?" icon="help-circle-outline">
@@ -59,34 +60,48 @@ export default function Workouts() {
                   <Muted key={r} variant="small">• {r}</Muted>
                 ))}
               </Expandable>
-              <Row wrap gap={Space.sm}>
-                <Button title="Generate a new plan" kind="secondary" size="sm" icon="sparkles-outline" onPress={proposeNewPlan} />
-                <Button title="Build my own" kind="ghost" size="sm" icon="create-outline" onPress={() => router.push('/workouts/routine')} />
-              </Row>
+              <Menu
+                title="Change plan"
+                trigger="Change plan"
+                items={[
+                  { label: 'Generate a new plan', icon: 'sparkles-outline', onPress: proposeNewPlan },
+                  { label: 'Build my own', icon: 'create-outline', onPress: () => router.push('/workouts/routine') },
+                  { label: 'My routines', icon: 'list-outline', onPress: () => setTab('routines') },
+                ]}
+              />
             </Card>
             <Stack gap={Space.md} style={isWide ? { flexDirection: 'row', flexWrap: 'wrap' } : undefined}>
-              {state.plan.days.map((d) => (
-                <Card key={d.id} style={[{ gap: 6 }, isWide ? { width: '48.5%' } : null]}>
-                  <Row>
-                    <Stack gap={0} style={{ flex: 1 }}>
-                      <Muted variant="caption">{d.weekday !== undefined ? WEEKDAY_SHORT[d.weekday].toUpperCase() : 'ANY DAY'}</Muted>
-                      <Text variant="h3">{d.name}</Text>
-                    </Stack>
-                    <Muted variant="small">~{dayMinutes(d)} min</Muted>
-                  </Row>
-                  <Muted variant="small">{d.focus}</Muted>
-                  {d.exercises.map((e, i) => (
-                    <Row key={i}>
-                      <Text variant="small" style={{ flex: 1 }}>{exerciseName(e.exerciseId)}</Text>
-                      <Muted variant="small">
-                        {formatPrescription(e)}
-                        {e.targetWeightKg !== undefined && e.targetWeightKg > 0 ? ` @ ${displayWeight(e.targetWeightKg, units)}` : ''}
-                      </Muted>
-                    </Row>
-                  ))}
-                  <Button title="Start this workout" kind="secondary" size="sm" icon="play-outline" onPress={() => router.push({ pathname: '/workouts/session', params: { dayId: d.id } })} />
-                </Card>
-              ))}
+              {state.plan.days.map((d) => {
+                const isToday = d.id === todayDayId;
+                const open = isToday || openDay === d.id;
+                return (
+                  <Card key={d.id} style={[{ gap: 6 }, isWide ? { width: '48.5%' } : null]}>
+                    <Pressable disabled={isToday} onPress={() => setOpenDay(openDay === d.id ? null : d.id)} accessibilityRole="button" accessibilityState={{ expanded: open }} accessibilityLabel={`${d.name}, ${d.focus}`}>
+                      <Row>
+                        <Stack gap={0} style={{ flex: 1 }}>
+                          <Muted variant="caption">{isToday ? 'TODAY' : d.weekday !== undefined ? WEEKDAY_SHORT[d.weekday].toUpperCase() : 'ANY DAY'}</Muted>
+                          <Text variant="h3">{d.name}</Text>
+                        </Stack>
+                        <Muted variant="small">~{dayMinutes(d)} min</Muted>
+                        {!isToday ? <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={C.textSecondary} /> : null}
+                      </Row>
+                      <Muted variant="small">{d.focus}</Muted>
+                    </Pressable>
+                    {open
+                      ? d.exercises.map((e, i) => (
+                          <Row key={i}>
+                            <Text variant="small" style={{ flex: 1 }}>{exerciseName(e.exerciseId)}</Text>
+                            <Muted variant="small">
+                              {formatPrescription(e)}
+                              {e.targetWeightKg !== undefined && e.targetWeightKg > 0 ? ` @ ${displayWeight(e.targetWeightKg, units)}` : ''}
+                            </Muted>
+                          </Row>
+                        ))
+                      : null}
+                    {isToday ? <Button title="Start this workout" kind="secondary" size="sm" icon="play-outline" onPress={() => router.push({ pathname: '/workouts/session', params: { dayId: d.id } })} /> : null}
+                  </Card>
+                );
+              })}
             </Stack>
           </Stack>
         ) : (
@@ -151,7 +166,6 @@ export default function Workouts() {
           <>
             <Row wrap gap={6}>
               <Badge kind="pending" label="Needs your approval" />
-              {preview.source === 'ai_generated' ? <Badge kind="simulated" label="Rule-based generator" /> : null}
             </Row>
             <Text variant="h3">{preview.name}</Text>
             {preview.days.map((d) => (

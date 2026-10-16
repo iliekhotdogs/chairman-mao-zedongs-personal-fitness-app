@@ -119,8 +119,8 @@ create table if not exists public.app_config (
   provider             text not null default 'groq' check (provider in ('groq', 'gemini', 'nvidia')),
   chat_model           text not null default 'openai/gpt-oss-120b',
   vision_model         text not null default 'qwen/qwen3.8-27b',
-  per_user_daily_limit integer not null default 5 check (per_user_daily_limit between 0 and 10000),
-  global_daily_limit   integer not null default 40 check (global_daily_limit between 0 and 1000000),
+  per_user_daily_limit integer not null default 30 check (per_user_daily_limit between 0 and 10000),
+  global_daily_limit   integer not null default 500 check (global_daily_limit between 0 and 1000000),
   ai_enabled           boolean not null default true,
   updated_at           timestamptz not null default now()
 );

@@ -5,14 +5,16 @@ jest.mock('@react-native-async-storage/async-storage', () =>
   jest.requireActual('@react-native-async-storage/async-storage/jest/async-storage-mock'),
 );
 const mockInvoke = jest.fn();
+let mockSession = true;
 jest.mock('../sync/supabase', () => ({
   isSupabaseConfigured: () => true,
-  supabase: () => ({ functions: { invoke: mockInvoke } }),
+  supabase: () => ({ functions: { invoke: mockInvoke }, auth: { getSession: async () => ({ data: { session: mockSession ? { user: {} } : null } }) } }),
 }));
 
 const TODAY = '2026-10-02';
 const sample = () => ({ ...buildSampleState('dev', TODAY), proposals: [] });
 afterEach(() => {
+  mockSession = true;
   mockInvoke.mockReset();
 });
 
@@ -81,5 +83,23 @@ describe('shared AI gateway', () => {
     const result = await coachReply(sample(), 'Can I shorten my workout?', TODAY);
     expect(result.simulated).toBe(true);
     expect(result.aiNotice).toContain('provider unavailable');
+  });
+});
+
+describe('coach when signed out', () => {
+  it('answers with a built-in reply, a sign-in notice and no server call', async () => {
+    mockSession = false;
+    const result = await coachReply(sample(), 'How am I doing?', TODAY);
+    expect(result.simulated).toBe(true);
+    expect(result.aiNoticeKind).toBe('signed_out');
+    expect(result.aiNotice).toBe('Sign in to use the AI coach.');
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+  it('maps a transport failure to a friendly message', async () => {
+    const err = Object.assign(new Error('Failed to send a request to the Edge Function'), { name: 'FunctionsFetchError' });
+    mockInvoke.mockResolvedValue({ data: null, error: err });
+    const result = await coachReply(sample(), 'How am I doing?', TODAY);
+    expect(result.aiNoticeKind).toBe('unavailable');
+    expect(result.aiNotice).not.toMatch(/edge function|supabase/i);
   });
 });

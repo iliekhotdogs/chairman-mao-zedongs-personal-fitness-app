@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { goBack } from '@/lib/nav';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, EmptyState, Field, IconButton, Muted, NumberField, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Ionicons, Columns } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, EmptyState, Expandable, Field, IconButton, Menu, Muted, NumberField, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Ionicons, Columns } from '@/components/ui';
 import { ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
@@ -14,14 +14,19 @@ import { RestTimerCard } from '@/components/RestTimer';
 import { defaultRestSec } from '@/lib/workouts/restTimer';
 import { activeSession, live, workoutForDay } from '@/lib/selectors';
 import { EXERCISES, exerciseName, EXERCISE_BY_ID, formatPrescription } from '@/lib/workouts/exercises';
-import { recommendNext } from '@/lib/workouts/progression';
+import { historyFor, recommendNext } from '@/lib/workouts/progression';
 import { parseSetUtterance, type ParsedSet } from '@/lib/workouts/voiceParser';
 import { progressionProposal } from '@/lib/coaching/adaptive';
 import { newId } from '@/lib/id';
+import { checkSet, jumpWarning, prefillReps, MAX_SET_WEIGHT_KG, MAX_REPS } from '@/lib/inputRules';
+import { RuleViolation } from '@/lib/reducer';
 import { formatDateLabel, formatTime, nowISO } from '@/lib/dates';
 import { displayWeight, toKg, weightUnit, weightValue } from '@/lib/units';
 import type { LoggedSet, PlannedExercise, WorkoutDay, WorkoutSession } from '@/lib/types';
 import type { AppState } from '@/lib/state';
+
+// Hidden to keep the set row to one primary action; the weight field accepts typed values.
+const SHOW_WEIGHT_NUDGE = false;
 
 export default function SessionScreen() {
   const { state } = useStore();
@@ -72,7 +77,7 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
 
   return (
     <Screen size="narrow">
-      <PageHeader title="Start a workout" subtitle={formatDateLabel(today, today)} right={<Button title="Back" kind="ghost" onPress={() => goBack('/workouts')} />} />
+      <PageHeader title="Start a workout" subtitle={formatDateLabel(today, today)} right={<Row gap={Space.sm}><Button title="Back" kind="ghost" onPress={() => goBack('/workouts')} /><Menu title="Other options" items={[{ label: 'Freestyle workout (no plan)', icon: 'add', onPress: () => start(undefined) }]} /></Row>} />
       {first ? (
         <Card tone={overridden && !preferred ? 'saved' : 'default'} style={{ gap: Space.sm }}>
           <Row wrap gap={6}>
@@ -94,8 +99,7 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
         </Card>
       )}
       {state.plan ? (
-        <Stack gap={Space.sm}>
-          <Text variant="h3">Other days in your plan</Text>
+        <Expandable title="Other days in your plan">
           {state.plan.days
             .filter((d) => d.id !== first?.id)
             .map((d) => (
@@ -109,9 +113,8 @@ function StartView({ preferredDayId }: { preferredDayId?: string }) {
                 </Row>
               </Card>
             ))}
-        </Stack>
+        </Expandable>
       ) : null}
-      <Button title="Freestyle workout (no plan)" kind="ghost" icon="add" onPress={() => start(undefined)} />
     </Screen>
   );
 }
@@ -167,7 +170,12 @@ function SessionView({ session }: { session: WorkoutSession }) {
       <PageHeader
         title={session.name}
         subtitle={finished ? `${formatDateLabel(session.date)} · ${totalSets} sets · ${displayWeight(volume, units, 0)} volume` : `Started ${formatTime(session.startedAt)} · ${totalSets} sets logged`}
-        right={finished ? <Button title="Done" kind="ghost" onPress={() => router.replace('/workouts')} /> : <Button title="Finish" icon="flag" onPress={() => setConfirmFinish(true)} />}
+        right={
+          <Row gap={Space.sm}>
+            {finished ? <Button title="Done" kind="ghost" onPress={() => router.replace('/workouts')} /> : <Button title="Finish" icon="flag" onPress={() => setConfirmFinish(true)} />}
+            <Menu title="Workout options" items={[{ label: finished ? 'Delete workout' : 'Discard workout', icon: 'trash-outline', danger: true, onPress: () => setConfirmDiscard(true) }]} />
+          </Row>
+        }
       />
       {finished ? <Banner kind="success" title="Workout saved">You can still correct sets below.</Banner> : null}
       {progression ? <ProposalCard proposal={progression} /> : null}
@@ -182,12 +190,16 @@ function SessionView({ session }: { session: WorkoutSession }) {
             <Button title="Add exercise" kind="secondary" icon="add" onPress={() => setPickerOpen(true)} />
           </Stack>,
           <Stack key="voice" gap={Space.md}>
-            <VoiceLogger session={session} currentExerciseId={currentEx} onLogged={startRestAfter} />
-            {!finished ? (
-              <Button title="Discard workout" kind="danger" size="sm" icon="trash-outline" onPress={() => setConfirmDiscard(true)} />
-            ) : (
-              <Button title="Delete workout" kind="danger" size="sm" icon="trash-outline" onPress={() => setConfirmDiscard(true)} />
-            )}
+            <Expandable title="More" icon="ellipsis-horizontal">
+              <VoiceLogger session={session} currentExerciseId={currentEx} onLogged={startRestAfter} />
+              {!finished ? (
+                <Card style={{ gap: Space.sm }}>
+                  <Button title={pain ? 'Pain during workout: yes' : 'Pain during workout'} kind={pain ? 'danger' : 'secondary'} onPress={() => setPain(!pain)} />
+                  {pain ? <Field label="Where or when did it hurt? (optional)" value={painNote} onChangeText={setPainNote} /> : null}
+                  {pain ? <Banner kind="warning">Skip movements that hurt. No automatic progression will be suggested from this session.</Banner> : null}
+                </Card>
+              ) : null}
+            </Expandable>
           </Stack>,
         ]}
       </Columns>
@@ -237,7 +249,7 @@ function SessionView({ session }: { session: WorkoutSession }) {
 }
 
 function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onLogged, rest }: { session: WorkoutSession; exerciseId: string; planned?: PlannedExercise; highlighted: boolean; onFocus: () => void; onLogged: () => void; rest?: RestTimerControls }) {
-  const { state } = useStore();
+  const { state, act } = useStore();
   const doAct = useAct();
   const units = state.settings.units;
   const ex = EXERCISE_BY_ID[exerciseId];
@@ -250,14 +262,40 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
   const bodyweight = ex?.loadType === 'bodyweight';
   const timed = Boolean(ex?.timed);
   const [weight, setWeight] = useState<number | undefined>(last ? weightValue(last.weightKg, units) : rec?.weightKg !== undefined ? weightValue(rec.weightKg, units) : bodyweight ? 0 : undefined);
-  const [reps, setReps] = useState<number>(last?.reps ?? planned?.repMax ?? 8);
+  const [reps, setReps] = useState<number>(prefillReps({ lastReps: last?.reps, repMin: rec?.repMin ?? planned?.repMin }));
   const [editing, setEditing] = useState<LoggedSet | null>(null);
   const step = units === 'imperial' ? 5 : 2.5;
 
+  const [msg, setMsg] = useState<string | undefined>();
+  const [undoId, setUndoId] = useState<string | undefined>();
+  const [ackJump, setAckJump] = useState<number | undefined>();
+  const lastTap = useRef(0);
+  const maxWeight = weightValue(MAX_SET_WEIGHT_KG, units);
+  const lastTopKg = Math.max(0, ...(historyFor(exerciseId, history)[0]?.sets.map((s) => s.weightKg) ?? []));
+
   const log = () => {
     if (weight === undefined) return;
+    // guard against double taps (400 ms)
+    if (Date.now() - lastTap.current < 400) return;
+    lastTap.current = Date.now();
+    const weightKg = toKg(weight, units);
+    const bad = checkSet({ weightKg, reps });
+    if (bad) return setMsg(bad);
+    const jump = jumpWarning(weightKg, lastTopKg);
+    if (jump && ackJump !== weight) {
+      setAckJump(weight);
+      return setMsg(jump);
+    }
     const now = nowISO();
-    if (doAct({ type: 'ADD_SETS', sessionId: session.id, now, sets: [{ id: newId(), exerciseId, weightKg: toKg(weight, units), reps, via: 'manual', loggedAt: now }] })) onLogged();
+    const id = newId();
+    try {
+      act({ type: 'ADD_SETS', sessionId: session.id, now, sets: [{ id, exerciseId, weightKg, reps, via: 'manual', loggedAt: now }] });
+    } catch (e) {
+      return setMsg(e instanceof RuleViolation ? e.message : 'Could not log that set. Please try again.');
+    }
+    setMsg(undefined);
+    setUndoId(id);
+    onLogged();
     onFocus();
   };
 
@@ -293,24 +331,30 @@ function ExerciseBlock({ session, exerciseId, planned, highlighted, onFocus, onL
             {bodyweight && s.weightKg === 0 ? 'Bodyweight' : displayWeight(s.weightKg, units)} × {s.reps}{timed ? ' s' : ''}
           </Text>
           {s.via === 'voice' ? <Ionicons name="mic-outline" size={14} color={C.textMuted} accessibilityLabel="Logged by voice" /> : null}
-          <IconButton icon="create-outline" label={`Edit set ${i + 1}`} size={17} color={C.textSecondary} onPress={() => setEditing(s)} />
-          <IconButton icon="close" label={`Delete set ${i + 1}`} size={17} color={C.textSecondary} onPress={() => doAct({ type: 'DELETE_SET', sessionId: session.id, setId: s.id, now: nowISO() })} />
+          <Menu title={`Set ${i + 1}`} label={`Options for set ${i + 1}`} items={[{ label: 'Edit set', icon: 'create-outline', onPress: () => setEditing(s) }, { label: 'Delete set', icon: 'close', danger: true, onPress: () => doAct({ type: 'DELETE_SET', sessionId: session.id, setId: s.id, now: nowISO() }) }]} />
         </Row>
       ))}
       <Row wrap gap={Space.md} style={{ marginTop: 4 }}>
-        <NumberField label={`Weight (${weightUnit(units)})`} value={weight} onChange={setWeight} style={{ width: 130 }} hint={bodyweight ? '0 = bodyweight' : undefined} />
+        <NumberField label={`Weight (${weightUnit(units)})`} value={weight} onChange={(v) => { setWeight(v); setAckJump(undefined); setMsg(undefined); }} min={0} max={maxWeight} style={{ width: 130 }} hint={bodyweight ? '0 = bodyweight' : undefined} />
         <Stack gap={6}>
           <Text variant="smallStrong">{timed ? 'Seconds' : 'Reps'}</Text>
-          <Stepper value={reps} onChange={setReps} min={1} max={timed ? 300 : 100} step={timed ? 5 : 1} />
+          <Stepper value={reps} onChange={setReps} min={1} max={timed ? MAX_REPS : 100} step={timed ? 5 : 1} />
         </Stack>
         <View style={{ justifyContent: 'flex-end', paddingBottom: bodyweight ? 22 : 0 }}>
           <Row gap={4}>
-            {!bodyweight ? <IconButton icon="remove-circle-outline" label={`Decrease weight by ${step}`} onPress={() => setWeight(Math.max(0, (weight ?? 0) - step))} /> : null}
-            {!bodyweight ? <IconButton icon="add-circle-outline" label={`Increase weight by ${step}`} onPress={() => setWeight((weight ?? 0) + step)} /> : null}
+            {SHOW_WEIGHT_NUDGE && !bodyweight ? <IconButton icon="remove-circle-outline" label={`Decrease weight by ${step}`} onPress={() => setWeight(Math.max(0, (weight ?? 0) - step))} /> : null}
+            {SHOW_WEIGHT_NUDGE && !bodyweight ? <IconButton icon="add-circle-outline" label={`Increase weight by ${step}`} onPress={() => setWeight((weight ?? 0) + step)} /> : null}
             <Button title="Log set" icon="checkmark" onPress={log} disabled={weight === undefined} />
           </Row>
         </View>
       </Row>
+      {msg ? <Text variant="small" color={C.danger} accessibilityRole="alert">{msg}</Text> : null}
+      {undoId && sets.some((s) => s.id === undoId) ? (
+        <Row gap={Space.sm}>
+          <Muted variant="small" style={{ flex: 1 }}>Set logged.</Muted>
+          <Button title="Undo" kind="secondary" size="sm" onPress={() => { doAct({ type: 'DELETE_SET', sessionId: session.id, setId: undoId, now: nowISO() }); setUndoId(undefined); }} />
+        </Row>
+      ) : null}
       {rest ? <RestTimerCard rest={rest} label={exerciseName(exerciseId)} /> : null}
       <EditSetSheet key={editing?.id ?? 'none'} set={editing} onClose={() => setEditing(null)} sessionId={session.id} />
     </Card>
@@ -336,11 +380,12 @@ function EditSetSheet({ set, onClose, sessionId }: { set: LoggedSet | null; onCl
           full
           disabled={w === undefined}
           onPress={() => {
+            if (w !== undefined && checkSet({ weightKg: toKg(w, units), reps: r })) return;
             if (set && w !== undefined && doAct({ type: 'UPDATE_SET', sessionId, set: { ...set, weightKg: toKg(w, units), reps: r }, now: nowISO() }, 'Set updated')) onClose();
           }}
         />
       }>
-      <NumberField label={`Weight (${weightUnit(units)})`} value={w} onChange={setW} />
+      <NumberField label={`Weight (${weightUnit(units)})`} value={w} onChange={setW} min={0} max={weightValue(MAX_SET_WEIGHT_KG, units)} />
       <Text variant="smallStrong">Reps</Text>
       <Stepper value={r} onChange={setR} min={1} max={100} />
     </Sheet>
@@ -353,6 +398,7 @@ function VoiceLogger({ session, currentExerciseId, onLogged }: { session: Workou
   const units = state.settings.units;
   const [text, setText] = useState('');
   const [parsed, setParsed] = useState<ParsedSet | null>(null);
+  const [voiceMsg, setVoiceMsg] = useState<string | undefined>();
   const speech = useSpeech((t) => {
     setText(t);
     interpret(t);
@@ -361,6 +407,12 @@ function VoiceLogger({ session, currentExerciseId, onLogged }: { session: Workou
   function interpret(input = text) {
     if (!input.trim()) return;
     const p = parseSetUtterance(input, { units, currentExerciseId });
+    if (!p.understood) {
+      setParsed(null);
+      setVoiceMsg(p.issues[0]);
+      return;
+    }
+    setVoiceMsg(undefined);
     if (p.repeatLast) {
       const last = session.sets.filter((s) => s.exerciseId === (p.exerciseId ?? '')).slice(-1)[0] ?? session.sets[session.sets.length - 1];
       if (last) {
@@ -378,7 +430,9 @@ function VoiceLogger({ session, currentExerciseId, onLogged }: { session: Workou
     const now = nowISO();
     const unitSys = parsed.unit === 'kg' ? 'metric' : 'imperial';
     const weightKg = toKg(parsed.weight, unitSys);
-    const sets: LoggedSet[] = Array.from({ length: parsed.sets }, (_, i) => ({ id: newId(), exerciseId: parsed.exerciseId!, weightKg, reps: parsed.reps!, via: 'voice', loggedAt: new Date(Date.now() + i).toISOString() }));
+    const bad = checkSet({ weightKg, reps: parsed.reps });
+    if (bad) return setVoiceMsg(bad);
+    const sets: LoggedSet[] = Array.from({ length: parsed.sets }, (_, i) => ({ id: newId(), exerciseId: parsed.exerciseId!, weightKg, reps: parsed.reps!, rpe: parsed.rpe, via: 'voice', loggedAt: new Date(Date.now() + i).toISOString() }));
     if (doAct({ type: 'ADD_SETS', sessionId: session.id, sets, now }, `Logged ${sets.length} set${sets.length > 1 ? 's' : ''}`)) {
       onLogged(parsed.exerciseId);
       setParsed(null);
@@ -409,6 +463,7 @@ function VoiceLogger({ session, currentExerciseId, onLogged }: { session: Workou
         <Button title="Interpret" kind="secondary" icon="color-wand-outline" onPress={() => interpret()} disabled={!text.trim()} />
       </Row>
       {speech.error ? <Text variant="small" color={C.danger}>{speech.error}</Text> : null}
+      {voiceMsg ? <Text variant="small" color={C.danger} accessibilityRole="alert">{voiceMsg}</Text> : null}
 
       {parsed ? (
         <Card tone="pending" style={{ gap: Space.sm }}>
@@ -424,7 +479,7 @@ function VoiceLogger({ session, currentExerciseId, onLogged }: { session: Workou
           </Row>
           {parsed.exerciseFromContext ? <Muted variant="small">No exercise name heard. Using the current exercise.</Muted> : null}
           <Row wrap gap={Space.md}>
-            <NumberField label="Weight" value={parsed.weight} onChange={(v) => setParsed({ ...parsed, weight: v })} suffix={parsed.unit ?? weightUnit(units)} style={{ width: 130 }} />
+            <NumberField label="Weight" value={parsed.weight} min={0} max={MAX_SET_WEIGHT_KG * 2.3} onChange={(v) => setParsed({ ...parsed, weight: v })} suffix={parsed.unit ?? weightUnit(units)} style={{ width: 130 }} />
             <Stack gap={6}>
               <Text variant="smallStrong">Unit</Text>
               <Row gap={4}>

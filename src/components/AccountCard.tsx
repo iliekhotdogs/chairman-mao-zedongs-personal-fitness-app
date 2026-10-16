@@ -4,10 +4,10 @@ import { router } from 'expo-router';
 import * as Linking from 'expo-linking';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Button, Card, Field, Muted, Row, Text } from './ui';
+import { Badge, Button, Card, Field, Muted, Row, Sheet, Text } from './ui';
 import { useStore } from '@/store/AppStore';
 import { useToast } from './Toast';
-import { signOut, supabase } from '@/lib/sync/supabase';
+import { supabase } from '@/lib/sync/supabase';
 import { functionErrorMessage } from '@/lib/ai/provider';
 
 const MIN_PASSWORD = 8;
@@ -25,7 +25,7 @@ function resetRedirectUrl(): string | undefined {
 type Mode = 'in' | 'up' | 'forgot';
 
 /** Sign in / invite signup / password reset / sync status. Used in Settings and on the welcome screen. */
-export function AccountCard({ intro }: { intro?: string }) {
+export function AccountCard({ intro, flat }: { intro?: string; flat?: boolean }) {
   const { state, sync } = useStore();
   const toast = useToast();
   const [mode, setMode] = useState<Mode>('in');
@@ -34,6 +34,8 @@ export function AccountCard({ intro }: { intro?: string }) {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string>();
+  const [confirmOut, setConfirmOut] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const passwordRef = useRef<TextInput>(null);
   const codeRef = useRef<TextInput>(null);
@@ -58,7 +60,7 @@ export function AccountCard({ intro }: { intro?: string }) {
       const message = e instanceof Error ? e.message : 'Something went wrong.';
       // Supabase's wording when the build has a wrong or mistyped publishable key.
       setErr(/invalid api key/i.test(message)
-        ? "Accounts are unavailable: this site's Supabase key is misconfigured. Check EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY and redeploy."
+        ? "Accounts are unavailable: this site's sign-in key is misconfigured. Check EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY and redeploy."
         : message);
     } finally {
       setBusy(false);
@@ -97,6 +99,14 @@ export function AccountCard({ intro }: { intro?: string }) {
     return 'If that email has an account, a reset link is on its way.';
   });
 
+  const doSignOut = async () => {
+    setSigningOut(true);
+    const { remoteOk } = await sync.signOut();
+    setSigningOut(false);
+    setConfirmOut(false);
+    if (!remoteOk) toast('Signed out on this device. We could not reach the server, so unsynced changes may not be saved.', 'error');
+  };
+
   const passwordError = password && password.length < MIN_PASSWORD ? `At least ${MIN_PASSWORD} characters.` : undefined;
   const canSignIn = Boolean(email.trim() && password) && !busy;
   const canReset = email.includes('@') && !busy;
@@ -107,12 +117,25 @@ export function AccountCard({ intro }: { intro?: string }) {
   const errorText = err ? <Text variant="small" color={C.danger} accessibilityRole="alert" accessibilityLiveRegion="assertive">{err}</Text> : null;
 
   return (
-    <Card style={{ gap: Space.sm }}>
-      <Text variant="h3">Account &amp; sync</Text>
+    <Card style={[{ gap: Space.sm }, flat ? { borderWidth: 0, padding: 0, backgroundColor: 'transparent' } : null]}>
+      {flat ? null : <Text variant="h3">Account &amp; sync</Text>}
+      {sync.session ? <Button title="Sign out" kind="secondary" size="sm" icon="log-out-outline" onPress={() => setConfirmOut(true)} /> : null}
+      <Sheet
+        visible={confirmOut}
+        onClose={() => !signingOut && setConfirmOut(false)}
+        title="Sign out?"
+        footer={
+          <Row gap={Space.sm}>
+            <Button title="Cancel" kind="secondary" style={{ flex: 1 }} disabled={signingOut} onPress={() => setConfirmOut(false)} />
+            <Button title="Sign out" kind="danger" style={{ flex: 1 }} loading={signingOut} onPress={doSignOut} />
+          </Row>
+        }>
+        <Muted>Your changes are synced first, then data for this account is removed from this device. Sign in again to get it back.</Muted>
+      </Sheet>
       {!sync.configured ? (
         <>
           <Badge kind="neutral" label="This device only" icon="phone-portrait-outline" />
-          <Muted variant="small">Cloud accounts aren&apos;t set up yet, so your data is saved only on this device/browser. Once the Supabase backend is configured (see docs/SETUP.md), you can sign in here and your data syncs between Android and the website.</Muted>
+          <Muted variant="small">Accounts aren&apos;t available in this version, so your data is saved only on this device.</Muted>
         </>
       ) : sync.session ? (
         <>
@@ -132,7 +155,6 @@ export function AccountCard({ intro }: { intro?: string }) {
             <Button title="Sync now" kind="secondary" size="sm" icon="refresh" onPress={() => sync.syncNow()} />
             <Button title="Change password" kind="secondary" size="sm" icon="key-outline" onPress={() => router.push('/reset-password')} />
             {isAdmin ? <Button title="Admin" kind="secondary" size="sm" onPress={() => router.push('/admin')} /> : null}
-            <Button title="Sign out" kind="ghost" size="sm" onPress={() => void signOut()} />
           </Row>
         </>
       ) : mode === 'forgot' ? (

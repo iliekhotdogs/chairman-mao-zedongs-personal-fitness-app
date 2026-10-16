@@ -1,21 +1,23 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C, Radius, Space } from '@/constants/theme';
-import { AccentRule, Badge, Banner, Button, Card, Chip, EmptyState, IconButton, Muted, Row, Segmented, Sheet, Stack, Text, ErrorState } from '@/components/ui';
+import { AccentRule, Badge, Banner, Button, Card, Chip, EmptyState, IconButton, Menu, Muted, Row, Sheet, Stack, Text, ErrorState } from '@/components/ui';
 import { InsightCard, ProposalCard } from '@/components/coaching';
 import { useStore } from '@/store/AppStore';
-import { useAct, useToast } from '@/components/Toast';
+import { useAct } from '@/components/Toast';
 import { useAiEngine } from '@/hooks/useAiEngine';
 import { useLayout } from '@/hooks/useLayout';
-import { coachReply } from '@/lib/ai/provider';
+import { router } from 'expo-router';
+import { coachReply, type AiNoticeKind } from '@/lib/ai/provider';
 import { pendingProposals, visibleChat } from '@/lib/selectors';
 import { newId } from '@/lib/id';
 import { formatTime, nowISO } from '@/lib/dates';
-import type { ChatMessage, CoachTone } from '@/lib/types';
+import type { ChatMessage } from '@/lib/types';
+import { PrivacyNotice } from '@/components/PrivacyNotice';
 
-const PROMPTS = ['I only have 20 minutes today', "I'm eating out tonight", 'My knee hurts', 'How am I doing?', 'What should I eat for dinner?'];
+const PROMPTS = ['How am I doing?', 'I only have 20 minutes today', "I'm eating out tonight", 'My knee hurts', 'What should I eat for dinner?'];
 
 export default function Coach() {
   const { state, today } = useStore();
@@ -26,15 +28,17 @@ export default function Coach() {
   const [inputFocused, setInputFocused] = useState(false);
   const [thinking, setThinking] = useState(false);
   const [error, setError] = useState<{ msg: string; retry: string } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; kind: AiNoticeKind; retry: string } | null>(null);
   const [tab, setTab] = useState<'chat' | 'suggestions'>('chat');
   const [confirmClear, setConfirmClear] = useState(false);
+  const [moreIdeas, setMoreIdeas] = useState(false);
+  const [sent, setSent] = useState(0);
   const scroll = useRef<ScrollView>(null);
   const messages = visibleChat(state);
   const pending = pendingProposals(state);
   const decided = state.proposals.filter((p) => p.status !== 'pending').sort((a, b) => (b.decidedAt ?? b.updatedAt).localeCompare(a.decidedAt ?? a.updatedAt)).slice(0, 6);
   const engine = useAiEngine('chat');
   const simulated = engine === 'simulated';
-  const toast = useToast();
 
   useEffect(() => {
     const t = setTimeout(() => scroll.current?.scrollToEnd({ animated: true }), 50);
@@ -45,14 +49,16 @@ export default function Coach() {
     const body = msg.trim();
     if (!body || thinking) return;
     setText('');
+    setSent((n) => n + 1);
     setError(null);
+    setNotice(null);
     const now = nowISO();
     const userMsg: ChatMessage = { id: newId(), role: 'user', text: body, createdAt: now, updatedAt: now };
     doAct({ type: 'ADD_CHAT', messages: [userMsg] });
     setThinking(true);
     try {
       const reply = await coachReply({ ...state, chat: [...state.chat, userMsg] }, body, today);
-      if (reply.aiNotice) toast(`The AI coach didn't answer. ${reply.aiNotice} Showing a built-in reply.`, 'error');
+      if (reply.aiNotice) setNotice({ text: reply.aiNotice, kind: reply.aiNoticeKind ?? 'other', retry: body });
       if (reply.proposals.length) doAct({ type: 'ADD_PROPOSALS', proposals: reply.proposals });
       const t = nowISO();
       doAct({ type: 'ADD_CHAT', messages: [{ id: newId(), role: 'coach', text: reply.text, createdAt: t, updatedAt: t, proposalIds: reply.proposals.map((p) => p.id), simulated: reply.simulated, safety: reply.safety }] });
@@ -62,15 +68,6 @@ export default function Coach() {
       setThinking(false);
     }
   };
-
-  const toneSwitch = (
-    <Segmented<CoachTone>
-      label="Coach tone"
-      value={state.settings.coachTone}
-      onChange={(v) => doAct({ type: 'UPDATE_SETTINGS', patch: { coachTone: v }, now: nowISO() }, v === 'supportive' ? 'Supportive coach' : 'Direct trainer')}
-      options={[{ value: 'supportive', label: 'Supportive' }, { value: 'direct', label: 'Direct' }]}
-    />
-  );
 
   const suggestions = (
     <Stack gap={Space.md}>
@@ -99,8 +96,8 @@ export default function Coach() {
   const chat = (
     <View style={{ flex: 1 }}>
       <ScrollView ref={scroll} style={{ flex: 1 }} contentContainerStyle={{ padding: isPhone ? Space.lg : Space.xl, gap: Space.md, paddingBottom: Space.xl }} keyboardShouldPersistTaps="handled">
-        {__DEV__ && simulated ? (
-          <Banner kind="simulated" title="Simulated coach">
+        {simulated ? (
+          <Banner kind="simulated" title="Built-in coach">
             Replies are built-in answers generated on this device from your data. Sign in to use the shared AI coach chat.
           </Banner>
         ) : null}
@@ -113,14 +110,24 @@ export default function Coach() {
             <Badge kind="neutral" label="Coach is typing…" icon="ellipsis-horizontal" />
           </Row>
         ) : null}
+        {notice ? (
+          <Banner
+            kind="warning"
+            title="Showing a built-in reply"
+            action={notice.kind === 'signed_out' ? <Button title="Sign in" size="sm" onPress={() => router.push('/settings')} /> : notice.kind === 'unavailable' ? <Button title="Retry" size="sm" onPress={() => send(notice.retry)} /> : undefined}>
+            {notice.text.replace(/([^.!?])$/, '$1.')}
+          </Banner>
+        ) : null}
         {error ? <ErrorState title="No reply" body={error.msg} onRetry={() => send(error.retry)} /> : null}
       </ScrollView>
       <View style={styles.composer}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
-          {PROMPTS.map((p) => (
+        {!simulated ? <PrivacyNotice kind="chat" dismissSignal={sent} /> : null}
+        <Row wrap gap={6}>
+          {(moreIdeas ? PROMPTS : PROMPTS.slice(0, 2)).map((p) => (
             <Chip key={p} label={p} asButton onPress={() => send(p)} />
           ))}
-        </ScrollView>
+          {!moreIdeas ? <Chip label="More ideas" asButton icon="ellipsis-horizontal" onPress={() => setMoreIdeas(true)} /> : null}
+        </Row>
         <Row gap={Space.sm}>
           <TextInput
             value={text}
@@ -149,13 +156,13 @@ export default function Coach() {
             <AccentRule style={{ marginVertical: 6 }} />
             <Muted variant="small">Suggestions are never applied without your OK.</Muted>
           </Stack>
-          {messages.length ? <IconButton icon="trash-outline" label="Clear chat" color={C.textSecondary} onPress={() => setConfirmClear(true)} /> : null}
-          {!isPhone ? <View style={{ width: 240 }}>{toneSwitch}</View> : null}
+          {!isDesktop ? (
+            <Pressable onPress={() => setTab(tab === 'chat' ? 'suggestions' : 'chat')} accessibilityRole="button" accessibilityLabel={tab === 'chat' ? `Suggestions, ${pending.length} waiting` : 'Back to chat'}>
+              {tab === 'chat' ? <Badge kind={pending.length ? 'pending' : 'neutral'} label={`Suggestions${pending.length ? ` · ${pending.length}` : ''}`} icon="bulb-outline" /> : <Badge kind="neutral" label="Back to chat" icon="chatbubbles-outline" />}
+            </Pressable>
+          ) : null}
+          {messages.length ? <Menu title="Chat options" items={[{ label: 'Clear chat', icon: 'trash-outline', danger: true, onPress: () => setConfirmClear(true) }]} /> : null}
         </Row>
-        {isPhone ? toneSwitch : null}
-        {!isDesktop ? (
-          <Segmented label="Coach view" value={tab} onChange={setTab} options={[{ value: 'chat', label: 'Chat' }, { value: 'suggestions', label: `Suggestions${pending.length ? ` (${pending.length})` : ''}` }]} />
-        ) : null}
       </View>
       {isDesktop ? (
         <View style={{ flex: 1, flexDirection: 'row' }}>
@@ -202,7 +209,7 @@ function Bubble({ m }: { m: ChatMessage }) {
         {!mine && (m.simulated || m.safety) ? (
           <Row wrap gap={4}>
             {m.safety ? <Badge kind="danger" label="Safety guidance, not medical advice" icon="medkit-outline" /> : null}
-            {__DEV__ && m.simulated ? <Badge kind="simulated" label="Simulated" /> : null}
+            {m.simulated ? <Badge kind="neutral" label="Built-in reply" /> : null}
           </Row>
         ) : null}
         <Text color={mine ? C.onPrimary : C.text}>{m.text}</Text>

@@ -16,6 +16,7 @@ import type { Confidence, EstimateItem, FoodEstimate, FoodItem, MealType } from 
 import { useLayout } from '@/hooks/useLayout';
 import { persistPhoto } from '@/lib/photo';
 import { useAiEngine } from '@/hooks/useAiEngine';
+import { PrivacyNotice } from '@/components/PrivacyNotice';
 import { setManualDraft } from '@/lib/nutrition/manualDraft';
 
 type Phase = 'pick' | 'analyzing' | 'review' | 'error' | 'denied';
@@ -34,8 +35,9 @@ export default function CaptureScreen() {
   const { state, today } = useStore();
   const doAct = useAct();
   const { isPhone } = useLayout();
-  const params = useLocalSearchParams<{ date?: string }>();
+  const params = useLocalSearchParams<{ date?: string; mode?: string }>();
   const date = params.date ?? today;
+  const describeOnly = params.mode === 'describe';
 
   const [phase, setPhase] = useState<Phase>('pick');
   const [photo, setPhoto] = useState<{ uri: string; width?: number; height?: number } | null>(null);
@@ -47,6 +49,7 @@ export default function CaptureScreen() {
   const [error, setError] = useState<string>();
   const [addOpen, setAddOpen] = useState(false);
   const [answered, setAnswered] = useState(false);
+  const [sent, setSent] = useState(0);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [leaveAfterDiscard, setLeaveAfterDiscard] = useState(false);
   const engine = useAiEngine('food');
@@ -76,6 +79,7 @@ export default function CaptureScreen() {
     const fullHint = [hint.trim(), extraHint?.trim()].filter(Boolean).join(', ');
     setPhase('analyzing');
     setError(undefined);
+    if (photo) setSent((n) => n + 1);
     try {
       const est = await estimateFood(state, { hint: fullHint, photoUri: photo?.uri, photoSize: photo ? { width: photo.width, height: photo.height } : undefined, followUpAnswered: Boolean(extraHint) || answered });
       if (extraHint) {
@@ -123,12 +127,13 @@ export default function CaptureScreen() {
 
       {!realAI ? (
         <Banner kind="simulated" title="Built-in estimates">
-          Without a Supabase connection, the estimate comes from your hint matched against built-in reference foods. The photo itself is not analysed. Sign in to use shared photo analysis.
+          Not signed in, so the estimate comes from your description matched against built-in reference foods. The photo itself is not analysed. Sign in to use photo analysis.
         </Banner>
       ) : null}
       {phase === 'review' && estimate?.aiNotice ? (
         <Banner kind="warning" title="Photo AI didn't work this time">{`${estimate.aiNotice} This is the built-in estimate from your hint instead. Check the items carefully.`}</Banner>
       ) : null}
+      {phase === 'review' && estimate?.rejectedItems ? <Banner kind="warning" title="Food item needs review">The photo estimate omitted {estimate.rejectedItems} invalid item(s). Correct the meal or add the missing food before accepting.</Banner> : null}
 
       {phase === 'denied' && (
         <Card tone="pending" style={{ gap: Space.sm }} accessibilityRole="alert">
@@ -146,7 +151,7 @@ export default function CaptureScreen() {
         <Columns ratio={[1, 1]}>
           {[
             <Stack key="photo" gap={Space.md}>
-              {photo ? (
+              {describeOnly && !photo ? null : photo ? (
                 <Stack gap={Space.sm}>
                   <Image source={{ uri: photo.uri }} style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: Radius.lg, backgroundColor: C.surfaceAlt }} resizeMode="cover" accessibilityLabel="Selected meal photo" />
                   <Row gap={Space.sm}>
@@ -167,6 +172,7 @@ export default function CaptureScreen() {
               )}
             </Stack>,
             <Stack key="hint" gap={Space.md}>
+              {photo && realAI ? <PrivacyNotice kind="photo" dismissSignal={sent} /> : null}
               <Field
                 label="Hint (recommended)"
                 value={hint}
@@ -208,8 +214,7 @@ export default function CaptureScreen() {
               {estimate.photoUri ? <Image source={{ uri: estimate.photoUri }} style={{ width: '100%', aspectRatio: 4 / 3, borderRadius: Radius.lg, backgroundColor: C.surfaceAlt }} accessibilityLabel="Meal photo" /> : null}
               <Card tone="pending" style={{ gap: Space.sm }}>
                 <Row wrap gap={6}>
-                  <Badge kind="suggestion" label="AI estimate" />
-                  {__DEV__ && estimate.simulated ? <Badge kind="simulated" label="Simulated" /> : null}
+                  <Badge kind="estimate" label="Estimate" />
                   <Badge kind={CONF[estimate.overallConfidence].kind} label={CONF[estimate.overallConfidence].label} />
                 </Row>
                 <Row align="flex-end" gap={6}>
@@ -254,9 +259,9 @@ export default function CaptureScreen() {
                   onRemove={() => setItems(items.filter((_, j) => j !== i))}
                   extra={
                     <>
-                      {it.confidence ? <Badge kind={CONF[it.confidence].kind} label={CONF[it.confidence].label} /> : null}
-                      {it.reviewRequired ? <Badge kind="danger" label="Correct portion before saving" /> : null}
-                      <Expandable title="Nutrition source & portion assumption" icon="document-text-outline">
+                      {it.reviewRequired ? <Badge kind="danger" label="Correction required" /> : null}
+                      <Expandable title="Details" icon="document-text-outline">
+                        {it.confidence ? <Badge kind={CONF[it.confidence].kind} label={CONF[it.confidence].label} /> : null}
                         <ItemSourceDetails item={it} />
                       </Expandable>
                     </>

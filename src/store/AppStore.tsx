@@ -16,6 +16,7 @@ import { currentPushToken, onNotificationPermissionGranted, onPushTokenChange, r
 import { isSupabaseConfigured, supabase } from '@/lib/sync/supabase';
 import { EMPTY_CURSOR, parseCursor, syncNow, type SyncCursor, type SyncStore } from '@/lib/sync/sync';
 import { localChanges } from '@/lib/sync/merge';
+import { signOutAndWipe } from '@/lib/sync/signOut';
 import type { Proposal } from '@/lib/types';
 import { loadIntegrationConfig, useIntegrationConfig } from '@/lib/integrations/config';
 
@@ -40,6 +41,8 @@ interface StoreValue {
     syncNow: () => Promise<void>;
     legacyAvailable: boolean;
     importLocalData: () => Promise<void>;
+    /** Flush, sign out, wipe local data. Never throws; remoteOk=false if the server was unreachable. */
+    signOut: () => Promise<{ remoteOk: boolean }>;
   };
   storageError?: string;
 }
@@ -331,6 +334,27 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
     setLegacyAvailable(false);
   }, [userId, scopeReady, dispatch]);
 
+  const signOut = useCallback(() => {
+    const uid = session?.user.id;
+    return signOutAndWipe({
+      flush: doSync,
+      signOut: async () => {
+        const sb = supabase();
+        const { error } = (await sb?.auth.signOut()) ?? {};
+        if (error) { await sb?.auth.signOut({ scope: 'local' }); throw error; }
+      },
+      reset: () => {
+        sessionRef.current = null;
+        setSession(null);
+        dispatch({ type: 'REPLACE_STATE', state: emptyState(newId(), nowISO()) });
+      },
+      clear: async () => {
+        // includes the pre-account 'local' copy so the next person on a shared device can't import it
+        await AsyncStorage.multiRemove([STORAGE_KEY, ...(uid ? [stateKey(uid), `${CURSOR_KEY}:${uid}`] : [])]);
+      },
+    });
+  }, [session, doSync, dispatch]);
+
   useEffect(() => {
     if (!configured || !userId || !scopeReady) return;
     // First sync for this account, in the background right after hydration (or sign-in).
@@ -382,9 +406,9 @@ export function AppStoreProvider({ children }: { children: React.ReactNode }) {
       act,
       storageError,
       // status is derived so it can't go stale when the user signs out
-      sync: { configured, session, status: !configured ? 'local_only' : !session ? 'signed_out' : syncStatus, lastSyncAt, error: syncError, syncNow: doSync, legacyAvailable, importLocalData },
+      sync: { configured, session, status: !configured ? 'local_only' : !session ? 'signed_out' : syncStatus, lastSyncAt, error: syncError, syncNow: doSync, legacyAvailable, importLocalData, signOut },
     }),
-    [state, scopeReady, awaitingAccountData, today, act, storageError, session, syncStatus, lastSyncAt, syncError, doSync, configured, legacyAvailable, importLocalData],
+    [state, scopeReady, awaitingAccountData, today, act, storageError, session, syncStatus, lastSyncAt, syncError, doSync, configured, legacyAvailable, importLocalData, signOut],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

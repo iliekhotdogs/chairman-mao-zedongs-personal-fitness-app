@@ -1,3 +1,4 @@
+import { parseNumberText, rangeMessage, type Bounds } from '@/lib/inputRules';
 import React from 'react';
 import {
   ActivityIndicator, Modal, Platform, Pressable, ScrollView, StyleSheet, Text as RNText, TextInput, View,
@@ -390,27 +391,31 @@ export function Field({ label, hint, error, suffix, style, inputStyle, ...rest }
   );
 }
 
-export function NumberField({ value, onChange, ...rest }: Omit<React.ComponentProps<typeof Field>, 'value' | 'onChangeText' | 'onChange'> & { value: number | undefined; onChange: (v: number | undefined) => void }) {
+export function NumberField({ value, onChange, min, max, exclusiveMin, error, ...rest }: Omit<React.ComponentProps<typeof Field>, 'value' | 'onChangeText' | 'onChange'> & { value: number | undefined; onChange: (v: number | undefined) => void } & Bounds) {
   const [text, setText] = React.useState(value === undefined || Number.isNaN(value) ? '' : String(value));
+  const [typedError, setTypedError] = React.useState<string | undefined>();
   // Sync the text when the value is changed from outside (e.g. +/- buttons), without an effect.
   const [prev, setPrev] = React.useState(value);
   if (value !== prev) {
     setPrev(value);
     const parsed = parseFloat(text);
     if (value !== undefined && parsed !== value) setText(String(value));
-    if (value === undefined && text !== '' && !Number.isNaN(parsed)) setText('');
+    if (value === undefined && text !== '' && !Number.isNaN(parsed) && !typedError) setText('');
   }
   return (
     <Field
       keyboardType="decimal-pad"
       inputMode="decimal"
       {...rest}
+      error={error ?? typedError}
       value={text}
       onChangeText={(t) => {
-        const clean = t.replace(',', '.').replace(/[^0-9.]/g, '');
-        setText(clean);
-        const n = parseFloat(clean);
-        onChange(Number.isFinite(n) ? n : undefined);
+        setText(t);
+        const r = parseNumberText(t);
+        const msg = r.error ?? (r.value !== undefined ? rangeMessage(r.value, { min, max, exclusiveMin }) : undefined);
+        setTypedError(msg);
+        // invalid or out-of-range input reports "no value" so callers keep their submit buttons disabled
+        onChange(msg ? undefined : r.value);
       }}
     />
   );
@@ -573,6 +578,34 @@ export function Sheet({ visible, onClose, title, children, footer }: { visible: 
         </View>
       </View>
     </Modal>
+  );
+}
+
+/** Overflow / action menu: a trigger (icon or labelled button) that opens a sheet of actions. */
+export function Menu({ title = 'Options', label = 'More options', trigger, items }: { title?: string; label?: string; trigger?: string; items: { label: string; icon?: IconName; danger?: boolean; onPress: () => void }[] }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      {trigger ? <Button title={trigger} kind="secondary" size="sm" icon="ellipsis-horizontal" onPress={() => setOpen(true)} /> : <IconButton icon="ellipsis-horizontal" label={label} color={C.textSecondary} onPress={() => setOpen(true)} />}
+      <Sheet visible={open} onClose={() => setOpen(false)} title={title}>
+        {items.map((it) => (
+          <Button key={it.label} title={it.label} icon={it.icon} kind={it.danger ? 'danger' : 'secondary'} full onPress={() => { setOpen(false); it.onPress(); }} />
+        ))}
+      </Sheet>
+    </>
+  );
+}
+
+/** Small "i" icon that explains a chart legend or term in a sheet. */
+export function InfoTip({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <>
+      <IconButton icon="information-circle-outline" label={`About: ${title}`} size={18} color={C.textSecondary} onPress={() => setOpen(true)} />
+      <Sheet visible={open} onClose={() => setOpen(false)} title={title}>
+        {typeof children === 'string' ? <Muted>{children}</Muted> : children}
+      </Sheet>
+    </>
   );
 }
 

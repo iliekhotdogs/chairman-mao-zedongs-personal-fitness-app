@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Banner, Button, Card, Chip, Columns, Expandable, Field, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Toggle } from '@/components/ui';
+import { Badge, Banner, Button, Card, Chip, Expandable, Field, IconButton, KeyValue, Muted, NumberField, OptionCard, PageHeader, Row, Screen, Segmented, Sheet, Stack, Stepper, Text, Toggle } from '@/components/ui';
 import { useStore, clearLocalData } from '@/store/AppStore';
 import { AccountCard } from '@/components/AccountCard';
 import { AiSettings } from '@/components/AiSettings';
@@ -19,7 +19,7 @@ import { newId } from '@/lib/id';
 import { permissionStatus, requestPermission } from '@/lib/notifications/deliver';
 import { forgetPushToken } from '@/lib/notifications/push';
 import { MAX_COACH_NOTIFICATIONS_PER_DAY, remainingToday } from '@/lib/notifications/policy';
-import { signOut, supabase } from '@/lib/sync/supabase';
+import { supabase } from '@/lib/sync/supabase';
 import { functionErrorMessage } from '@/lib/ai/provider';
 import { deleteCloudData } from '@/lib/sync/sync';
 import { csvExports, jsonExport } from '@/lib/export';
@@ -32,30 +32,45 @@ const GOALS: { value: GoalPriority; label: string }[] = [
   { value: 'fat_loss', label: 'Lose fat' }, { value: 'muscle_gain', label: 'Build muscle' }, { value: 'strength', label: 'Get stronger' }, { value: 'maintenance', label: 'Maintain' },
 ];
 
+// Sections render flat inside an accordion card.
+const FLAT = { borderWidth: 0, padding: 0, backgroundColor: 'transparent' } as const;
+
+function Accordion({ title, icon, open, children }: { title: string; icon: React.ComponentProps<typeof Expandable>['icon']; open?: boolean; children: React.ReactNode }) {
+  return (
+    <Card>
+      <Expandable title={title} icon={icon} initiallyOpen={open}>
+        <Stack gap={Space.lg} style={{ paddingTop: Space.sm }}>{children}</Stack>
+      </Expandable>
+    </Card>
+  );
+}
+
 export default function Settings() {
   return (
-    <Screen size="medium">
-      <PageHeader title="Settings" />
-      <Columns>
-        {[
-          <Stack key="l" gap={Space.lg}>
-            <GoalSection />
-            <TargetsSection />
-            <ProfileSection />
-            <CoachSection />
-            <RestSection />
-            <AiSettings />
-          </Stack>,
-          <Stack key="r" gap={Space.lg}>
-            <NotificationsSection />
-            <IntegrationSettings />
-            <AccountCard />
-            <DeleteAccountSection />
-            <PrivacySection />
-            <AboutSection />
-          </Stack>,
-        ]}
-      </Columns>
+    <Screen maxWidth={720}>
+      <PageHeader title="Settings" right={<IconButton icon="close" label="Close settings" onPress={() => router.back()} />} />
+      <Accordion title="Account" icon="person-circle-outline" open>
+        <AccountCard flat />
+      </Accordion>
+      <Accordion title="Plan and targets" icon="flag-outline">
+        <GoalSection />
+        <TargetsSection />
+        <ProfileSection />
+      </Accordion>
+      <Accordion title="Notifications" icon="notifications-outline">
+        <NotificationsSection />
+      </Accordion>
+      <Accordion title="Privacy and data" icon="lock-closed-outline">
+        <PrivacySection />
+        <DeleteAccountSection />
+      </Accordion>
+      <Accordion title="Advanced" icon="options-outline">
+        <CoachSection />
+        <RestSection />
+        {__DEV__ ? <AiSettings /> : null}
+        {__DEV__ ? <IntegrationSettings /> : null}
+        <AboutSection />
+      </Accordion>
     </Screen>
   );
 }
@@ -68,7 +83,7 @@ function GoalSection() {
   const p = state.profile!;
   const w = latestWeight(state)?.weightKg ?? p.startWeightKg;
   return (
-    <Card style={{ gap: Space.md }}>
+    <Card style={[FLAT, { gap: Space.md }]}>
       <Text variant="h3">Current priority</Text>
       <Row wrap gap={6}>
         {GOALS.map((g) => (
@@ -121,7 +136,7 @@ function TargetsSection() {
   };
 
   return (
-    <Card style={{ gap: Space.sm }}>
+    <Card style={[FLAT, { gap: Space.sm }]}>
       <Text variant="h3">Nutrition targets</Text>
       <Row wrap gap={Space.xl}>
         <Stack gap={0}><Text variant="numberSm">{t.calories.toLocaleString()}</Text><Muted variant="small">kcal</Muted></Stack>
@@ -139,7 +154,7 @@ function TargetsSection() {
         <Button title="Recalculate from latest weight" kind="ghost" size="sm" icon="refresh" onPress={() => setRecalc(computeTargets(state.profile!, w))} />
       </Row>
       <Sheet visible={edit} onClose={() => setEdit(false)} title="Edit targets" footer={<Button title="Save targets" icon="checkmark" full onPress={saveManual} disabled={!cal || cal < 1000 || !prot} />}>
-        <NumberField label="Daily calories" value={cal} onChange={setCal} suffix="kcal" error={cal !== undefined && cal < 1000 ? 'Below 1,000 kcal is not supported. Please talk to a professional.' : undefined} />
+        <NumberField label="Daily calories" value={cal} onChange={setCal} min={0} max={10000} exclusiveMin suffix="kcal" error={cal !== undefined && cal < 1000 ? 'Below 1,000 kcal is not supported. Please talk to a professional.' : undefined} />
         <NumberField label="Protein" value={prot} onChange={setProt} suffix="g" />
         <Muted variant="small">Fat is set to ~27% of calories and carbs fill the rest.</Muted>
       </Sheet>
@@ -191,7 +206,7 @@ function ProfileSection() {
     return saved;
   };
   return (
-    <Card style={{ gap: Space.md }}>
+    <Card style={[FLAT, { gap: Space.md }]}>
       <Text variant="h3">Profile</Text>
       <Field label="Name" value={p.name === 'there' ? '' : p.name} onChangeText={(name) => upd({ name: name || 'there' })} />
       <Button title="Edit body & lifestyle" kind="secondary" size="sm" onPress={() => setDraft({ ...p, dietPreferences: [...p.dietPreferences] })} />
@@ -238,7 +253,7 @@ function CoachSection() {
   const { state } = useStore();
   const doAct = useAct();
   return (
-    <Card style={{ gap: Space.md }}>
+    <Card style={[FLAT, { gap: Space.md }]}>
       <Text variant="h3">Coach</Text>
       <Text variant="smallStrong">Tone</Text>
       <OptionCard title="Supportive coach" body="Encouraging and explains the why." selected={state.settings.coachTone === 'supportive'} onPress={() => doAct({ type: 'UPDATE_SETTINGS', patch: { coachTone: 'supportive' }, now: nowISO() })} />
@@ -297,11 +312,8 @@ function NotificationsSection() {
   const validTime = (s: string) => /^([01]\d|2[0-3]):[0-5]\d$/.test(s);
   const todays = state.notifications.filter((r) => r.date === today && !r.deleted);
   return (
-    <Card style={{ gap: Space.sm }}>
-      <Row>
-        <Text variant="h3" style={{ flex: 1 }}>Coaching notifications</Text>
-        <Badge kind="simulated" label="Local delivery only" />
-      </Row>
+    <Card style={[FLAT, { gap: Space.sm }]}>
+      <Text variant="h3">Coaching notifications</Text>
       <Toggle label="Allow coaching notifications" description={`At most ${MAX_COACH_NOTIFICATIONS_PER_DAY} per day across all your devices, and only when something is worth your attention.`} value={n.enabled} onChange={enable} />
       {perm === 'denied' ? <Banner kind="warning">Notifications are blocked for this app/browser. Check-ins will still appear in the app.</Banner> : null}
       {n.enabled ? (
@@ -355,9 +367,14 @@ function PrivacySection() {
   const wipe = async () => {
     try {
       if (confirm === 'cloud' && sync.session) await deleteCloudData(sync.session.user.id);
-      // sign out before clearing, so background sync can't re-upload or re-download meanwhile
-      if (sync.session) await signOut();
-      await clearLocalData(sync.session?.user.id);
+      if (sync.session) {
+        // flush, sign out and wipe local state in one place
+        await sync.signOut();
+        setConfirm(null);
+        router.replace('/onboarding');
+        return;
+      }
+      await clearLocalData();
       if (!sync.configured) {
         await clearIntegrationConfig();
       }
@@ -370,15 +387,20 @@ function PrivacySection() {
   };
 
   return (
-    <Card style={{ gap: Space.sm }}>
+    <Card style={[FLAT, { gap: Space.sm }]}>
       <Text variant="h3">Privacy &amp; your data</Text>
-      <Muted variant="small">Your food log, photos, body weight, workouts and chat are private to you. With an account, cloud data is protected so only your signed-in account can read it. AI requests send a short context summary or reduced photo to the selected provider.</Muted>
+      <Muted variant="small">Your food log, photos, body weight, workouts and chat are private to you. With an account, cloud data is protected so only your signed-in account can read it. Photos and messages are sent to our AI provider when you use the coach or photo logging.</Muted>
       <Row wrap gap={Space.sm}>
         <Button title="Export my data" kind="secondary" size="sm" icon="download-outline" onPress={() => exportData('json')} />
         <Button title="Export food & weights (CSV)" kind="secondary" size="sm" icon="document-text-outline" onPress={() => exportData('csv')} />
-        <Button title="Delete data on this device" kind="danger" size="sm" onPress={() => setConfirm('local')} />
-        {sync.session ? <Button title="Delete my cloud data" kind="danger" size="sm" onPress={() => setConfirm('cloud')} /> : null}
       </Row>
+      <Stack gap={Space.sm} style={{ marginTop: Space.md, paddingTop: Space.md, borderTopWidth: 1, borderTopColor: C.border }}>
+        <Text variant="smallStrong" color={C.danger}>Danger zone</Text>
+        <Row wrap gap={Space.sm}>
+          <Button title="Delete data on this device" kind="danger" size="sm" onPress={() => setConfirm('local')} />
+          {sync.session ? <Button title="Delete my cloud data" kind="danger" size="sm" onPress={() => setConfirm('cloud')} /> : null}
+        </Row>
+      </Stack>
       <Sheet
         visible={!!confirm}
         onClose={() => setConfirm(null)}
@@ -393,7 +415,7 @@ function PrivacySection() {
           {confirm === 'cloud'
             ? 'This permanently removes your synced records and food photos from the server, then clears this device and signs you out. Other signed-in devices will keep only their local copy until they are cleared.'
             : sync.session
-              ? 'This clears this device and signs you out. Your cloud copy stays and downloads again when you sign back in.'
+              ? 'This clears this device and signs you out. Your account and cloud copy stay on the server and download again when you sign back in.'
               : 'This permanently removes your profile, logs and history from this device. Consider exporting first.'}
         </Muted>
       </Sheet>
@@ -465,19 +487,22 @@ function AboutSection() {
   const doAct = useAct();
   const [confirm, setConfirm] = useState(false);
   return (
-    <Card style={{ gap: Space.sm }}>
+    <Card style={[FLAT, { gap: Space.sm }]}>
       <Text variant="h3">About FitCoach</Text>
-      <Row wrap gap={6}>
-        {__DEV__ ? <Badge kind={imageEngine === 'simulated' ? 'simulated' : 'info'} label={imageEngine === 'server' ? 'Server images' : 'Built-in image estimates'} /> : null}
-        {__DEV__ ? <Badge kind={chatEngine === 'simulated' ? 'simulated' : 'info'} label={chatEngine === 'server' ? 'Server chat' : 'Built-in chat'} /> : null}
-        {__DEV__ && !sync.configured ? <Badge kind="simulated" label="Simulated health sync" /> : null}
-        <Badge kind="info" label="USDA lookup is live" />
-      </Row>
-      <Row wrap gap={Space.sm}>
-        {__DEV__ ? <Button title="UI states gallery" kind="secondary" size="sm" icon="color-palette-outline" onPress={() => router.push('/states')} /> : null}
-        {!sync.configured ? <Button title="Load sample data" kind="ghost" size="sm" icon="flask-outline" onPress={() => setConfirm(true)} /> : null}
-      </Row>
-      <Muted variant="small">FitCoach v1.0.0 · Consult a professional for injuries, medical conditions, or eating-disorder concerns.</Muted>
+      {__DEV__ ? (
+        <>
+          <Row wrap gap={6}>
+            <Badge kind={imageEngine === 'simulated' ? 'simulated' : 'info'} label={imageEngine === 'server' ? 'Server images' : 'Built-in image estimates'} />
+            <Badge kind={chatEngine === 'simulated' ? 'simulated' : 'info'} label={chatEngine === 'server' ? 'Server chat' : 'Built-in chat'} />
+            {!sync.configured ? <Badge kind="simulated" label="Simulated health sync" /> : <Badge kind="neutral" label="Manual activity entry" />}
+          </Row>
+          <Row wrap gap={Space.sm}>
+            <Button title="UI states gallery" kind="secondary" size="sm" icon="color-palette-outline" onPress={() => router.push('/states')} />
+            {!sync.configured ? <Button title="Load sample data" kind="ghost" size="sm" icon="flask-outline" onPress={() => setConfirm(true)} /> : null}
+          </Row>
+        </>
+      ) : null}
+      <Muted variant="small">Meal calories are estimates. Consult a professional for injuries, medical conditions, or eating-disorder concerns.</Muted>
       <Sheet
         visible={confirm}
         onClose={() => setConfirm(false)}

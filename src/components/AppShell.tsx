@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { C, Radius, Space } from '@/constants/theme';
 import { useLayout } from '@/hooks/useLayout';
-import { Badge, Button, Ionicons, Muted, Row, Stack, Text, type IconName } from './ui';
+import { Badge, Button, IconButton, Ionicons, Muted, Row, Stack, Text, type IconName } from './ui';
 import { Logo, LogoMark } from './Brand';
 import { useStore } from '@/store/AppStore';
 import { pendingProposals } from '@/lib/selectors';
@@ -47,7 +47,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ))}
           </Stack>
           <View style={{ flex: 1 }} />
-          <SideItem item={SETTINGS} active={SETTINGS.match(path)} collapsed={collapsed} />
+          <SideItem item={{ ...SETTINGS, label: 'Account & settings', icon: 'person-circle-outline', iconActive: 'person-circle' }} active={SETTINGS.match(path)} collapsed={collapsed} />
           {isDesktop ? (
             <Pressable
               onPress={() => setCollapsedPref((c) => !c)}
@@ -77,6 +77,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const tabs = [...NAV, SETTINGS];
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
+      <View style={[styles.topbar, { paddingTop: Math.max(insets.top, 4) }]}>
+        <IconButton icon="person-circle-outline" label="Account and settings" onPress={() => router.navigate('/settings' as never)} />
+      </View>
       {sync.session && (sync.status === 'error' || sync.status === 'offline') ? (
         <Row gap={Space.sm} style={{ paddingHorizontal: Space.md, paddingVertical: Space.sm, backgroundColor: C.warningSoft }} accessibilityRole="alert">
           <Muted variant="small" style={{ flex: 1 }}>{sync.status === 'offline' ? 'Offline. Changes will sync when connected.' : 'Sync failed. Your changes are saved here.'}</Muted>
@@ -137,6 +140,7 @@ const styles = StyleSheet.create({
   sideItemCollapsed: { justifyContent: 'center', paddingHorizontal: 0 },
   activeBar: { position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, borderRadius: 2, backgroundColor: C.primary },
   syncDot: { width: 8, height: 8, borderRadius: 4 },
+  topbar: { flexDirection: 'row', justifyContent: 'flex-end', paddingHorizontal: Space.sm, backgroundColor: C.bgDeep },
   tabbar: { flexDirection: 'row', backgroundColor: C.bgDeep, borderTopWidth: 1, borderTopColor: C.border },
   tab: { flex: 1, alignItems: 'center', gap: 3, minHeight: 54, justifyContent: 'center', paddingTop: 6 },
   tabIndicator: { position: 'absolute', top: 0, width: 24, height: 2, borderRadius: 1, backgroundColor: 'transparent' },

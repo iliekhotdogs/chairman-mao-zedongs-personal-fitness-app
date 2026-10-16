@@ -3,8 +3,9 @@ import { Pressable } from 'react-native';
 import { router } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
-import { Badge, Button, Card, EmptyState, IconButton, Muted, PageHeader, Row, Screen, Sheet, Stack, Text, Columns } from '@/components/ui';
+import { Badge, Button, Card, EmptyState, Expandable, IconButton, Menu, Muted, PageHeader, Row, Screen, Sheet, Stack, Text, Columns } from '@/components/ui';
 import { CaloriesRing, MacroBars, PhotoThumb, sourceBadge } from '@/components/nutrition';
+import { LogMealSheet } from '@/components/LogMealSheet';
 import { useStore } from '@/store/AppStore';
 import { useAct } from '@/components/Toast';
 import { addDays, formatDateLabel, formatTime, nowISO } from '@/lib/dates';
@@ -21,6 +22,7 @@ export default function FoodLog() {
   const doAct = useAct();
   const [date, setDate] = useState(today);
   const [toDelete, setToDelete] = useState<FoodEntry | null>(null);
+  const [mealOpen, setMealOpen] = useState(false);
   const entries = foodForDay(state, date);
   const rem = remainingForDay(state, date)!;
 
@@ -39,13 +41,7 @@ export default function FoodLog() {
       <PageHeader
         title="Food"
         subtitle="Everything here was confirmed by you."
-        right={
-          <Row gap={Space.sm}>
-            <Button title="Snap" icon="camera" onPress={() => router.push({ pathname: '/food/capture', params: { date } })} />
-            <Button title="Scan" kind="secondary" icon="barcode-outline" onPress={() => router.push({ pathname: '/food/barcode', params: { date } })} />
-            <Button title="Add" kind="secondary" icon="add" onPress={() => router.push({ pathname: '/food/manual', params: { date } })} />
-          </Row>
-        }
+        right={<Button title="Add meal" icon="add" onPress={() => setMealOpen(true)} />}
       />
       <Row>
         <IconButton icon="chevron-back" label="Previous day" onPress={() => setDate(addDays(date, -1))} />
@@ -61,8 +57,7 @@ export default function FoodLog() {
               <EmptyState
                 icon="restaurant-outline"
                 title={date === today ? 'Nothing logged yet today' : 'Nothing logged this day'}
-                body="Snap a photo of your meal with a short hint. You'll review the estimate before it's saved."
-                action={<Button title="Snap a meal" icon="camera" onPress={() => router.push({ pathname: '/food/capture', params: { date } })} />}
+                body="Add a meal with a photo, a short description or manual entry. You'll review any estimate before it's saved."
               />
             ) : (
               ORDER.map((m) => {
@@ -76,7 +71,7 @@ export default function FoodLog() {
                       <Muted variant="smallStrong">{Math.round(tot.calories)} kcal</Muted>
                     </Row>
                     {list.map((e) => (
-                      <EntryCard key={e.id} entry={e} onDelete={() => setToDelete(e)} />
+                      <EntryCard key={e.id} entry={e} onDelete={() => setToDelete(e)} onEdit={() => router.push({ pathname: '/food/manual', params: { id: e.id } })} />
                     ))}
                   </Stack>
                 );
@@ -85,6 +80,8 @@ export default function FoodLog() {
           </Stack>,
         ]}
       </Columns>
+
+      <LogMealSheet visible={mealOpen} onClose={() => setMealOpen(false)} date={date} />
 
       <Sheet
         visible={!!toDelete}
@@ -111,7 +108,7 @@ export default function FoodLog() {
   );
 }
 
-function EntryCard({ entry, onDelete }: { entry: FoodEntry; onDelete: () => void }) {
+function EntryCard({ entry, onDelete, onEdit }: { entry: FoodEntry; onDelete: () => void; onEdit: () => void }) {
   const tot = sumItems(entry.items);
   const kinds = [...new Set(entry.items.map((i) => i.source.kind))];
   return (
@@ -123,14 +120,16 @@ function EntryCard({ entry, onDelete }: { entry: FoodEntry; onDelete: () => void
           <Muted variant="small">
             {Math.round(tot.calories)} kcal · P {Math.round(tot.proteinG)} · C {Math.round(tot.carbsG)} · F {Math.round(tot.fatG)} · {formatTime(entry.createdAt)}
           </Muted>
-          <Row wrap gap={4}>
-            {entry.origin === 'photo' ? <Badge kind="saved" label="Confirmed photo estimate" /> : null}
-            {kinds.slice(0, 2).map((k) => (
-              <React.Fragment key={k}>{sourceBadge(entry.items.find((i) => i.source.kind === k)!.source)}</React.Fragment>
-            ))}
-          </Row>
+          <Expandable title="Details">
+            <Row wrap gap={4}>
+              {entry.origin === 'photo' ? <Badge kind="saved" label="Confirmed photo estimate" /> : null}
+              {kinds.slice(0, 2).map((k) => (
+                <React.Fragment key={k}>{sourceBadge(entry.items.find((i) => i.source.kind === k)!.source)}</React.Fragment>
+              ))}
+            </Row>
+          </Expandable>
         </Pressable>
-        <IconButton icon="trash-outline" label="Delete meal" color={C.textSecondary} size={18} onPress={onDelete} />
+        <Menu title="Meal options" label="Meal options" items={[{ label: 'Edit', icon: 'create-outline', onPress: onEdit }, { label: 'Delete', icon: 'trash-outline', danger: true, onPress: onDelete }]} />
       </Row>
     </Card>
   );

@@ -18,7 +18,9 @@ import { buildSampleState } from '@/lib/sampleData';
 import { useLayout } from '@/hooks/useLayout';
 import { AccountCard } from '@/components/AccountCard';
 
-const STEPS = ['Welcome', 'Goal', 'About you', 'Training', 'Lifestyle', 'Your plan'];
+const STEPS = ['Welcome', 'Goal', 'About you', 'Training', 'Lifestyle', 'Optional', 'Your plan'];
+const OPTIONAL_STEP = 5;
+const PLAN_STEP = 6;
 
 const GOALS: { value: GoalPriority; title: string; body: string; icon: React.ComponentProps<typeof OptionCard>['icon'] }[] = [
   { value: 'fat_loss', title: 'Lose fat', body: 'Moderate calorie deficit with high protein to keep muscle.', icon: 'flame-outline' },
@@ -162,18 +164,16 @@ export default function Onboarding() {
           <Field label="What should we call you? (optional)" value={name} onChangeText={setName} placeholder="First name" autoComplete="given-name" />
           <Row wrap gap={Space.sm}>
             <Button title="Get started" size="lg" icon="arrow-forward" onPress={next} loading={firstSyncPending} disabled={firstSyncPending} />
-            {!sync.configured ? <Button title="Explore with sample data" kind="secondary" size="lg" icon="flask-outline" onPress={loadSample} disabled={firstSyncPending} /> : null}
+            {__DEV__ && !sync.configured ? <Button title="Explore with sample data" kind="secondary" size="lg" icon="flask-outline" onPress={loadSample} disabled={firstSyncPending} /> : null}
           </Row>
           {firstSyncPending ? <Muted variant="small" accessibilityLiveRegion="polite">Checking your account for existing data…</Muted> : null}
           {sync.configured ? (
-            <Expandable title="I already have an account" icon="person-circle-outline" initiallyOpen={!!sync.session}>
+            <>
               <AccountCard intro="Sign in and your profile, plan and history download from the cloud. No need to set up again." />
               {sync.session && !state.profile ? <Muted variant="small">Signed in. Downloading your data… If you are new, tap Get started.</Muted> : null}
-            </Expandable>
+            </>
           ) : null}
-          <Banner kind="info" title="How estimates work">
-            {sync.configured ? 'Food photos and chat can use the shared AI service. Check every meal estimate before saving. Activity can also be entered manually.' : 'Food estimates use your written hint; photos are not analysed until you connect an account. Check every estimate before saving.'}
-          </Banner>
+          {!sync.configured ? <Muted variant="small">Your data is saved on this device. Meal estimates use your text hint; notifications stay on this device.</Muted> : null}
         </Stack>
       )}
 
@@ -194,21 +194,21 @@ export default function Onboarding() {
           <Segmented label="Units" value={units} onChange={setUnits} options={[{ value: 'imperial', label: 'lb / ft' }, { value: 'metric', label: 'kg / cm' }]} />
           <Columns>
             {[
-              <NumberField key="age" label="Age" value={age} onChange={setAge} suffix="years" error={age !== undefined && (age < 16 || age > 90) ? 'This app is for ages 16–90.' : undefined} />,
+              <NumberField key="age" label="Age" value={age} onChange={setAge} suffix="years" placeholder="e.g. 30" error={age !== undefined && (age < 16 || age > 90) ? 'This app is for ages 16–90.' : undefined} />,
               units === 'imperial' ? (
-                <NumberField key="w" label="Weight" value={weightKg ? round(kgToLb(weightKg), 1) : undefined} onChange={(v) => setWeightKg(v ? lbToKg(v) : undefined)} suffix="lb" />
+                <NumberField key="w" label="Weight" value={weightKg ? round(kgToLb(weightKg), 1) : undefined} onChange={(v) => setWeightKg(v ? lbToKg(v) : undefined)} suffix="lb" placeholder="e.g. 175" error={weightKg !== undefined && (weightKg <= 35 || weightKg >= 300) ? 'Enter a weight between 80 and 660 lb.' : undefined} />
               ) : (
-                <NumberField key="w" label="Weight" value={weightKg ? round(weightKg, 1) : undefined} onChange={setWeightKg} suffix="kg" />
+                <NumberField key="w" label="Weight" value={weightKg ? round(weightKg, 1) : undefined} onChange={setWeightKg} suffix="kg" placeholder="e.g. 80" error={weightKg !== undefined && (weightKg <= 35 || weightKg >= 300) ? 'Enter a weight between 36 and 299 kg.' : undefined} />
               ),
             ]}
           </Columns>
           {units === 'imperial' ? (
             <Row gap={Space.md}>
-              <NumberField label="Height" accessibilityLabel="Height, feet" value={ft.ft} onChange={(v) => setHeightCm(ftInToCm(v ?? 0, ft.inch))} suffix="ft" style={{ flex: 1 }} />
-              <NumberField label=" " accessibilityLabel="Height, inches" value={ft.inch} onChange={(v) => setHeightCm(ftInToCm(ft.ft, Math.min(11, v ?? 0)))} suffix="in" style={{ flex: 1 }} />
+              <NumberField label="Height" accessibilityLabel="Height, feet" value={heightCm ? ft.ft : undefined} placeholder="5" onChange={(v) => setHeightCm(ftInToCm(v ?? 0, ft.inch))} suffix="ft" style={{ flex: 1 }} />
+              <NumberField label=" " accessibilityLabel="Height, inches" value={heightCm ? ft.inch : undefined} placeholder="9" onChange={(v) => setHeightCm(ftInToCm(ft.ft, Math.min(11, v ?? 0)))} suffix="in" style={{ flex: 1 }} />
             </Row>
           ) : (
-            <NumberField label="Height" value={heightCm ? Math.round(heightCm) : undefined} onChange={setHeightCm} suffix="cm" />
+            <NumberField label="Height" value={heightCm ? Math.round(heightCm) : undefined} onChange={setHeightCm} suffix="cm" placeholder="e.g. 175" error={heightCm !== undefined && (heightCm <= 120 || heightCm >= 230) ? 'Enter a height between 121 and 229 cm.' : undefined} />
           )}
           <Text variant="smallStrong">Sex (for the calorie equation)</Text>
           <Segmented label="Sex" value={sex} onChange={setSex} options={[{ value: 'female', label: 'Female' }, { value: 'male', label: 'Male' }, { value: 'unspecified', label: 'Prefer not to say' }]} />
@@ -245,8 +245,8 @@ export default function Onboarding() {
 
       {step === 4 && (
         <Stack gap={Space.md}>
-          <Text variant="h1">Lifestyle &amp; limitations</Text>
-          <Why>Your daily movement outside the gym affects your calorie needs. Food preferences shape suggestions. Injuries help us avoid exercises that could aggravate them.</Why>
+          <Text variant="h1">Your daily life</Text>
+          <Why>Your daily movement outside the gym affects your calorie needs.</Why>
           <Text variant="smallStrong">Outside of workouts, your day is mostly…</Text>
           {([
             ['mostly_sitting', 'Sitting', 'Desk work, under ~5,000 steps'],
@@ -255,6 +255,13 @@ export default function Onboarding() {
           ] as [DailyActivity, string, string][]).map(([v, t, b]) => (
             <OptionCard key={v} title={t} body={b} selected={activity === v} onPress={() => setActivity(v)} />
           ))}
+        </Stack>
+      )}
+
+      {step === OPTIONAL_STEP && (
+        <Stack gap={Space.md}>
+          <Text variant="h1">Anything else? (optional)</Text>
+          <Why>Food preferences shape suggestions. Injuries help us avoid exercises that could aggravate them. You can skip this and add it later in Settings.</Why>
           <Text variant="smallStrong">Food preferences (optional)</Text>
           <Row wrap gap={6}>
             {DIETS.map((d) => (
@@ -272,7 +279,7 @@ export default function Onboarding() {
         </Stack>
       )}
 
-      {step === 5 && profile && targets && (
+      {step === PLAN_STEP && profile && targets && (
         <Stack gap={Space.md}>
           <Text variant="h1">Here&apos;s your starting plan</Text>
           <Muted>These are starting estimates. Your coach will suggest adjustments as your real weight trend comes in, and you approve each one.</Muted>
@@ -300,18 +307,15 @@ export default function Onboarding() {
               })()}
             </Row>
             <Expandable title="How this was calculated" icon="calculator-outline">
-              <Muted variant="small">Estimated resting burn (BMR): {targets.bmr.toLocaleString()} kcal</Muted>
+              <Muted variant="small">Estimated resting burn: {targets.bmr.toLocaleString()} kcal</Muted>
               <Muted variant="small">Estimated maintenance: {targets.maintenance.toLocaleString()} kcal (includes ~{targets.baselineSteps.toLocaleString()} steps/day and your planned workouts)</Muted>
               <Muted variant="small">{targets.method}</Muted>
-              <Muted variant="small">Equations are typically within ±10% for most people, which is why the coach adjusts from your real results.</Muted>
+              <Muted variant="small">These equations are usually accurate to within about 10%, which is why the coach adjusts from your real results.</Muted>
             </Expandable>
             <NumberField label="Prefer a different calorie target? (optional)" value={calorieOverride} onChange={setCalorieOverride} suffix="kcal" hint="Leave empty to use the suggested number." />
           </Card>
 
           <Card tone={wantPlan ? 'pending' : 'muted'} style={{ gap: Space.md }}>
-            <Row wrap gap={6}>
-              <Badge kind="suggestion" label="Suggested plan" />
-            </Row>
             {plan ? (
               <>
                 <Text variant="h3">{plan.name}</Text>
@@ -343,6 +347,7 @@ export default function Onboarding() {
         <Row style={{ marginTop: Space.md }}>
           <Button title="Back" kind="ghost" icon="arrow-back" onPress={back} />
           <View style={{ flex: 1 }} />
+          {step === OPTIONAL_STEP ? <Button title="Skip" kind="ghost" onPress={next} /> : null}
           {step < STEPS.length - 1 ? <Button title="Continue" icon="arrow-forward" onPress={next} disabled={!canNext} /> : null}
         </Row>
       ) : null}
