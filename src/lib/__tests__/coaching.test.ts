@@ -2,7 +2,7 @@ import { activityBonus, missedWorkoutInsight, runEngine, targetChangeRows, trend
 import { reducer } from '../reducer';
 import { simulateCoachReply } from '../coaching/coachSim';
 import { buildSampleState } from '../sampleData';
-import { emptyState, type AppState } from '../state';
+import { emptyState, STATE_VERSION, type AppState } from '../state';
 import { decide, inQuietHours, MAX_COACH_NOTIFICATIONS_PER_DAY, type Candidate } from '../notifications/policy';
 import { generatePlan, planGoal, stalePlanGoal } from '../workouts/generator';
 import type { NotificationPrefs, NotificationRecord } from '../types';
@@ -209,7 +209,7 @@ describe('plan generator', () => {
     expect(ids).not.toContain('back_squat');
     expect(ids).not.toContain('deadlift');
     expect(ids).not.toContain('leg_extension');
-    expect(s.version).toBe(2);
+    expect(s.version).toBe(STATE_VERSION);
   });
 
   it('only uses available equipment', () => {

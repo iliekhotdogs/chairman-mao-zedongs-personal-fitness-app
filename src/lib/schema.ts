@@ -44,6 +44,14 @@ const chat = z.looseObject({ ...syncMeta, role: z.enum(['user', 'coach']), text:
 const notification = z.looseObject({ ...syncMeta, date: str, dedupeKey: str, category: str });
 const dayAdjustment = z.looseObject({ ...syncMeta, date: str, calorieDelta: num, carbsDeltaG: num });
 const progressPhoto = z.looseObject({ ...syncMeta, date: str, uri: z.string().min(1) });
+const nullableNum = num.nullable();
+const savedFood = z.looseObject({
+  ...syncMeta,
+  kind: z.enum(['barcode', 'restaurant', 'custom']),
+  name: z.string().min(1),
+  basis: z.looseObject({ unit: z.enum(['g', 'ml', 'serving']), amount: num.positive(), label: str }),
+  nutrients: z.looseObject({ calories: nullableNum, proteinG: nullableNum, carbsG: nullableNum, fatG: nullableNum }),
+});
 const workoutOverride = z.looseObject({ ...syncMeta, date: str, day: workoutDay });
 
 const COLLECTION_SCHEMAS: Record<SyncedCollection, z.ZodType> = {
@@ -58,6 +66,7 @@ const COLLECTION_SCHEMAS: Record<SyncedCollection, z.ZodType> = {
   chat,
   notifications: notification,
   progressPhotos: progressPhoto,
+  savedFoods: savedFood,
 };
 
 const SINGLETON_SCHEMAS: Record<SyncedSingleton, z.ZodType> = {

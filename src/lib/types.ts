@@ -98,6 +98,43 @@ export interface FoodItem {
   confidence?: Confidence;
   portionAssumption?: string;
   reviewRequired?: boolean;
+  /** Macros the source did not give: the number is 0 only so totals add up; show "—". */
+  missing?: MacroKey[];
+}
+
+export type MacroKey = 'proteinG' | 'carbsG' | 'fatG';
+
+/** What a label's numbers are "per": grams, millilitres, or one serving (no weight given). */
+export interface ServingBasis {
+  unit: 'g' | 'ml' | 'serving';
+  /** g or ml in one serving; 1 for 'serving' */
+  amount: number;
+  /** as printed, e.g. "2 cookies (30 g)" */
+  label: string;
+}
+
+/** Nutrients per serving basis; null means the source did not say (never assumed 0). */
+export interface Nutrients {
+  calories: number | null;
+  proteinG: number | null;
+  carbsG: number | null;
+  fatG: number | null;
+}
+
+/** A user-confirmed product or dish in the personal food database. */
+export interface SavedFood extends SyncMeta {
+  kind: 'barcode' | 'restaurant' | 'custom';
+  name: string;
+  brand?: string;
+  flavour?: string;
+  packageSize?: string;
+  restaurant?: string;
+  barcode?: string;
+  basis: ServingBasis;
+  nutrients: Nutrients;
+  source?: NutritionSource;
+  confirmedAt: ISODateTime;
+  createdAt: ISODateTime;
 }
 
 export interface FoodEntry extends SyncMeta {

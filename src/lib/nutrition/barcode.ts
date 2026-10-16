@@ -10,22 +10,23 @@ import { round } from '../units';
  */
 
 export const OFF_PRODUCT_URL = 'https://world.openfoodfacts.org/api/v2/product/';
-const FIELDS = 'code,product_name,product_name_en,brands,nutriments,serving_size,serving_quantity,serving_quantity_unit';
+const FIELDS = 'code,product_name,product_name_en,brands,quantity,nutriments,serving_size,serving_quantity,serving_quantity_unit';
 
 /** Native apps should identify themselves to Open Food Facts; browsers don't allow setting it. */
 export const OFF_USER_AGENT = 'FitCoach/1.0 (personal fitness app; barcode food logging)';
 
 export type BarcodeLookup =
-  | { status: 'found'; code: string; item: FoodItem; per100g: Per100g; servingGrams?: number }
+  | { status: 'found'; code: string; item: FoodItem; per100g: Per100g; servingGrams?: number; brand?: string; packageSize?: string }
   /** The product exists but has no usable calorie data: offer manual entry with the name. */
   | { status: 'incomplete'; code: string; name?: string }
   | { status: 'not_found'; code: string };
 
+/** Macros the product doesn't list stay undefined (never assumed 0). */
 export interface Per100g {
   kcal: number;
-  p: number;
-  c: number;
-  f: number;
+  p?: number;
+  c?: number;
+  f?: number;
 }
 
 export class BarcodeError extends Error {}
@@ -92,6 +93,7 @@ const offProductSchema = z.object({
   product_name: looseStr,
   product_name_en: looseStr,
   brands: looseStr,
+  quantity: looseStr,
   nutriments: z.record(z.string(), looseNum).optional().catch(undefined),
   serving_size: looseStr,
   serving_quantity: looseNum,
@@ -116,16 +118,23 @@ export function per100gFrom(n: Nutriments | undefined): Per100g | undefined {
   const kj = num(n['energy-kj_100g']) ?? num(n['energy_100g']);
   const kcal = num(n['energy-kcal_100g']) ?? (kj !== undefined ? kj / 4.184 : undefined);
   if (kcal === undefined) return undefined;
-  return { kcal, p: num(n['proteins_100g']) ?? 0, c: num(n['carbohydrates_100g']) ?? 0, f: num(n['fat_100g']) ?? 0 };
+  return { kcal, p: num(n['proteins_100g']), c: num(n['carbohydrates_100g']), f: num(n['fat_100g']) };
 }
 
-/** Grams in one serving from `serving_quantity` or text like "30 g", "1 bar (40g)", "250 ml". */
-export function servingGramsFrom(p: Pick<OffProduct, 'serving_quantity' | 'serving_size'>): number | undefined {
+/** One serving from `serving_quantity` or text like "30 g", "1 bar (40g)", "250 ml". Millilitres are never turned into grams. */
+export function servingFrom(p: Pick<OffProduct, 'serving_quantity' | 'serving_size' | 'serving_quantity_unit'>): { amount: number; unit: 'g' | 'ml' } | undefined {
+  const textUnit = /\d\s*ml\b/i.test(p.serving_size ?? '') ? 'ml' : 'g';
+  const unit = p.serving_quantity_unit === 'ml' || (!p.serving_quantity_unit && textUnit === 'ml') ? 'ml' : 'g';
   const q = num(p.serving_quantity);
-  if (q && q > 0 && q < 2000) return q;
+  if (q && q > 0 && q < 2000) return { amount: q, unit };
   const m = p.serving_size?.toLowerCase().match(/(\d+(?:[.,]\d+)?)\s*(g|gr|grams?|ml)\b/);
   const g = m ? num(m[1]) : undefined;
-  return g && g > 0 && g < 2000 ? g : undefined;
+  return g && g > 0 && g < 2000 ? { amount: g, unit: m![2] === 'ml' ? 'ml' : 'g' } : undefined;
+}
+
+export function servingGramsFrom(p: Pick<OffProduct, 'serving_quantity' | 'serving_size' | 'serving_quantity_unit'>): number | undefined {
+  const s = servingFrom(p);
+  return s?.unit === 'g' ? s.amount : undefined;
 }
 
 export function productName(p: OffProduct): string | undefined {
@@ -140,22 +149,23 @@ export function itemFromProduct(code: string, p: OffProduct): BarcodeLookup {
   const name = productName(p);
   const per100g = per100gFrom(p.nutriments);
   if (!per100g) return { status: 'incomplete', code, name };
-  const servingGrams = servingGramsFrom(p);
-  const grams = servingGrams ?? 100;
-  const k = grams / 100;
-  const unit = p.serving_quantity_unit === 'ml' || /ml\b/i.test(p.serving_size ?? '') ? 'ml' : 'g';
-  const portionLabel = servingGrams ? `1 serving (${p.serving_size?.trim() || `${round(grams)} ${unit}`})` : '100 g';
+  const serving = servingFrom(p);
+  // OFF's *_100g values are per 100 ml for drinks, so scaling by ml is fine; only grams get a weight.
+  const k = (serving?.amount ?? 100) / 100;
+  const portionLabel = serving ? `1 serving (${p.serving_size?.trim() || `${round(serving.amount)} ${serving.unit}`})` : '100 g';
+  const missing = (['p', 'c', 'f'] as const).filter((m) => per100g[m] === undefined).map((m) => ({ p: 'proteinG', c: 'carbsG', f: 'fatG' } as const)[m]);
   const item: FoodItem = {
     name: name ?? `Product ${code}`,
     portionLabel,
-    grams: round(grams),
+    grams: serving ? (serving.unit === 'g' ? round(serving.amount) : undefined) : 100,
     calories: Math.round(per100g.kcal * k),
-    proteinG: round(per100g.p * k, 1),
-    carbsG: round(per100g.c * k, 1),
-    fatG: round(per100g.f * k, 1),
+    proteinG: round((per100g.p ?? 0) * k, 1),
+    carbsG: round((per100g.c ?? 0) * k, 1),
+    fatG: round((per100g.f ?? 0) * k, 1),
+    ...(missing.length ? { missing } : {}),
     source: { kind: 'label', sourced: true, label: `Open Food Facts #${code} (package label data)`, url: `https://world.openfoodfacts.org/product/${code}` },
   };
-  return { status: 'found', code, item, per100g, servingGrams };
+  return { status: 'found', code, item, per100g, servingGrams: serving?.unit === 'g' ? serving.amount : undefined, brand: p.brands?.split(',')[0]?.trim() || undefined, packageSize: p.quantity?.trim() || undefined };
 }
 
 export interface LookupOptions {

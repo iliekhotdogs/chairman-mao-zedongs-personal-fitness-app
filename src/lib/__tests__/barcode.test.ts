@@ -63,7 +63,7 @@ describe('Open Food Facts mapping', () => {
 
   it('parses serving text', () => {
     expect(servingGramsFrom({ serving_size: '1 bar (40g)' })).toBe(40);
-    expect(servingGramsFrom({ serving_size: '250 ml' })).toBe(250);
+    expect(servingGramsFrom({ serving_size: '250 ml' })).toBeUndefined(); // never turn ml into grams
     expect(servingGramsFrom({ serving_quantity: '30' })).toBe(30);
     expect(servingGramsFrom({ serving_size: '2 biscuits' })).toBeUndefined();
   });
