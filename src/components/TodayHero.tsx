@@ -29,7 +29,7 @@ export function TodayHero({ greeting, dateLabel }: { greeting: string; dateLabel
       </StatCell>
       <StatCell label="Calories" sub={rem ? `of ${rem.target.calories.toLocaleString()} kcal` : undefined}>
         <CountUp value={Math.round(rem?.eaten.calories ?? 0)} variant={numVariant} />
-        {rem ? <ProgressBar value={rem.eaten.calories} max={rem.target.calories} height={4} over={rem.eaten.calories > rem.target.calories * 1.1} /> : null}
+        {rem ? <ProgressBar value={rem.eaten.calories} max={rem.target.calories} height={4} over={rem.eaten.calories > rem.target.calories * 1.1} label="Calories eaten today" /> : null}
       </StatCell>
       <StatCell label="This week" sub={week.volumeKg ? `${weightValue(week.volumeKg, units, 0).toLocaleString()} ${weightUnit(units)} lifted` : 'workouts done'}>
         <CountUp value={week.workouts} variant={numVariant} />
@@ -121,7 +121,7 @@ function NextWorkoutTile() {
       </Row>
       <Text variant="h2" numberOfLines={1}>{next.day.name}</Text>
       {next.isToday ? (
-        <Button title={active ? 'Continue workout' : 'Start workout'} icon="play" onPress={() => router.push('/workouts/session')} />
+        <Button title={active ? 'Resume workout' : 'Start workout'} icon="play" onPress={() => router.push('/workouts/session')} />
       ) : (
         <Stack gap={2}>
           <Text variant="numberSm" accessibilityLabel={`Starts in ${formatCountdown(next.startsAt.getTime() - now)}`} style={{ fontVariant: ['tabular-nums'] }}>

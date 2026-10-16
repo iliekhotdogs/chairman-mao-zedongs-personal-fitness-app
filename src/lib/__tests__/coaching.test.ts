@@ -225,6 +225,13 @@ describe('plan generator', () => {
     expect(plan.days.map((d) => d.weekday)).toEqual([2, 4]);
   });
 
+  it('explains flexible days when the profile has no training schedule', () => {
+    const plan = generatePlan({ ...base, trainingDays: [] }, TODAY);
+    expect(plan.days).toHaveLength(3);
+    expect(plan.days.every((d) => d.weekday === undefined)).toBe(true);
+    expect(plan.rationale[0]).toContain('flexible days');
+  });
+
   it('stores the goal and flags a plan built for a different goal', () => {
     const plan = generatePlan({ ...base, goal: 'fat_loss' }, TODAY);
     expect(plan.goal).toBe('fat_loss');

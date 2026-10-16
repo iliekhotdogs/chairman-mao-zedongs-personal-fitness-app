@@ -10,11 +10,14 @@ import Animated, { Easing, FadeInDown, ReduceMotion, useAnimatedStyle, useReduce
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { C, Font, MaxWidths, Motion, Radius, Space, Type } from '@/constants/theme';
+import { Blob, C, DisplayFont, Font, MaxWidths, Motion, Radius, Space, Type } from '@/constants/theme';
 import { useLayout } from '@/hooks/useLayout';
 
 export type IconName = React.ComponentProps<typeof Ionicons>['name'];
 export { Ionicons };
+
+/** Web-only hover wiggle hook (see global.css [data-wiggle]); ignored on native. */
+export const WIGGLE = { dataSet: { wiggle: '1' } } as object;
 
 /** Pressable state on react-native-web also carries `hovered`. */
 type PState = { pressed: boolean; hovered?: boolean };
@@ -31,7 +34,7 @@ export const Muted = (p: TextProps & { variant?: Variant }) => <Text color={C.te
 
 /** Short accent underline used under display headings. */
 export function AccentRule({ width = 36, style }: { width?: number; style?: StyleProp<ViewStyle> }) {
-  return <View style={[{ width, height: 3, borderRadius: 2, backgroundColor: C.accent }, style]} />;
+  return <View style={[{ width, height: 5, borderRadius: 3, backgroundColor: C.accent }, style]} />;
 }
 
 // ---------- Motion ----------
@@ -82,6 +85,22 @@ export function CountUp({ value, format = (v) => Math.round(v).toLocaleString(),
 
 export type ScreenSize = keyof typeof MaxWidths;
 
+/** A real web anchor lets keyboard users bypass the app navigation. */
+export function SkipLink() {
+  const [focused, setFocused] = React.useState(false);
+  if (Platform.OS !== 'web') return null;
+  return React.createElement('a', {
+    href: '#main-content',
+    onFocus: () => setFocused(true),
+    onBlur: () => setFocused(false),
+    style: {
+      position: 'absolute', top: 8, left: 8, zIndex: 1000,
+      transform: focused ? 'none' : 'translateY(-200%)',
+      padding: '10px 14px', borderRadius: 6, background: C.primary, color: C.onPrimary,
+    },
+  }, 'Skip to main content');
+}
+
 export function Screen({ children, scroll = true, size = 'wide', maxWidth, padded = true, contentStyle, scrollRef }: { children: React.ReactNode; scroll?: boolean; size?: ScreenSize; maxWidth?: number; padded?: boolean; contentStyle?: StyleProp<ViewStyle>; scrollRef?: React.Ref<ScrollView> }) {
   const insets = useSafeAreaInsets();
   const { isPhone } = useLayout();
@@ -92,9 +111,9 @@ export function Screen({ children, scroll = true, size = 'wide', maxWidth, padde
       {children}
     </Animated.View>
   );
-  if (!scroll) return <View style={{ flex: 1, backgroundColor: C.bg }}>{inner}</View>;
+  if (!scroll) return <View id="main-content" role="main" tabIndex={-1} style={{ flex: 1, backgroundColor: C.bg }}>{inner}</View>;
   return (
-    <ScrollView ref={scrollRef} style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scrollRef} id="main-content" role="main" tabIndex={-1} style={{ flex: 1, backgroundColor: C.bg }} contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
       {inner}
     </ScrollView>
   );
@@ -126,11 +145,12 @@ export function Columns({ children, ratio = [1, 1], gap = Space.lg }: { children
 }
 
 export function PageHeader({ title, subtitle, eyebrow, right }: { title: string; subtitle?: string; eyebrow?: string; right?: React.ReactNode }) {
+  const { isPhone } = useLayout();
   return (
     <Row align="flex-end" wrap gap={Space.md} style={{ marginBottom: Space.sm }}>
       <Stack gap={Space.sm} style={{ flex: 1, minWidth: 220 }}>
         {eyebrow ? <Text variant="eyebrow" color={C.textSecondary}>{eyebrow}</Text> : null}
-        <Text variant="h1" accessibilityRole="header">
+        <Text variant="h1" accessibilityRole="header" style={isPhone ? { fontSize: 44, lineHeight: 40 } : { fontSize: 72, lineHeight: 64 }}>
           {title}
         </Text>
         <AccentRule />
@@ -175,9 +195,10 @@ export function Card({ style, tone = 'default', dashed, children, onPress, ...re
     return (
       <Pressable
         {...(rest as PressableProps)}
+        {...WIGGLE}
         onPress={onPress}
         accessibilityRole={rest.accessibilityRole ?? 'button'}
-        style={({ pressed, hovered }: PState) => [...base, hovered ? { borderColor: C.borderStrong, backgroundColor: tone === 'default' ? C.surfaceHover : t.bg } : null, pressed ? { opacity: 0.85 } : null, style]}>
+        style={({ pressed, hovered }: PState) => [...base, hovered ? { borderColor: C.primary, backgroundColor: tone === 'default' ? C.surfaceHover : t.bg } : null, pressed ? { opacity: 0.85 } : null, style]}>
         {children}
       </Pressable>
     );
@@ -196,20 +217,21 @@ export const Divider = ({ style }: { style?: StyleProp<ViewStyle> }) => <View st
 type ButtonKind = 'primary' | 'secondary' | 'ghost' | 'danger' | 'accept' | 'reject';
 
 const BUTTONS: Record<ButtonKind, { bg: string; fg: string; border: string; hoverBg: string; hoverBorder: string }> = {
-  primary: { bg: C.primary, fg: C.onPrimary, border: C.primary, hoverBg: C.primaryHover, hoverBorder: C.primaryHover },
-  accept: { bg: C.primary, fg: C.onPrimary, border: C.primary, hoverBg: C.primaryHover, hoverBorder: C.primaryHover },
-  secondary: { bg: C.surfaceAlt, fg: C.text, border: C.borderStrong, hoverBg: C.surfaceRaised, hoverBorder: C.textMuted },
-  reject: { bg: C.surfaceAlt, fg: C.text, border: C.borderStrong, hoverBg: C.surfaceRaised, hoverBorder: C.textMuted },
+  primary: { bg: C.primary, fg: C.onPrimary, border: C.text, hoverBg: C.primaryHover, hoverBorder: C.white },
+  accept: { bg: C.primary, fg: C.onPrimary, border: C.text, hoverBg: C.primaryHover, hoverBorder: C.white },
+  secondary: { bg: C.surfaceAlt, fg: C.text, border: C.borderStrong, hoverBg: C.surfaceRaised, hoverBorder: C.text },
+  reject: { bg: C.surfaceAlt, fg: C.text, border: C.borderStrong, hoverBg: C.surfaceRaised, hoverBorder: C.text },
   ghost: { bg: 'transparent', fg: C.primary, border: 'transparent', hoverBg: C.primarySoft, hoverBorder: 'transparent' },
   danger: { bg: 'transparent', fg: C.danger, border: C.dangerBorder, hoverBg: C.dangerSoft, hoverBorder: C.danger },
 };
 
 export function Button({ title, kind = 'primary', icon, loading, disabled, size = 'md', style, full, ...rest }: PressableProps & { title: string; kind?: ButtonKind; icon?: IconName; loading?: boolean; size?: 'sm' | 'md' | 'lg'; style?: StyleProp<ViewStyle>; full?: boolean }) {
   const palette = BUTTONS[kind];
-  const pad = size === 'sm' ? { paddingVertical: 7, paddingHorizontal: 12 } : size === 'lg' ? { paddingVertical: 15, paddingHorizontal: 24 } : { paddingVertical: 11, paddingHorizontal: 18 };
+  const pad = size === 'sm' ? { paddingVertical: 6, paddingHorizontal: 14 } : size === 'lg' ? { paddingVertical: 13, paddingHorizontal: 28 } : { paddingVertical: 9, paddingHorizontal: 22 };
   const isDisabled = disabled || loading;
   return (
     <Pressable
+      {...WIGGLE}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!isDisabled, busy: !!loading }}
       accessibilityLabel={title}
@@ -229,7 +251,7 @@ export function Button({ title, kind = 'primary', icon, loading, disabled, size 
         style,
       ]}>
       {loading ? <ActivityIndicator size="small" color={palette.fg} /> : icon ? <Ionicons name={icon} size={size === 'sm' ? 15 : 18} color={palette.fg} /> : null}
-      <Text variant={size === 'sm' ? 'smallStrong' : 'bodyStrong'} color={palette.fg} style={size === 'lg' ? { letterSpacing: 0.3 } : undefined}>
+      <Text variant={size === 'sm' ? 'smallStrong' : 'bodyStrong'} color={palette.fg} style={[styles.buttonLabel, size === 'sm' ? { fontSize: 16, lineHeight: 18 } : size === 'lg' ? { fontSize: 22, lineHeight: 24 } : null]}>
         {title}
       </Text>
     </Pressable>
@@ -238,7 +260,7 @@ export function Button({ title, kind = 'primary', icon, loading, disabled, size 
 
 export function IconButton({ icon, label, onPress, color = C.text, size = 22, style, disabled }: { icon: IconName; label: string; onPress?: () => void; color?: string; size?: number; style?: StyleProp<ViewStyle>; disabled?: boolean }) {
   return (
-    <Pressable accessibilityRole="button" accessibilityState={{ disabled }} accessibilityLabel={label} onPress={onPress} disabled={disabled} hitSlop={8} style={({ pressed, hovered }: PState) => [{ padding: 8, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: Radius.pill, opacity: disabled ? 0.45 : pressed ? 0.6 : 1 }, style, hovered ? { backgroundColor: C.surfaceRaised } : null]}>
+    <Pressable {...WIGGLE} accessibilityRole="button" accessibilityState={{ disabled }} accessibilityLabel={label} onPress={onPress} disabled={disabled} hitSlop={8} style={({ pressed, hovered }: PState) => [{ padding: 8, minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center', ...Blob.sm, opacity: disabled ? 0.45 : pressed ? 0.6 : 1 }, style, hovered ? { backgroundColor: C.surfaceRaised } : null]}>
       <Ionicons name={icon} size={size} color={color} />
     </Pressable>
   );
@@ -268,7 +290,7 @@ export function Badge({ kind = 'neutral', label, icon }: { kind?: BadgeKind; lab
   return (
     <View style={[styles.badge, { backgroundColor: b.bg, borderColor: b.border }]} accessibilityLabel={label}>
       {ic ? <Ionicons name={ic} size={12} color={b.fg} /> : null}
-      <Text variant="caption" color={b.fg}>
+      <Text variant="caption" color={b.fg} style={{ fontWeight: '700', letterSpacing: 0.6 }}>
         {label}
       </Text>
     </View>
@@ -459,6 +481,7 @@ function FtInField({ value, onChange }: { value: number | undefined; onChange: (
 export function Chip({ label, selected, onPress, icon, asButton, disabled }: { label: string; selected?: boolean; onPress?: () => void; icon?: IconName; asButton?: boolean; disabled?: boolean }) {
   return (
     <Pressable
+      {...WIGGLE}
       onPress={onPress}
       disabled={disabled}
       accessibilityRole={asButton ? 'button' : 'checkbox'}
@@ -466,9 +489,9 @@ export function Chip({ label, selected, onPress, icon, asButton, disabled }: { l
       aria-checked={asButton ? undefined : !!selected}
       aria-disabled={disabled}
       accessibilityLabel={label}
-      style={({ pressed, hovered }: PState) => [styles.chip, hovered && !selected && !disabled ? { borderColor: C.borderStrong, backgroundColor: C.surfaceRaised } : null, selected ? { backgroundColor: C.primarySoft, borderColor: C.primaryBorder } : null, disabled ? { opacity: 0.45 } : pressed ? { opacity: 0.8 } : null]}>
-      {icon ? <Ionicons name={icon} size={15} color={selected ? C.primary : C.textSecondary} /> : null}
-      <Text variant="smallStrong" color={selected ? C.primary : C.text}>
+      style={({ pressed, hovered }: PState) => [styles.chip, hovered && !selected && !disabled ? { borderColor: C.borderStrong, backgroundColor: C.surfaceRaised } : null, selected ? { backgroundColor: C.primary, borderColor: C.text } : null, disabled ? { opacity: 0.45 } : pressed ? { opacity: 0.8 } : null]}>
+      {icon ? <Ionicons name={icon} size={15} color={selected ? C.onPrimary : C.textSecondary} /> : null}
+      <Text variant="smallStrong" color={selected ? C.onPrimary : C.text}>
         {label}
       </Text>
     </Pressable>
@@ -489,7 +512,7 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
             accessibilityState={{ selected: sel }}
             aria-checked={sel}
             style={({ hovered }: PState) => [styles.segmentItem, sel ? styles.segmentItemSel : hovered ? { backgroundColor: C.surfaceHover } : null]}>
-            <Text variant="smallStrong" color={sel ? C.text : C.textSecondary} numberOfLines={1}>
+            <Text variant="smallStrong" color={sel ? C.onPrimary : C.textSecondary} numberOfLines={3} style={{ textAlign: 'center', flexShrink: 1 }}>
               {o.label}
             </Text>
           </Pressable>
@@ -502,6 +525,7 @@ export function Segmented<T extends string>({ options, value, onChange, label }:
 export function OptionCard({ title, body, selected, onPress, icon }: { title: string; body?: string; selected?: boolean; onPress: () => void; icon?: IconName }) {
   return (
     <Pressable
+      {...WIGGLE}
       onPress={onPress}
       accessibilityRole="radio"
       accessibilityLabel={body ? `${title}. ${body}` : title}
@@ -546,7 +570,7 @@ export function Toggle({ value, onChange, label, description }: { value: boolean
 
 // ---------- Data display ----------
 
-export function ProgressBar({ value, max, color = C.primary, height = 8, over, label = 'Progress' }: { value: number; max: number; color?: string; height?: number; over?: boolean; label?: string }) {
+export function ProgressBar({ value, max, color = C.primary, height = 8, over, label }: { value: number; max: number; color?: string; height?: number; over?: boolean; label: string }) {
   const pct = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
   return (
     <View style={{ height, borderRadius: height, backgroundColor: C.surfaceRaised, overflow: 'hidden' }} accessibilityRole="progressbar" accessibilityLabel={label} accessibilityValue={{ min: 0, max: Math.round(max), now: Math.round(value) }} aria-valuemin={0} aria-valuemax={Math.round(max)} aria-valuenow={Math.round(value)}>
@@ -649,19 +673,20 @@ export function InfoTip({ title, children }: { title: string; children: React.Re
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: Radius.lg, borderWidth: 1, padding: Space.lg, gap: Space.sm },
-  button: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Space.sm, borderRadius: Radius.md, borderWidth: 1 },
-  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: Radius.pill, borderWidth: 1, alignSelf: 'flex-start' },
-  emptyIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: C.surfaceAlt, alignItems: 'center', justifyContent: 'center' },
-  inputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: C.borderStrong, borderRadius: Radius.md, backgroundColor: C.bgDeep, minHeight: 44 },
-  input: { flex: 1, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: C.text, minHeight: 44 },
-  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: Radius.pill, borderWidth: 1, borderColor: C.border, backgroundColor: C.surfaceAlt, minHeight: 44 },
-  segment: { flexDirection: 'row', backgroundColor: C.bgDeep, borderRadius: Radius.md, borderWidth: 1, borderColor: C.border, padding: 3, gap: 2 },
-  segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 10, borderRadius: Radius.sm, minHeight: 44 },
-  segmentItemSel: { backgroundColor: C.surfaceRaised },
+  card: { ...Blob.a, borderWidth: 2, padding: Space.lg, gap: Space.sm },
+  button: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: Space.sm, ...Blob.a, borderWidth: 3 },
+  buttonLabel: { fontFamily: DisplayFont.heavy, fontWeight: 'normal', textTransform: 'uppercase', letterSpacing: 0.8, fontSize: 19, lineHeight: 22 },
+  badge: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 3, borderRadius: Radius.pill, borderWidth: 1.5, alignSelf: 'flex-start' },
+  emptyIcon: { width: 56, height: 56, ...Blob.b, backgroundColor: C.surfaceAlt, borderWidth: 2, borderColor: C.borderStrong, alignItems: 'center', justifyContent: 'center' },
+  inputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 2, borderColor: C.borderStrong, ...Blob.sm, backgroundColor: C.bgDeep, minHeight: 48 },
+  input: { flex: 1, paddingHorizontal: 14, paddingVertical: 10, fontSize: 15, color: C.text, minHeight: 44 },
+  chip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, ...Blob.chip, borderWidth: 2, borderColor: C.borderStrong, backgroundColor: C.surfaceAlt, minHeight: 44 },
+  segment: { flexDirection: 'row', backgroundColor: C.bgDeep, ...Blob.a, borderWidth: 2, borderColor: C.borderStrong, padding: 3, gap: 2 },
+  segmentItem: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 10, ...Blob.sm, minHeight: 44 },
+  segmentItemSel: { backgroundColor: C.primary },
   stepBtn: { backgroundColor: C.surfaceAlt },
-  switchTrack: { width: 46, height: 28, borderRadius: 14, padding: 3, borderWidth: 1 },
-  switchThumb: { width: 20, height: 20, borderRadius: 10 },
+  switchTrack: { width: 46, height: 28, borderRadius: 14, padding: 3, borderWidth: 2 },
+  switchThumb: { width: 18, height: 18, borderRadius: 9 },
   backdrop: { flex: 1, backgroundColor: C.overlay, padding: 0 },
-  sheet: { backgroundColor: C.surface, borderRadius: Radius.xl, borderWidth: 1, borderColor: C.border, padding: Space.xl, gap: Space.md, maxWidth: '100%' },
+  sheet: { backgroundColor: C.surface, ...Blob.a, borderWidth: 2, borderColor: C.borderStrong, padding: Space.xl, gap: Space.md, maxWidth: '100%' },
 });

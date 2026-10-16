@@ -72,7 +72,7 @@ export function MacroBars({ eaten, target }: { eaten: MacroTargets; target: Macr
                 {left >= 0 ? `${left} g left` : `${-left} g over`} · {Math.round(r.e)}/{r.t} g
               </Muted>
             </Row>
-            <ProgressBar value={r.e} max={r.t} color={r.color} over={r.e > r.t * 1.1} />
+            <ProgressBar value={r.e} max={r.t} color={r.color} over={r.e > r.t * 1.1} label={`${r.k} daily target`} />
           </Stack>
         );
       })}

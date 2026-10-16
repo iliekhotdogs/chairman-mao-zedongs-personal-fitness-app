@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { View, useWindowDimensions } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 
 import { C, Space } from '@/constants/theme';
 import { Button, Card, Chip, EmptyState, IconButton, InfoTip, Muted, PageHeader, Row, Screen, SectionTitle, Segmented, Stack, Stat, Text, Columns } from '@/components/ui';
 import { Timeline } from '@/components/Timeline';
 import { milestones } from '@/lib/streaks';
+import { calorieStats, loggedDaysLabel, MIN_LOGGED_DAYS } from '@/lib/calorieStats';
 import { BarChart, LineChart } from '@/components/charts';
 import { WeightSheet } from '@/components/WeightSheet';
 import { ProgressPhotosSection } from '@/components/ProgressPhotos';
@@ -28,10 +29,20 @@ export default function Progress() {
   const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
   const [tab, setTab] = useState<Tab>(TABS.includes(tabParam as Tab) ? (tabParam as Tab) : 'calories');
   const { state } = useStore();
+  const narrow = useWindowDimensions().width < 480;
+  const tabOptions = [{ value: 'calories', label: 'Calories' }, { value: 'weight', label: 'Weight' }, { value: 'strength', label: 'Strength' }, { value: 'photos', label: 'Photos' }] as const;
+  const pick = (t: Tab) => { setTab(t); router.setParams({ tab: t }); };
   return (
     <Screen>
       <PageHeader title="Progress" subtitle="Calories, body weight, strength and photos" right={hasActivitySource(state) ? <Button title="Activity" kind="secondary" icon="footsteps-outline" onPress={() => router.push('/activity')} /> : undefined} />
-      <Segmented label="Progress view" value={tab} onChange={(t) => { setTab(t); router.setParams({ tab: t }); }} options={[{ value: 'calories', label: 'Calories' }, { value: 'weight', label: 'Weight' }, { value: 'strength', label: 'Strength' }, { value: 'photos', label: 'Photos' }]} />
+      {narrow ? (
+        // four segments don't fit one line at 320px without wrapping mid-word
+        <Row wrap gap={6}>
+          {tabOptions.map((o) => <Chip key={o.value} label={o.label} selected={o.value === tab} onPress={() => pick(o.value)} />)}
+        </Row>
+      ) : (
+        <Segmented label="Progress view" value={tab} onChange={pick} options={[...tabOptions]} />
+      )}
       {tab === 'calories' && <Calories />}
       {tab === 'weight' && <Weight />}
       {tab === 'strength' && <Strength />}
@@ -62,23 +73,21 @@ function Calories() {
   const [range, setRange] = useState<'14' | '30'>('14');
   const dates = lastNDates(parseInt(range, 10), today);
   const rows = dates.map((d) => ({ d, eaten: totalsForDay(state, d), target: dayTargets(state, d)! }));
-  const logged = rows.filter((r) => r.eaten.calories > 0 && r.d !== today);
-  const avg = logged.length ? Math.round(logged.reduce((s, r) => s + r.eaten.calories, 0) / logged.length) : 0;
-  const avgP = logged.length ? Math.round(logged.reduce((s, r) => s + r.eaten.proteinG, 0) / logged.length) : 0;
-  const within = logged.filter((r) => Math.abs(r.eaten.calories - r.target.calories) <= r.target.calories * 0.1).length;
+  const stats = calorieStats(rows, today);
+  const hasLogged = rows.some((r) => r.eaten.calories > 0 && r.d !== today);
   const target = state.targets!.calories;
   return (
     <Stack gap={Space.lg}>
       <Card style={{ gap: Space.md }}>
-        <Row>
+        <Row wrap>
           <Text variant="h3">Daily calories</Text>
           <InfoTip title="Reading this chart">{`Dashed line = your ongoing target (${target.toLocaleString()} kcal). Orange bars are more than 10% over that day's target. Grey ticks are days with nothing logged.`}</InfoTip>
-          <View style={{ flex: 1 }} />
-          <View style={{ width: 190 }}>
+          <View style={{ flexGrow: 1 }} />
+          <View style={{ flexBasis: 190, flexGrow: 1, maxWidth: 240 }}>
             <Segmented label="Range" value={range} onChange={setRange} options={[{ value: '14', label: '14 days' }, { value: '30', label: '30 days' }]} />
           </View>
         </Row>
-        {logged.length === 0 ? (
+        {!hasLogged ? (
           <EmptyState icon="bar-chart-outline" title="No data yet" body="Log meals for a few days to see your trend." />
         ) : (
           <>
@@ -93,9 +102,9 @@ function Calories() {
       </Card>
       <Columns>
         {[
-          <Card key="a"><Stat label="Average intake" value={avg ? avg.toLocaleString() : '—'} unit="kcal" sub={`${logged.length} logged days (today excluded)`} /></Card>,
-          <Card key="b"><Stat label="Days near target" value={logged.length ? `${within}/${logged.length}` : '—'} sub="within 10% either way" /></Card>,
-          <Card key="c"><Stat label="Average protein" value={avgP || '—'} unit="g" sub={`Goal ${state.targets!.proteinG} g`} color={C.protein} /></Card>,
+          <Card key="a"><Stat label="Average intake" value={stats.avg ? stats.avg.toLocaleString() : '—'} unit="kcal" sub={stats.ready ? `${loggedDaysLabel(stats.count)} (today excluded)` : `${stats.count} of ${MIN_LOGGED_DAYS} logged days needed (today excluded)`} /></Card>,
+          <Card key="b"><Stat label="Days near target" value={stats.ready ? `${stats.within}/${stats.count}` : '—'} sub={stats.ready ? 'within 10% either way' : `${stats.count} of ${MIN_LOGGED_DAYS} logged days needed`} /></Card>,
+          <Card key="c"><Stat label="Average protein" value={stats.avgProtein || '—'} unit="g" sub={stats.ready ? `Goal ${state.targets!.proteinG} g` : `${stats.count} of ${MIN_LOGGED_DAYS} logged days needed`} color={C.protein} /></Card>,
         ]}
       </Columns>
     </Stack>

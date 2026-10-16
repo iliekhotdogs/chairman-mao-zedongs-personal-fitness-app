@@ -4,13 +4,14 @@ import Animated, { Easing, useAnimatedStyle, useReducedMotion, useSharedValue, w
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
-import { C, MaxWidths, Radius, Space } from '@/constants/theme';
+import { Blob, C, MaxWidths, Radius, Space } from '@/constants/theme';
 import { useLayout } from '@/hooks/useLayout';
 import { useStore } from '@/store/AppStore';
 import { AccountCard } from '@/components/AccountCard';
 import { Logo } from '@/components/Brand';
-import { AccentRule, Badge, Button, Card, CountUp, IconButton, Ionicons, Muted, ProgressBar, Reveal, Row, Stack, Text, type IconName } from '@/components/ui';
+import { AccentRule, Badge, Button, Card, CountUp, IconButton, Ionicons, Muted, ProgressBar, Reveal, Row, SkipLink, Stack, Text, type IconName } from '@/components/ui';
 import { HeroBackdrop } from './HeroBackdrop';
+import { Marquee } from './Marquee';
 
 type SectionId = 'features' | 'how' | 'join';
 type PState = { pressed: boolean; hovered?: boolean };
@@ -86,16 +87,17 @@ export function Landing() {
   };
 
   const heroH = isPhone ? Math.max(560, Math.min(height * 0.9, 760)) : Math.max(640, Math.min(height, 980));
-  const heroSize = isDesktop ? 120 : isPhone ? 64 : 92;
+  const heroSize = isDesktop ? 176 : isPhone ? 72 : 128;
 
   return (
     <View style={{ flex: 1, backgroundColor: C.bg }}>
-      <ScrollView ref={scrollRef} onScroll={onScroll} scrollEventThrottle={32} style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }}>
+      <SkipLink />
+      <ScrollView ref={scrollRef} id="main-content" role="main" tabIndex={-1} onScroll={onScroll} scrollEventThrottle={32} style={{ flex: 1 }} contentContainerStyle={{ flexGrow: 1 }}>
         {/* ---------- Hero ---------- */}
         <View style={{ minHeight: heroH, justifyContent: 'flex-end', overflow: 'hidden' }} accessibilityRole="summary">
           <HeroBackdrop />
           <View style={[styles.inner, { paddingHorizontal: gutter, paddingTop: navH + Space.xxxl, paddingBottom: isPhone ? Space.xxxl : Space.huge }]}>
-            <Stack gap={isPhone ? Space.lg : Space.xl} style={{ maxWidth: 880 }}>
+            <Stack gap={isPhone ? Space.lg : Space.xl} style={{ maxWidth: 1100 }}>
               <Reveal>
                 <Row gap={Space.sm}>
                   <View style={styles.liveDot} />
@@ -103,9 +105,9 @@ export function Landing() {
                 </Row>
               </Reveal>
               <Reveal index={1}>
-                <Text variant="hero" accessibilityRole="header" style={{ fontSize: heroSize, lineHeight: heroSize * 0.92 }}>
+                <Text variant="hero" accessibilityRole="header" style={{ fontSize: heroSize, lineHeight: heroSize * 0.88 }}>
                   I train.{'\n'}I eat.{'\n'}
-                  <Text variant="hero" color={C.accent} style={{ fontSize: heroSize, lineHeight: heroSize * 0.92 }}>I get better.</Text>
+                  <Text variant="hero" color={C.accent} style={{ fontSize: heroSize, lineHeight: heroSize * 0.88 }}>I get better.</Text>
                 </Text>
               </Reveal>
               <Reveal index={2}>
@@ -130,6 +132,8 @@ export function Landing() {
             </Stack>
           </View>
         </View>
+
+        <Marquee />
 
         {/* ---------- Stat strip ---------- */}
         <View onLayout={(e) => onSectionLayout('stats', e)} style={[styles.inner, { paddingHorizontal: gutter }]}>
@@ -327,7 +331,7 @@ function FeatureVisual({ kind }: { kind: 'food' | 'train' | 'coach' | 'progress'
               <Text variant="smallStrong" style={{ flex: 1 }}>{k}</Text>
               <Muted variant="small">{v} g</Muted>
             </Row>
-            <ProgressBar value={v as number} max={t as number} color={color as string} height={6} />
+            <ProgressBar value={v as number} max={t as number} color={color as string} height={6} label={`${k} progress`} />
           </Stack>
         ))}
       </Card>
@@ -399,13 +403,13 @@ function FeatureVisual({ kind }: { kind: 'food' | 'train' | 'coach' | 'progress'
 const styles = StyleSheet.create({
   inner: { width: '100%', maxWidth: MaxWidths.wide + 160, alignSelf: 'center' },
   nav: { position: 'absolute', top: 0, left: 0, right: 0, borderBottomWidth: 1 },
-  liveDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: C.accent },
-  statStrip: { flexDirection: 'row', borderTopWidth: 1, borderBottomWidth: 1, borderColor: C.border },
-  statCell: { paddingVertical: Space.xl, paddingHorizontal: Space.lg, gap: Space.sm, borderColor: C.border },
-  step: { borderTopWidth: 2, borderTopColor: C.borderStrong, paddingTop: Space.lg, gap: Space.sm },
-  joinPanel: { borderRadius: Radius.xl, borderWidth: 1, borderColor: C.border, backgroundColor: C.surface },
+  liveDot: { width: 10, height: 10, borderRadius: 5, backgroundColor: C.accent },
+  statStrip: { flexDirection: 'row', borderTopWidth: 2, borderBottomWidth: 2, borderColor: C.borderStrong },
+  statCell: { paddingVertical: Space.xl, paddingHorizontal: Space.lg, gap: Space.sm, borderColor: C.borderStrong },
+  step: { borderTopWidth: 4, borderTopColor: C.primary, paddingTop: Space.lg, gap: Space.sm },
+  joinPanel: { ...Blob.a, borderWidth: 3, borderColor: C.borderStrong, backgroundColor: C.surface },
   menuItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: Space.md, borderBottomWidth: 1, borderBottomColor: C.border },
   visual: { padding: Space.xl, gap: Space.md },
-  bubble: { maxWidth: '85%', paddingHorizontal: 14, paddingVertical: 10, borderRadius: Radius.lg },
-  fakeBtn: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: Radius.md },
+  bubble: { maxWidth: '85%', paddingHorizontal: 14, paddingVertical: 10, ...Blob.a },
+  fakeBtn: { paddingHorizontal: 14, paddingVertical: 8, ...Blob.sm },
 });

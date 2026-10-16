@@ -80,6 +80,9 @@ async function main() {
   check(!write.error, 'A can write its own record', write.error?.message);
   const own = await a.client.from('records').select('id').eq('user_id', a.id);
   check(own.data?.length === 1, 'A can read its own record', describe(own));
+  const savedFood = { ...record, collection: 'savedFoods', id: `rls-check-food-${run}`, data: { id: `rls-check-food-${run}`, name: 'Test food', updatedAt: new Date().toISOString() } };
+  const savedWrite = await a.client.from('records').insert(savedFood);
+  check(!savedWrite.error, 'A can save a personal food', savedWrite.error?.message);
   photoPath = `${a.id}/rls-check.jpg`;
   const jpeg = Buffer.from('ffd8ffe000104a46494600010100000100010000ffd9', 'hex');
   const upload = await a.client.storage.from(BUCKET).upload(photoPath, jpeg, { contentType: 'image/jpeg', upsert: true });
@@ -130,6 +133,10 @@ async function main() {
   check(stillThere.data && !stillThere.data.data?.hacked, 'A\'s record is unchanged (checked with the service role)', describe(stillThere));
   const forged = await admin.from('records').select('id').eq('user_id', a.id).eq('id', 'rls-check-forged');
   check((forged.data ?? []).length === 0, 'No forged record exists for A', describe(forged));
+  const foodRead = await b.client.from('records').select('id').eq('collection', 'savedFoods').eq('user_id', a.id);
+  check(denied(foodRead), 'B cannot read A\'s saved foods', describe(foodRead));
+  const foodForge = await b.client.from('records').insert({ ...savedFood, id: `rls-check-food-forged-${run}` });
+  check(Boolean(foodForge.error), 'B cannot forge A\'s saved food', foodForge.error ? '' : 'insert succeeded');
 
   console.log('\nUser B cannot reach A\'s photos');
   const download = await b.client.storage.from(BUCKET).download(photoPath);
@@ -170,6 +177,14 @@ async function main() {
     const result = await b.client.from(table).select('*').limit(5);
     check(denied(result), `B cannot read ${table}`, describe(result));
   }
+  const sources = await b.client.from('restaurant_sources').select('*').limit(1);
+  check(Boolean(sources.error), 'B cannot read restaurant import sources', describe(sources));
+  const catalog = await b.client.from('restaurant_items').select('id').limit(1);
+  check(!catalog.error, 'B can read the signed-in restaurant catalog', catalog.error?.message);
+  const catalogWrite = await b.client.from('restaurant_items').insert({ source_id: 'not-a-source', restaurant: 'Test', name: 'Test meal', serving: '1 plate', calories: 300, protein_g: 10, carbs_g: 30, fat_g: 10, source_url: 'https://example.com', checked_at: new Date().toISOString() });
+  check(catalogWrite.error?.code === '42501', 'B cannot write restaurant items', catalogWrite.error?.message ?? 'insert succeeded');
+  const catalogRpc = await b.client.rpc('replace_restaurant_items', { p_source: 'not-a-source', p_items: [], p_checked_at: new Date().toISOString() });
+  check(['42501', '42883', 'PGRST202'].includes(catalogRpc.error?.code), 'B cannot call the restaurant import RPC', catalogRpc.error?.message ?? 'RPC ran');
   for (const table of ['profiles', 'push_tokens', 'notification_log', 'ai_usage', 'food_search_usage']) {
     const result = await b.client.from(table).select('user_id').eq('user_id', a.id);
     check(denied(result), `B cannot read A's rows in ${table}`, describe(result));
@@ -196,6 +211,8 @@ async function main() {
   console.log('\nAnonymous (signed-out) client');
   const anonRecords = await anon.from('records').select('id').limit(5);
   check(denied(anonRecords), 'anon reads 0 records', describe(anonRecords));
+  const anonCatalog = await anon.from('restaurant_items').select('id').limit(1);
+  check(Boolean(anonCatalog.error), 'anon cannot read the restaurant catalog', describe(anonCatalog));
   const anonPhoto = await anon.storage.from(BUCKET).download(photoPath);
   check(Boolean(anonPhoto.error), 'anon cannot download A\'s photo', anonPhoto.error ? '' : 'download succeeded');
 }

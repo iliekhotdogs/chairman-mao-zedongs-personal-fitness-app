@@ -1,9 +1,10 @@
 /* Keep these values in sync with `C` in src/constants/theme.ts */
 :root {
   color-scheme: dark;
-  --bg: #0a0b0d;
-  --text: #f3f4f6;
-  --accent: #d4ff3a;
+  --bg: #181818;
+  --text: #f4f1e8;
+  --accent: #5beb94;
+  --ease: cubic-bezier(0.62, 0.05, 0.01, 0.99);
   --font-body:
     Inter, 'Segoe UI Variable', 'Segoe UI', ui-sans-serif, system-ui, -apple-system, Roboto, sans-serif,
     'Segoe UI Emoji', 'Noto Color Emoji';
@@ -26,19 +27,63 @@ body {
   color: var(--bg);
 }
 
-/* Visible keyboard focus for accessibility on desktop browsers */
+/* Visible keyboard focus: 3px mint ring (11:1 on the page bg), offset so it also clears mint fills */
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  border-radius: 6px;
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 14px;
 }
 
-/* Dark scrollbars on desktop browsers */
+/* Hidden scrollbars; scrolling still works */
 * {
-  scrollbar-color: #3a3f48 transparent;
+  scrollbar-width: none;
+}
+*::-webkit-scrollbar {
+  display: none;
+}
+
+/* Film grain over everything; never intercepts input */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
+  pointer-events: none;
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 .9 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+
+/* Hand-drawn hover wiggle (set via dataSet={{ wiggle: '1' }}) */
+@keyframes fc-wiggle {
+  0% { transform: rotate(-1.25deg); }
+  100% { transform: rotate(1.25deg); }
+}
+[data-wiggle]:hover {
+  animation: fc-wiggle 0.3s steps(2) infinite;
+}
+[data-wiggle] {
+  transition: border-color 0.35s var(--ease), background-color 0.35s var(--ease);
+}
+
+/* Scrolling banner */
+@keyframes fc-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.fc-marquee {
+  display: flex;
+  width: max-content;
+  animation: fc-marquee 28s linear infinite;
+}
+.fc-marquee:hover {
+  animation-play-state: paused;
 }
 
 @media (prefers-reduced-motion: reduce) {
+  [data-wiggle]:hover,
+  .fc-marquee {
+    animation: none !important;
+  }
   * {
     scroll-behavior: auto !important;
   }

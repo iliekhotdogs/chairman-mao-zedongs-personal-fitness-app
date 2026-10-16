@@ -198,7 +198,7 @@ describe('client re-validates every coach intent', () => {
 
 describe('offline coach answers the question it was asked', () => {
   it('admits it has no built-in answer instead of a generic status reply', () => {
-    expect(simulateCoachReply(sample(), 'does looking at my feet burn calories?', TODAY).text).toMatch(/^I don't have a built-in answer to that question/);
-    expect(simulateCoachReply(sample(), 'hello', TODAY).text).toMatch(/^I'm here to help/);
+    expect(simulateCoachReply(sample(), 'does looking at my feet burn calories?', TODAY).text).toMatch(/^I can't answer that offline/);
+    expect(simulateCoachReply(sample(), 'hello', TODAY).text).toMatch(/^Hi!/);
   });
 });
