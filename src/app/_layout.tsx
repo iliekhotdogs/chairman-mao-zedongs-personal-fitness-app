@@ -16,6 +16,7 @@ import { Splash } from '@/components/Splash';
 import { Landing } from '@/components/landing/Landing';
 import { initErrorReporting, withErrorReporting } from '@/lib/errorReporting';
 import { isPasswordRecoveryPending, onPasswordRecovery } from '@/lib/sync/supabase';
+import { pageTitle } from '@/lib/uiText';
 
 // Crash/error reporting, only when EXPO_PUBLIC_SENTRY_DSN is set (no-op otherwise).
 initErrorReporting();
@@ -49,8 +50,13 @@ function Gate() {
   useEffect(() => {
     if (ready) SplashScreen.hideAsync().catch(() => {});
   }, [ready]);
+  const landing = sync.configured && !sync.session && !PUBLIC_ROUTES.has(pathname);
+  // Expo Router leaves document titles off; set one per route on web.
+  useEffect(() => {
+    if (Platform.OS === 'web' && typeof document !== 'undefined') document.title = landing ? 'FitCoach' : pageTitle(pathname);
+  }, [pathname, landing]);
   if (!ready) return <Splash />;
-  if (sync.configured && !sync.session && !PUBLIC_ROUTES.has(pathname)) return <Landing />;
+  if (landing) return <Landing />;
   return (
     <>
       <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: C.bg } }} />
